@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ['*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.SUBMODULE_PAT || github.token }}
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/reinicorn tests
+
+      - name: Type check (pyright)
+        run: uv run pyright src/reinicorn
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+        env:
+          GIT_ALLOW_PROTOCOL: "file:ext:https:http:ssh:git"

@@ -1,0 +1,208 @@
+name: Doc Gardening
+
+on:
+  schedule:
+    # Weekly: Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  doc-gardening:
+    name: Check documentation health
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.SUBMODULE_PAT || github.token }}
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check for stale docs
+        id: stale
+        run: |
+          threshold_days=30
+          now=$(date +%s)
+          stale_docs=""
+
+          while IFS= read -r file; do
+            last_modified=$(git log -1 --format="%ct" -- "$file" 2>/dev/null)
+            if [ -z "$last_modified" ]; then
+              continue
+            fi
+            age_days=$(( (now - last_modified) / 86400 ))
+            if [ "$age_days" -gt "$threshold_days" ]; then
+              stale_docs="${stale_docs}- \`${file}\` (${age_days} days since last change)\n"
+            fi
+          done < <(find kb/ docs/ -name '*.md' -type f 2>/dev/null)
+
+          if [ -n "$stale_docs" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "list<<STALE_EOF"
+              echo -e "$stale_docs"
+              echo "STALE_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for orphaned plans
+        id: orphans
+        run: |
+          orphaned=""
+
+          if [ -d "kb/exec-plans/active" ]; then
+            for plan_dir in kb/exec-plans/active/*/; do
+              [ -d "$plan_dir" ] || continue
+              branch_name=$(basename "$plan_dir")
+              [ "$branch_name" = "*" ] && continue
+              # Check if a remote branch exists for this plan
+              if ! git ls-remote --heads origin "$branch_name" | grep -q .; then
+                orphaned="${orphaned}- \`${plan_dir}\` (branch \`${branch_name}\` no longer exists)\n"
+              fi
+            done
+          fi
+
+          if [ -n "$orphaned" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "list<<ORPHAN_EOF"
+              echo -e "$orphaned"
+              echo "ORPHAN_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check quality score drift
+        id: quality
+        run: |
+          drift_notes=""
+
+          if [ -f "kb/quality-scores.md" ]; then
+            last_modified=$(git log -1 --format="%ct" -- "kb/quality-scores.md" 2>/dev/null)
+            now=$(date +%s)
+            if [ -n "$last_modified" ]; then
+              age_days=$(( (now - last_modified) / 86400 ))
+              if [ "$age_days" -gt 30 ]; then
+                drift_notes="- \`kb/quality-scores.md\` has not been updated in ${age_days} days. Scores may not reflect current state.\n"
+              fi
+            fi
+          else
+            drift_notes="- \`kb/quality-scores.md\` does not exist.\n"
+          fi
+
+          if [ -n "$drift_notes" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "notes<<DRIFT_EOF"
+              echo -e "$drift_notes"
+              echo "DRIFT_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build report
+        id: report
+        # Step outputs are passed as environment variables, never interpolated
+        # into this shell source. A doc filename containing backticks or $(...)
+        # would otherwise be executed as a command when the shell parses the line.
+        env:
+          STALE_FOUND: ${{ steps.stale.outputs.found }}
+          STALE_LIST: ${{ steps.stale.outputs.list }}
+          ORPHANS_FOUND: ${{ steps.orphans.outputs.found }}
+          ORPHANS_LIST: ${{ steps.orphans.outputs.list }}
+          QUALITY_FOUND: ${{ steps.quality.outputs.found }}
+          QUALITY_NOTES: ${{ steps.quality.outputs.notes }}
+        run: |
+          has_findings=false
+          body="## Doc Gardening Report\n\n"
+          body+="*Generated on $(date -u '+%Y-%m-%d %H:%M UTC')*\n\n"
+
+          if [ "$STALE_FOUND" = "true" ]; then
+            has_findings=true
+            body+="### Stale Docs (>30 days unchanged)\n\n"
+            body+="${STALE_LIST}\n"
+          fi
+
+          if [ "$ORPHANS_FOUND" = "true" ]; then
+            has_findings=true
+            body+="### Orphaned Plans\n\n"
+            body+="${ORPHANS_LIST}\n"
+          fi
+
+          if [ "$QUALITY_FOUND" = "true" ]; then
+            has_findings=true
+            body+="### Quality Score Drift\n\n"
+            body+="${QUALITY_NOTES}\n"
+          fi
+
+          if [ "$has_findings" = "false" ]; then
+            echo "No findings this week."
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "body<<REPORT_EOF"
+              echo -e "$body"
+              echo "REPORT_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find existing gardening issue
+        if: steps.report.outputs.has_findings == 'true'
+        id: find_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'doc-gardening',
+              state: 'open',
+              per_page: 1
+            });
+            if (issues.data.length > 0) {
+              core.setOutput('issue_number', issues.data[0].number);
+              core.setOutput('exists', 'true');
+            } else {
+              core.setOutput('exists', 'false');
+            }
+
+      - name: Comment on existing issue
+        if: steps.report.outputs.has_findings == 'true' && steps.find_issue.outputs.exists == 'true'
+        uses: actions/github-script@v7
+        env:
+          REPORT_BODY: ${{ steps.report.outputs.body }}
+          ISSUE_NUMBER: ${{ steps.find_issue.outputs.issue_number }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(process.env.ISSUE_NUMBER, 10),
+              body: process.env.REPORT_BODY
+            });
+
+      - name: Create new gardening issue
+        if: steps.report.outputs.has_findings == 'true' && steps.find_issue.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        env:
+          REPORT_BODY: ${{ steps.report.outputs.body }}
+        with:
+          script: |
+            const body = process.env.REPORT_BODY;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Doc Gardening: items need attention',
+              labels: ['doc-gardening'],
+              body: body
+            });

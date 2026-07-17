@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# =============================================================================
+# post-merge — Reinicorn git hook
+#
+# Runs after `git merge`. Responsibilities:
+#   1. Archive stale exec-plans (delegated to rcorn _post-merge)
+#
+# Arguments (provided by git):
+#   $1 = flag: "1" if squash merge, "0" otherwise
+# =============================================================================
+
+set -euo pipefail
+
+# Delegate to Reinicorn Python hook for plan archival
+if command -v rcorn &>/dev/null; then
+    rcorn _post-merge 2>/dev/null || true
+fi
+
+exit 0

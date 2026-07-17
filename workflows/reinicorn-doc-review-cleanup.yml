@@ -1,0 +1,51 @@
+# Installed into kb repos by `rcorn review setup`. Do not edit in place —
+# edits are overwritten by the next `rcorn review setup --force`.
+#
+# Note: Reinicorn is installed from its repo's @main, so this workflow always
+# runs the latest released cleanup logic.
+name: Reinicorn doc-review cleanup
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  cleanup:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'review/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Reinicorn is installed from a checkout, not `pip install git+...` — pip's
+      # git backend force-inits submodules, which fails on the kb submodule
+      # (SSH URL, private repo). actions/checkout leaves submodules alone.
+      # While the Reinicorn repo is private, the kb repo needs a
+      # REINICORN_INSTALL_TOKEN secret (fine-grained PAT, Contents:read on the
+      # Reinicorn repo) — the runner's own token is scoped to this kb repo and
+      # cannot read Reinicorn. Once Reinicorn is public, delete the secret: the
+      # runner token fallback reads public repos fine.
+      - uses: actions/checkout@v7
+        with:
+          # __REINICORN_REPO__ is substituted by `rcorn review setup` from the
+          # installed package's Repository URL (pyproject [project.urls]).
+          repository: __REINICORN_REPO__
+          ref: main
+          token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}
+          path: .reinicorn-src
+      - run: pip install ./.reinicorn-src
+      # actions/checkout stores its token in this checkout's LOCAL git config;
+      # the fresh temp clone inside _review-cleanup does not inherit local
+      # config, so origin must carry an authenticated URL for the clone/push.
+      - run: git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+      # head.ref is attacker-controlled (script injection) — env indirection
+      # only, never interpolated into the run script.
+      - env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: rcorn _review-cleanup "$HEAD_REF" "$PR_URL"

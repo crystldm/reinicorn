@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "kb/docs-freshness": { "enabled": true, "severity": "warning", "max_days_stale": 30 },
+    "kb/cross-links": { "enabled": true, "severity": "error" },
+    "kb/plan-structure": { "enabled": true, "severity": "warning" },
+    "kb/provenance": { "enabled": true, "severity": "warning" },
+    "kb/draft-refs": { "enabled": true, "severity": "warning" },
+    "scripts/shellcheck": { "enabled": true, "severity": "error" }
+  }
+}

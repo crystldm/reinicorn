@@ -1,0 +1,12 @@
+"""Canonical runtime identity for Reinicorn."""
+
+PRODUCT_NAME = "Reinicorn"
+CLI_NAME = "rcorn"
+STATE_DIR_NAME = ".reinicorn"
+CONFIG_FILE_NAME = ".reinicorn-config"
+ENV_PREFIX = "REINICORN_"
+MANIFEST_FILE_NAME = "manifest.json"
+MODE_FILE_NAME = "mode"
+KB_SCOPE_KEY = "REINICORN_KB_SCOPE"
+TICKET_PATTERN_KEY = "REINICORN_TICKET_PATTERN"
+STALE_THRESHOLD_KEY = "REINICORN_STALE_THRESHOLD"

@@ -1,0 +1,4 @@
+[submodule "kb"]
+	path = kb
+	url = https://github.com/crystldm/reinicorn-kb.git
+	branch = main

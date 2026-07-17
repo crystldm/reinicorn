@@ -1,0 +1,31 @@
+# Reinicorn configuration
+# This file is read by the Reinicorn CLI and git hooks.
+# All values have sensible defaults — uncomment and edit as needed.
+
+# Knowledge-base scope for this repository.
+REINICORN_KB_SCOPE=reinicorn
+
+# Ticket ID pattern for issue tracker integration (regex).
+# Used by post-checkout hook and exec plan creation to extract ticket IDs
+# from branch names (e.g., feature/PROJ-1234-description -> PROJ-1234).
+REINICORN_TICKET_PATTERN="[A-Z]+-[0-9]+"
+
+# Kb submodule remote URL (for attach workflow).
+# Set this when using the submodule layout so Reinicorn sync/publish know
+# where to push and pull.
+REINICORN_KB_REMOTE="https://github.com/crystldm/reinicorn-kb.git"
+
+# Stale docs threshold in days. Documents not modified within this window
+# are flagged by the doc-gardening workflow and the docs-freshness lint rule.
+REINICORN_STALE_THRESHOLD=30
+
+# Auto-sync kb on checkout (true/false).
+# When true, the post-checkout hook pulls the latest kb state.
+REINICORN_AUTO_SYNC=true
+
+# Agent command template. {prompt} is replaced with the task content (shell-quoted).
+# Examples:
+#   REINICORN_AGENT_CMD='claude -p {prompt}'
+#   REINICORN_AGENT_CMD='copilot -p {prompt}'
+#   REINICORN_AGENT_CMD='aider --yes-always --message {prompt}'
+REINICORN_AGENT_CMD='copilot --model "gpt-5-mini" -p {prompt}'

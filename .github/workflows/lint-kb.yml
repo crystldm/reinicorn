@@ -1,0 +1,67 @@
+name: Lint Kb
+
+on:
+  pull_request:
+    branches: ['*']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lint-kb:
+    name: Run kb lints
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.SUBMODULE_PAT || github.token }}
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install shellcheck
+        run: |
+          if ! command -v shellcheck &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y shellcheck
+          fi
+
+      - name: Run lint kb
+        id: lints
+        run: |
+          set +e
+          output=$(uv run rcorn kb lint 2>&1)
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          {
+            echo "output<<LINT_EOF"
+            echo "$output"
+            echo "LINT_EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit $exit_code
+        continue-on-error: true
+
+      - name: Post PR comment on failure
+        if: steps.lints.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        env:
+          # Pass lint output as data, never interpolated into the script source.
+          # Otherwise a backtick or ${...} in kb content would break out of the
+          # template literal and run arbitrary JS with the pull-requests token.
+          LINT_OUTPUT: ${{ steps.lints.outputs.output }}
+        with:
+          script: |
+            const output = process.env.LINT_OUTPUT;
+            const body = `### Kb Lint Failures\n\n\`\`\`\n${output}\n\`\`\`\n\n> Posted by the lint-kb workflow.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Fail if lints failed
+        if: steps.lints.outputs.exit_code != '0'
+        run: exit 1

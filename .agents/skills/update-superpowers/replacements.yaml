@@ -1,0 +1,36 @@
+# Mechanical substitutions applied to forked superpowers SKILL.md files
+# after copying from upstream. Applied in order, longest `find` first
+# to avoid partial matches.
+#
+# These handle known path/convention differences between superpowers
+# defaults and Reinicorn's kb structure.
+
+replacements:
+  # Specific full-path references (longest first)
+  - find: "save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`"
+    replace: "save via `rcorn spec create \"<topic>\"`"
+    context: "brainstorming step 6 save instruction"
+
+  - find: "docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md"
+    replace: "kb/<repo>/specs/"
+    context: "brainstorming after-design documentation path"
+
+  - find: "docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md"
+    replace: "kb/<repo>/exec-plans/active/<feature-name>/plan.md"
+    context: "writing-plans save path"
+
+  - find: "docs/superpowers/plans/<filename>.md"
+    replace: "kb/<repo>/exec-plans/active/<feature>/plan.md"
+    context: "writing-plans handoff message"
+
+  - find: "../using-superpowers/references/"
+    replace: "../using-reinicorn/references/"
+    context: "executing-plans platform tool refs pointer (Reinicorn vendors Codex only)"
+
+  - find: "docs/superpowers/plans/"
+    replace: "kb/<repo>/exec-plans/active/"
+    context: "general plans directory reference"
+
+  - find: "docs/superpowers/specs/"
+    replace: "kb/<repo>/specs/"
+    context: "general specs directory reference"

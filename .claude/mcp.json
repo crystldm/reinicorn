@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "_comment_codegraphcontext": "CodeGraphContext MCP — codebase graph indexing. Provides dependency graphs, call chains, class hierarchies, and dead code detection. Install from: https://github.com/nicobailon/CodeGraphContext. Uncomment and configure the command and args below.",
+
+    "_comment_codeindexmcp": "code-index-mcp — semantic code search. Provides natural language search across your codebase. Install from: https://github.com/nicobailon/code-index-mcp. Uncomment and configure below.",
+
+    "_comment_context7": "Context7 — up-to-date documentation and code examples for libraries. Useful for checking API usage against current docs. Install from: https://github.com/nicobailon/context7-mcp. Uncomment and configure below.",
+
+    "_comment_issuetracker": "Issue tracker integration. Configure the MCP server for your issue tracker (JIRA, Linear, GitHub Issues, etc.) to pull ticket context into plans."
+  }
+}

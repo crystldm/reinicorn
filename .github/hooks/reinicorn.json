@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": ".reinicorn/hooks/enforce-doc-templates.sh"
+      },
+      {
+        "type": "command",
+        "bash": ".reinicorn/hooks/block-raw-kb-git.sh"
+      }
+    ]
+  }
+}

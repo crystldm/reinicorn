@@ -1,0 +1,60 @@
+name: Lint Architecture
+
+on:
+  pull_request:
+    branches: ['*']
+
+permissions:
+  contents: read
+
+jobs:
+  lint-architecture:
+    name: Run structural tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.SUBMODULE_PAT || github.token }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check for structural tests
+        id: check
+        run: |
+          test_files=$(find linters/structural-tests/ -type f ! -name '.gitkeep' 2>/dev/null)
+          if [ -z "$test_files" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No structural tests found, skipping."
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Found structural tests:"
+            echo "$test_files"
+          fi
+
+      - name: Run structural tests
+        if: steps.check.outputs.found == 'true'
+        id: tests
+        run: |
+          violations=0
+          for test_file in linters/structural-tests/*; do
+            [ -f "$test_file" ] || continue
+            [ "$(basename "$test_file")" = ".gitkeep" ] && continue
+            echo "--- Running: $test_file ---"
+            if [ -x "$test_file" ]; then
+              if ! "$test_file"; then
+                violations=$((violations + 1))
+              fi
+            elif [[ "$test_file" == *.sh ]]; then
+              if ! bash "$test_file"; then
+                violations=$((violations + 1))
+              fi
+            else
+              echo "Skipping non-executable: $test_file"
+            fi
+          done
+          if [ "$violations" -gt 0 ]; then
+            echo "::error::$violations structural test(s) reported violations."
+            exit 1
+          fi
+          echo "All structural tests passed."

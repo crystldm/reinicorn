@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-push — Reinicorn git hook
+#
+# Runs before `git push`. Responsibility:
+#   1. Ensure kb submodule is pushed (BLOCKS push if not and auto-push fails)
+#
+# Delegates all logic to `rcorn _pre-push` (Python).
+# =============================================================================
+
+if command -v rcorn &>/dev/null; then
+    rcorn _pre-push
+    exit $?
+fi
+
+exit 0

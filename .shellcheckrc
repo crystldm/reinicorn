@@ -1,0 +1,3 @@
+# Project-wide shellcheck configuration
+# All scripts target bash
+shell=bash
