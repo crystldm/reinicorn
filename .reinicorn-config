@@ -18,14 +18,3 @@ REINICORN_KB_REMOTE="https://github.com/crystldm/reinicorn-kb.git"
 # Stale docs threshold in days. Documents not modified within this window
 # are flagged by the doc-gardening workflow and the docs-freshness lint rule.
 REINICORN_STALE_THRESHOLD=30
-
-# Auto-sync kb on checkout (true/false).
-# When true, the post-checkout hook pulls the latest kb state.
-REINICORN_AUTO_SYNC=true
-
-# Agent command template. {prompt} is replaced with the task content (shell-quoted).
-# Examples:
-#   REINICORN_AGENT_CMD='claude -p {prompt}'
-#   REINICORN_AGENT_CMD='copilot -p {prompt}'
-#   REINICORN_AGENT_CMD='aider --yes-always --message {prompt}'
-REINICORN_AGENT_CMD='copilot --model "gpt-5-mini" -p {prompt}'

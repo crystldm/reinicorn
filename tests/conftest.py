@@ -77,8 +77,6 @@ def kb_repo(tmp_path: Path) -> Path:
     (repo / ".reinicorn-config").write_text(
         'REINICORN_TICKET_PATTERN="[A-Z]+-[0-9]+"\n'
         "REINICORN_STALE_THRESHOLD=30\n"
-        "REINICORN_AUTO_SYNC=true\n"
-        "REINICORN_AGENT_CMD='echo {prompt}'\n"
     )
 
     # Linters config
