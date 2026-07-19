@@ -14,7 +14,7 @@ can talk about it before you spend time on it.
 Reinicorn is a harness for real human teams. Contributions must come from a
 person with genuine intent behind them.
 
-**We do not accept pure AI-bot contributions** — issues, pull requests, or
+**We do not accept pure AI-bot contributions**: issues, pull requests, or
 comments generated and submitted by an automated agent with no human directing
 the work and standing behind the result. Using AI tools to help you write code
 is fine (this project is built with them). Pointing a bot at the repo to
