@@ -40,8 +40,10 @@ def _copilot_entry(script: str, _matcher: str) -> dict:
 
 def cmd_hooks_install() -> int:
     try:
-        r = run_git("rev-parse", "--git-dir")
-        git_dir = Path(r.stdout.strip())
+        # --git-common-dir, not --git-dir: inside a linked worktree the latter
+        # is .git/worktrees/<name>, where git never reads hooks.
+        r = run_git("rev-parse", "--git-common-dir")
+        git_dir = Path(r.stdout.strip()).resolve()
     except Exception:
         console.error("Not inside a git repository.")
         return 1
