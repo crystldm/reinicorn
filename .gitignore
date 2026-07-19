@@ -17,7 +17,6 @@ build/
 
 # Test caches
 .pytest_cache/
-pr-review-tools-v2
 
 # Local git worktrees
 .worktrees/
