@@ -130,6 +130,16 @@ def test_sanitize_branch_idempotent():
     assert sanitize_branch("feature-mvp") == "feature-mvp"
 
 
+def test_sanitize_branch_collapses_traversal_names():
+    assert sanitize_branch("..") == "-"
+    assert sanitize_branch(".") == "-"
+    assert sanitize_branch("") == "-"
+
+
+def test_sanitize_branch_replaces_backslashes():
+    assert sanitize_branch("..\\evil") == "..-evil"
+
+
 # --- repo_slug tests ---
 
 

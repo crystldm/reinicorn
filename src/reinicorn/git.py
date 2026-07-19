@@ -137,9 +137,14 @@ def sanitize_branch(name: str) -> str:
     """Sanitize a branch name for use as a directory name.
 
     Replaces '/' with '-' so that 'feature/mvp' becomes 'feature-mvp',
-    avoiding nested directories in exec-plan paths.
+    avoiding nested directories in exec-plan paths. Path-traversal names
+    ('.', '..', empty) collapse to '-' so the result can never escape
+    its parent directory.
     """
-    return name.replace("/", "-")
+    safe = name.replace("/", "-").replace("\\", "-")
+    if safe in ("", ".", ".."):
+        return "-"
+    return safe
 
 
 def remote_uses_ssh(cwd: Path | None = None) -> bool:
