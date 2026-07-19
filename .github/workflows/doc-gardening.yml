@@ -25,13 +25,17 @@ jobs:
 
       - name: Check for stale docs
         id: stale
+        # Only the living dashboards are expected to stay fresh — historical
+        # docs (specs, ideas, completed plans) age by design. Kb files live in
+        # a submodule, so ages come from `git -C kb`, not the parent repo.
         run: |
-          threshold_days=30
+          threshold_days=60
           now=$(date +%s)
           stale_docs=""
 
           while IFS= read -r file; do
-            last_modified=$(git log -1 --format="%ct" -- "$file" 2>/dev/null)
+            rel="${file#kb/}"
+            last_modified=$(git -C kb log -1 --format="%ct" -- "$rel" 2>/dev/null)
             if [ -z "$last_modified" ]; then
               continue
             fi
@@ -39,7 +43,7 @@ jobs:
             if [ "$age_days" -gt "$threshold_days" ]; then
               stale_docs="${stale_docs}- \`${file}\` (${age_days} days since last change)\n"
             fi
-          done < <(find kb/ docs/ -name '*.md' -type f 2>/dev/null)
+          done < <(find kb/*/tech-debt -name '*.md' -type f 2>/dev/null)
 
           if [ -n "$stale_docs" ]; then
             echo "found=true" >> "$GITHUB_OUTPUT"
@@ -57,17 +61,19 @@ jobs:
         run: |
           orphaned=""
 
-          if [ -d "kb/exec-plans/active" ]; then
-            for plan_dir in kb/exec-plans/active/*/; do
-              [ -d "$plan_dir" ] || continue
-              branch_name=$(basename "$plan_dir")
-              [ "$branch_name" = "*" ] && continue
-              # Check if a remote branch exists for this plan
-              if ! git ls-remote --heads origin "$branch_name" | grep -q .; then
-                orphaned="${orphaned}- \`${plan_dir}\` (branch \`${branch_name}\` no longer exists)\n"
-              fi
-            done
-          fi
+          # Plan dirs use sanitized branch names (slashes become dashes), so
+          # sanitize the remote heads the same way before comparing.
+          live_branches=$(git ls-remote --heads origin | awk '{print $2}' \
+            | sed 's|^refs/heads/||' | tr '/' '-')
+
+          for plan_dir in kb/*/exec-plans/active/*/; do
+            [ -d "$plan_dir" ] || continue
+            branch_name=$(basename "$plan_dir")
+            [ "$branch_name" = "*" ] && continue
+            if ! printf '%s\n' "$live_branches" | grep -qxF "$branch_name"; then
+              orphaned="${orphaned}- \`${plan_dir}\` (branch \`${branch_name}\` no longer exists)\n"
+            fi
+          done
 
           if [ -n "$orphaned" ]; then
             echo "found=true" >> "$GITHUB_OUTPUT"
@@ -84,18 +90,20 @@ jobs:
         id: quality
         run: |
           drift_notes=""
+          now=$(date +%s)
 
-          if [ -f "kb/quality-scores.md" ]; then
-            last_modified=$(git log -1 --format="%ct" -- "kb/quality-scores.md" 2>/dev/null)
-            now=$(date +%s)
+          scores_file=$(find kb/*/ -maxdepth 1 -name 'quality-scores.md' -type f 2>/dev/null | head -1)
+          if [ -n "$scores_file" ]; then
+            rel="${scores_file#kb/}"
+            last_modified=$(git -C kb log -1 --format="%ct" -- "$rel" 2>/dev/null)
             if [ -n "$last_modified" ]; then
               age_days=$(( (now - last_modified) / 86400 ))
-              if [ "$age_days" -gt 30 ]; then
-                drift_notes="- \`kb/quality-scores.md\` has not been updated in ${age_days} days. Scores may not reflect current state.\n"
+              if [ "$age_days" -gt 60 ]; then
+                drift_notes="- \`${scores_file}\` has not been updated in ${age_days} days. Scores may not reflect current state.\n"
               fi
             fi
           else
-            drift_notes="- \`kb/quality-scores.md\` does not exist.\n"
+            drift_notes="- quality-scores.md not found under \`kb/*/\`.\n"
           fi
 
           if [ -n "$drift_notes" ]; then
