@@ -2,20 +2,23 @@ name: Lint Architecture
 
 on:
   pull_request:
-    branches: ['*']
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint-architecture:
     name: Run structural tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          token: ${{ secrets.SUBMODULE_PAT || github.token }}
           submodules: recursive
           persist-credentials: false
 
