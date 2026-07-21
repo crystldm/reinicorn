@@ -42,7 +42,12 @@ jobs:
       # actions/checkout stores its token in this checkout's LOCAL git config;
       # the fresh temp clone inside _review-cleanup does not inherit local
       # config, so origin must carry an authenticated URL for the clone/push.
-      - run: git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+      # When kb main requires PRs (the reinicorn-doc-review ruleset), the
+      # runner token has no bypass and the finalize push is rejected — set a
+      # KB_CLEANUP_TOKEN kb-repo secret (fine-grained PAT, Contents:read-write
+      # on this kb repo, owned by a ruleset-bypass actor). Unprotected kbs can
+      # skip the secret; the runner token fallback pushes fine.
+      - run: git remote set-url origin "https://x-access-token:${{ secrets.KB_CLEANUP_TOKEN || github.token }}@github.com/${{ github.repository }}.git"
       # head.ref is attacker-controlled (script injection) — env indirection
       # only, never interpolated into the run script.
       - env:
