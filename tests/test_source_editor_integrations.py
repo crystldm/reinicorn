@@ -21,9 +21,12 @@ def test_source_editor_settings_use_reinicorn_hook_directory() -> None:
         entry["command"] for entry in cursor["hooks"]["preToolUse"]
     ]
 
-    expected = {f".reinicorn/hooks/{name}" for name in HOOK_NAMES}
-    assert set(claude_commands) == expected
-    assert set(cursor_commands) == expected
+    relative_expected = {f".reinicorn/hooks/{name}" for name in HOOK_NAMES}
+    claude_expected = {
+        f"$CLAUDE_PROJECT_DIR/.reinicorn/hooks/{name}" for name in HOOK_NAMES
+    }
+    assert set(claude_commands) == claude_expected
+    assert set(cursor_commands) == relative_expected
     assert not (ROOT / ".reins").exists()
 
 
