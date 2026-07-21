@@ -180,7 +180,11 @@ def _build_parser() -> argparse.ArgumentParser:
     init_p.add_argument("--kb-name", help="Custom name for the GitHub kb repo")
     init_p.add_argument(
         "--platforms",
-        help="Comma-separated platform keys (skip interactive prompt)",
+        help=(
+            "Comma-separated platform keys "
+            "(claude,cursor,copilot,codex; case-insensitive; "
+            "skip interactive prompt)"
+        ),
     )
 
     hooks_p = sub.add_parser("hooks", help="Git hook management")

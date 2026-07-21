@@ -76,7 +76,8 @@ def _parse_platforms_flag(value: str) -> list[str] | None:
     known = {key for key, _label, _default in PLATFORM_OPTIONS}
     selected: set[str] = set()
     for token in _split_comma_tokens(value):
-        if token not in known:
+        key = token.lower()
+        if key not in known:
             known_list = ", ".join(key for key, _label, _default in PLATFORM_OPTIONS)
             console.error(
                 f"Unknown platform '{token}'. "
@@ -85,7 +86,7 @@ def _parse_platforms_flag(value: str) -> list[str] | None:
                 f"e.g. --platforms claude,cursor"
             )
             return None
-        selected.add(token)
+        selected.add(key)
     return [key for key, _label, _default in PLATFORM_OPTIONS if key in selected]
 
 

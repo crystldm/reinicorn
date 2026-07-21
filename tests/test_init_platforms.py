@@ -192,6 +192,13 @@ def test_parse_platforms_flag_dedup_and_order():
     assert _parse_platforms_flag("codex, claude,claude") == ["claude", "codex"]
 
 
+def test_parse_platforms_flag_case_insensitive():
+    from reinicorn.commands.init import _parse_platforms_flag
+
+    assert _parse_platforms_flag("Claude") == ["claude"]
+    assert _parse_platforms_flag("CURSOR,Codex") == ["cursor", "codex"]
+
+
 def test_parse_platforms_flag_empty_string():
     from reinicorn.commands.init import _parse_platforms_flag
 
@@ -199,9 +206,18 @@ def test_parse_platforms_flag_empty_string():
 
 
 def test_cli_accepts_platforms_flag():
+    import argparse
+
     from reinicorn.cli import _build_parser
 
-    args = _build_parser().parse_args(
+    parser = _build_parser()
+    args = parser.parse_args(
         ["init", "--local", "--platforms", "cursor,claude"]
     )
     assert args.platforms == "cursor,claude"
+    init_parser = next(
+        action.choices["init"]
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    assert "case-insensitive" in init_parser.format_help()
