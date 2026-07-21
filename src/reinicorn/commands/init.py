@@ -163,6 +163,11 @@ def cmd_init(
         local: Create a local bare repo instead of using a remote.
         cwd: Override working directory (for testing).
         slug: Override the auto-derived repo scope name.
+        platforms_raw: Comma-separated platform keys from ``--platforms``
+            (case-insensitive). When set, skips the interactive platform
+            prompt on asset-setup paths; omitted means prompt. Invalid keys
+            hard-fail before creating kb state. Ignored (with a warning) on
+            hooks-only teammate re-inits.
     """
     if cwd is None:
         from reinicorn.git import repo_root as _repo_root
