@@ -78,7 +78,7 @@ testpaths = ["tests"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.15.22",
-    "pyright>=1.1",
+    "pyright>=1.1.411",
     "pyyaml>=6.0.3",
     "bashlex>=0.18",
 ]
