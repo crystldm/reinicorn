@@ -129,7 +129,9 @@ def test_doc_review_cleanup_workflow_hardening():
         if "${{ github.event.pull_request.head.ref }}" in line:
             assert "run" not in line.split(":")[0], f"head.ref inlined in shell: {line}"
 
-    assert "x-access-token:${{ github.token }}" in text
+    assert (
+        "x-access-token:${{ secrets.KB_CLEANUP_TOKEN || github.token }}" in text
+    )
 
 
 def test_doc_review_cleanup_workflow_private_reinicorn_install():
