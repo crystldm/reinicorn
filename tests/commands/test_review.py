@@ -528,7 +528,7 @@ def _gh_ok(monkeypatch):
     monkeypatch.setattr(review_cmds.github, "gh_available", lambda: True)
     monkeypatch.setattr(review_cmds.github, "gh_authenticated", lambda: True)
     monkeypatch.setattr(
-        review_cmds, "remote_url", lambda kb: "git@github.com:o/kb.git"
+        review_cmds, "remote_url", lambda _kb: "git@github.com:o/kb.git"
     )
 
 
