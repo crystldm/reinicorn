@@ -68,6 +68,27 @@ def _split_comma_tokens(raw: str) -> list[str]:
 def _default_platform_keys() -> list[str]:
     return [key for key, _label, default in PLATFORM_OPTIONS if default]
 
+
+def _parse_platforms_flag(value: str) -> list[str] | None:
+    """Parse --platforms KEYS. Returns key list, or None on hard error."""
+    if value.strip() == "":
+        return []
+    known = {key for key, _label, _default in PLATFORM_OPTIONS}
+    selected: set[str] = set()
+    for token in _split_comma_tokens(value):
+        if token not in known:
+            known_list = ", ".join(key for key, _label, _default in PLATFORM_OPTIONS)
+            console.error(
+                f"Unknown platform '{token}'. "
+                f"Known platforms: {known_list}. "
+                f"How to fix: pass a comma-separated subset, "
+                f"e.g. --platforms claude,cursor"
+            )
+            return None
+        selected.add(token)
+    return [key for key, _label, _default in PLATFORM_OPTIONS if key in selected]
+
+
 PLATFORM_TEMPLATES = {
     "claude": "platform-instructions/claude.md",
     "cursor": "platform-instructions/cursor.md",
@@ -115,6 +136,7 @@ def cmd_init(
     kb_name: str | None = None,
     cwd: Path | None = None,
     slug: str | None = None,
+    platforms_raw: str | None = None,
 ) -> int:
     """Unified init command.
 
@@ -190,8 +212,17 @@ def cmd_init(
         asset_slug = effective_slug or kb_scope(cwd)
         if not _validate_scope_name(asset_slug):
             return 1
+        platforms: list[str] | None = None
+        if platforms_raw is not None:
+            platforms = _parse_platforms_flag(platforms_raw)
+            if platforms is None:
+                return 1
         hooks_rc = _setup_assets(
-            reinicorn_root(), cwd, asset_slug, agent_template=agent_template
+            reinicorn_root(),
+            cwd,
+            asset_slug,
+            agent_template=agent_template,
+            platforms=platforms,
         )
         if hooks_rc is None:
             return 1
@@ -255,7 +286,14 @@ def cmd_init(
             console.warn(f"Could not push repo-scoped dir for '{slug}': {e.stderr or e}")
             console.warn("You can push the kb changes manually later.")
 
-    hooks_rc = _setup_assets(r_root, cwd, slug, agent_template=agent_template)
+    platforms: list[str] | None = None
+    if platforms_raw is not None:
+        platforms = _parse_platforms_flag(platforms_raw)
+        if platforms is None:
+            return 1
+    hooks_rc = _setup_assets(
+        r_root, cwd, slug, agent_template=agent_template, platforms=platforms
+    )
     if hooks_rc is None:
         return 1
     local_bare_path = str(cwd.parent / f"{cwd.name}-kb.git") if local else None
@@ -264,7 +302,12 @@ def cmd_init(
 
 
 def _setup_assets(
-    r_root: Path, cwd: Path, slug: str, *, agent_template: Path | None
+    r_root: Path,
+    cwd: Path,
+    slug: str,
+    *,
+    agent_template: Path | None,
+    platforms: list[str] | None = None,
 ) -> int | None:
     """Lay down Reinicorn assets: agent instructions, platform files, skills,
     the session hook, lint config, and the manifest. Shared tail of the
@@ -274,8 +317,8 @@ def _setup_assets(
     print()
     if not _copy_agent_instructions(r_root, cwd, slug, template=agent_template):
         return None
-    platforms = _prompt_platforms()
-    _install_platform_instructions(cwd, slug, platforms)
+    selected = _prompt_platforms() if platforms is None else platforms
+    _install_platform_instructions(cwd, slug, selected)
     _copy_skills(r_root, cwd)
     _install_session_hook(cwd)
     _copy_lint_config(cwd)

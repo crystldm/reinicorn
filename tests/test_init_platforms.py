@@ -100,3 +100,59 @@ def test_init_substitutes_repo_slug(tmp_path: Path):
     content = (repo / "CLAUDE.md").read_text()
     assert "{repo}" not in content, "template variable should be substituted"
     assert "my-repo" in content
+
+
+def test_init_platforms_raw_skips_prompt_and_installs_cursor(tmp_path: Path):
+    repo = tmp_path / "my-repo"
+    _init_repo(repo)
+
+    with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
+         patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
+         patch("reinicorn.commands.init._prompt_platforms") as prompt:
+        rc = cmd_init(
+            kb_url="unused", local=True, cwd=repo, platforms_raw="cursor"
+        )
+
+    assert rc == 0
+    prompt.assert_not_called()
+    assert (repo / ".cursor" / "rules" / "reinicorn.mdc").is_file()
+    assert not (repo / "CLAUDE.md").exists()
+
+
+def test_init_platforms_raw_unknown_key_errors(tmp_path: Path, capsys):
+    repo = tmp_path / "my-repo"
+    _init_repo(repo)
+
+    with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
+         patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
+         patch("reinicorn.commands.init._prompt_platforms") as prompt:
+        rc = cmd_init(
+            kb_url="unused", local=True, cwd=repo, platforms_raw="nope"
+        )
+
+    assert rc == 1
+    prompt.assert_not_called()
+    err = capsys.readouterr().out
+    assert "nope" in err
+    assert "claude" in err
+
+
+def test_parse_platforms_flag_dedup_and_order():
+    from reinicorn.commands.init import _parse_platforms_flag
+
+    assert _parse_platforms_flag("codex, claude,claude") == ["claude", "codex"]
+
+
+def test_parse_platforms_flag_empty_string():
+    from reinicorn.commands.init import _parse_platforms_flag
+
+    assert _parse_platforms_flag("") == []
+
+
+def test_cli_accepts_platforms_flag():
+    from reinicorn.cli import _build_parser
+
+    args = _build_parser().parse_args(
+        ["init", "--local", "--platforms", "cursor,claude"]
+    )
+    assert args.platforms == "cursor,claude"
