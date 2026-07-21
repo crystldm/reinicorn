@@ -89,6 +89,23 @@ def _parse_platforms_flag(value: str) -> list[str] | None:
     return [key for key, _label, _default in PLATFORM_OPTIONS if key in selected]
 
 
+def _resolve_platforms_arg(
+    platforms_raw: str | None,
+) -> tuple[bool, list[str] | None]:
+    """Resolve --platforms for asset-setup paths.
+
+    Returns ``(ok, platforms)``. ``platforms`` is ``None`` when the flag was
+    omitted (caller should prompt). ``ok`` is False when the flag was invalid
+    (error already printed).
+    """
+    if platforms_raw is None:
+        return True, None
+    parsed = _parse_platforms_flag(platforms_raw)
+    if parsed is None:
+        return False, None
+    return True, parsed
+
+
 PLATFORM_TEMPLATES = {
     "claude": "platform-instructions/claude.md",
     "cursor": "platform-instructions/cursor.md",
@@ -165,12 +182,6 @@ def cmd_init(
         print("  Or create a repo first: git init && rcorn init")
         return 1
 
-    platforms: list[str] | None = None
-    if platforms_raw is not None:
-        platforms = _parse_platforms_flag(platforms_raw)
-        if platforms is None:
-            return 1
-
     print()
     console.header("Reinicorn Init")
     print("==============")
@@ -204,6 +215,11 @@ def cmd_init(
         # the submodule was added by hand), so fall through to full asset setup,
         # skipping the submodule creation that is already done.
         if (cwd / MANIFEST_PATH).is_file():
+            if platforms_raw is not None:
+                console.warn(
+                    "--platforms has no effect on hooks-only init "
+                    "(assets already installed via manifest) — ignoring."
+                )
             console.info("Kb submodule already configured — setting up hooks.")
             if not _copy_agent_instructions(
                 reinicorn_root(), cwd, effective_slug, template=agent_template
@@ -218,6 +234,9 @@ def cmd_init(
         asset_slug = effective_slug or kb_scope(cwd)
         if not _validate_scope_name(asset_slug):
             return 1
+        ok, platforms = _resolve_platforms_arg(platforms_raw)
+        if not ok:
+            return 1
         hooks_rc = _setup_assets(
             reinicorn_root(),
             cwd,
@@ -230,7 +249,11 @@ def cmd_init(
         _print_full_summary(hooks_rc, asset_slug)
         return 0
 
-    # Full setup flow
+    # Full setup flow — validate --platforms before creating remote/submodule state.
+    ok, platforms = _resolve_platforms_arg(platforms_raw)
+    if not ok:
+        return 1
+
     r_root = reinicorn_root()
 
     # Determine kb URL
