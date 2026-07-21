@@ -102,6 +102,24 @@ def test_init_substitutes_repo_slug(tmp_path: Path):
     assert "my-repo" in content
 
 
+def test_init_platforms_raw_empty_skips_prompt_and_installs_no_platform_files(
+    tmp_path: Path,
+):
+    repo = tmp_path / "my-repo"
+    _init_repo(repo)
+
+    with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
+         patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
+         patch("reinicorn.commands.init._prompt_platforms") as prompt:
+        rc = cmd_init(kb_url="unused", local=True, cwd=repo, platforms_raw="")
+
+    assert rc == 0
+    prompt.assert_not_called()
+    assert not (repo / "CLAUDE.md").exists()
+    assert not (repo / ".cursor" / "rules" / "reinicorn.mdc").exists()
+    assert not (repo / ".github" / "copilot-instructions.md").exists()
+
+
 def test_init_platforms_raw_skips_prompt_and_installs_cursor(tmp_path: Path):
     repo = tmp_path / "my-repo"
     _init_repo(repo)

@@ -165,6 +165,12 @@ def cmd_init(
         print("  Or create a repo first: git init && rcorn init")
         return 1
 
+    platforms: list[str] | None = None
+    if platforms_raw is not None:
+        platforms = _parse_platforms_flag(platforms_raw)
+        if platforms is None:
+            return 1
+
     print()
     console.header("Reinicorn Init")
     print("==============")
@@ -212,11 +218,6 @@ def cmd_init(
         asset_slug = effective_slug or kb_scope(cwd)
         if not _validate_scope_name(asset_slug):
             return 1
-        platforms: list[str] | None = None
-        if platforms_raw is not None:
-            platforms = _parse_platforms_flag(platforms_raw)
-            if platforms is None:
-                return 1
         hooks_rc = _setup_assets(
             reinicorn_root(),
             cwd,
@@ -286,11 +287,6 @@ def cmd_init(
             console.warn(f"Could not push repo-scoped dir for '{slug}': {e.stderr or e}")
             console.warn("You can push the kb changes manually later.")
 
-    platforms: list[str] | None = None
-    if platforms_raw is not None:
-        platforms = _parse_platforms_flag(platforms_raw)
-        if platforms is None:
-            return 1
     hooks_rc = _setup_assets(
         r_root, cwd, slug, agent_template=agent_template, platforms=platforms
     )
