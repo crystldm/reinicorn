@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -510,6 +511,75 @@ def test_setup_refuses_clobber_without_force(env, monkeypatch, capsys):
     wf.write_text(wf.read_text() + "# user edit\n")
     assert review_cmds.cmd_review_setup() == 1
     assert review_cmds.cmd_review_setup(force=True) == 0
+
+
+def test_ruleset_bypasses_every_push_capable_role():
+    """The kb is push-first: write, maintain, and admin must all bypass the
+    pull_request rule or routine `kb publish` pushes break. GitHub's
+    RepositoryRole ids (verified via GraphQL repositoryRoleName):
+    2=maintain 4=write 5=admin."""
+    actors = review_cmds._RULESET["bypass_actors"]
+    assert {a["actor_id"] for a in actors} == {2, 4, 5}
+    assert all(a["actor_type"] == "RepositoryRole" for a in actors)
+    assert all(a["bypass_mode"] == "always" for a in actors)
+
+
+def _gh_ok(monkeypatch):
+    monkeypatch.setattr(review_cmds.github, "gh_available", lambda: True)
+    monkeypatch.setattr(review_cmds.github, "gh_authenticated", lambda: True)
+    monkeypatch.setattr(
+        review_cmds, "remote_url", lambda kb: "git@github.com:o/kb.git"
+    )
+
+
+def test_setup_hints_cleanup_secret_when_ruleset_applies(env, monkeypatch, capsys):
+    """A protected kb main rejects the CI cleanup's runner-token push — setup
+    must tell the operator to create the KB_CLEANUP_TOKEN secret."""
+    _gh_ok(monkeypatch)
+
+    def fake_run_gh(*args, **kwargs):
+        if "--method" in args:  # POST: create ruleset
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "ruleset applied" in out
+    assert "KB_CLEANUP_TOKEN" in out
+    assert "gh secret set KB_CLEANUP_TOKEN --repo o/kb" in out
+
+
+def test_setup_detects_existing_ruleset(env, monkeypatch, capsys):
+    """An already-installed ruleset is not a failure — report it as such (not
+    'plan/permissions?') and still surface the secret hint."""
+    _gh_ok(monkeypatch)
+    listing = '[{"name": "reinicorn-doc-review", "id": 1}]'
+
+    def fake_run_gh(*args, **kwargs):
+        assert "--method" not in args, "must not POST a duplicate ruleset"
+        return subprocess.CompletedProcess(args, 0, stdout=listing, stderr="")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "already installed" in out
+    assert "KB_CLEANUP_TOKEN" in out
+
+
+def test_setup_no_secret_hint_when_ruleset_not_applied(env, monkeypatch, capsys):
+    """Unprotected kb main: the runner-token fallback pushes fine, so the
+    secret hint would be noise."""
+    _gh_ok(monkeypatch)
+
+    def fake_run_gh(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="422")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "ruleset not applied" in out
+    assert "KB_CLEANUP_TOKEN" not in out
 
 
 # ── error surfacing ──────────────────────────────────────────

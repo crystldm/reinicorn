@@ -396,12 +396,17 @@ _RULESET = {
             "allowed_merge_methods": ["squash", "merge"],
         },
     }],
-    # Admin (5) and maintain (4) bypass so direct `kb publish` pushes to main
-    # keep working; PR merges still get dismiss-stale. IDs are GitHub's fixed
-    # RepositoryRole mapping (1=read 2=triage 3=write 4=maintain 5=admin).
+    # Every push-capable role (write, maintain, admin) bypasses, so direct
+    # `kb publish` pushes to main keep working for all collaborators — the kb
+    # is push-first and this rule exists to give review PRs approval +
+    # dismiss-stale semantics, not to gate routine pushes. Gated-doc integrity
+    # is enforced by Reinicorn's own guards, not this rule. RepositoryRole ids
+    # are GitHub's fixed mapping, verified via GraphQL repositoryRoleName:
+    # 2=maintain 4=write 5=admin (yes, maintain < write numerically).
     "bypass_actors": [
         {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"},
         {"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+        {"actor_id": 2, "actor_type": "RepositoryRole", "bypass_mode": "always"},
     ],
 }
 
@@ -448,16 +453,42 @@ def cmd_review_setup(force: bool = False) -> int:
     gh_repo = gh_repo_from_url(remote_url(kb_dir))
     if gh_repo and _gh_ready():
         import json
-        r = github.run_gh(
-            "api", f"repos/{gh_repo}/rulesets", "--method", "POST",
-            "--input", "-", check=False, input_text=json.dumps(_RULESET),
+        applied = False
+        existing = github.run_gh(
+            "api", f"repos/{gh_repo}/rulesets", check=False,
         )
-        if r.returncode == 0:
-            console.success("dismiss-stale-approvals ruleset applied")
+        if existing.returncode == 0:
+            try:
+                names = {rs.get("name") for rs in json.loads(existing.stdout)}
+            except ValueError:
+                names = set()
+            applied = _RULESET["name"] in names
+        if applied:
+            console.info("doc-review ruleset already installed")
         else:
-            console.warn(
-                "ruleset not applied (plan/permissions?) — Reinicorn's own "
-                "divergence check remains the guardrail"
+            r = github.run_gh(
+                "api", f"repos/{gh_repo}/rulesets", "--method", "POST",
+                "--input", "-", check=False, input_text=json.dumps(_RULESET),
+            )
+            if r.returncode == 0:
+                applied = True
+                console.success("dismiss-stale-approvals ruleset applied")
+            else:
+                console.warn(
+                    "ruleset not applied (plan/permissions?) — Reinicorn's own "
+                    "divergence check remains the guardrail"
+                )
+        if applied:
+            # With the ruleset active, the CI cleanup push to main is rejected
+            # for the runner token (no ruleset bypass) — it needs a PAT owned
+            # by a bypass actor.
+            console.info(
+                "protected kb main: the CI cleanup needs a KB_CLEANUP_TOKEN "
+                f"secret — a fine-grained PAT (Contents: read/write on "
+                f"{gh_repo}) owned by a collaborator"
+            )
+            console.next_step(
+                f"gh secret set KB_CLEANUP_TOKEN --repo {gh_repo}"
             )
     else:
         console.warn("gh unavailable — ruleset skipped; apply manually if wanted")
