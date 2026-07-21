@@ -52,6 +52,22 @@ PLATFORM_FILES = {
     "copilot": ".github/copilot-instructions.md",
 }
 
+PLATFORM_OPTIONS: list[tuple[str, str, bool]] = [
+    ("claude", "Claude Code", True),
+    ("cursor", "Cursor", False),
+    ("copilot", "GitHub Copilot", False),
+    ("codex", "Codex", False),
+]
+
+
+def _split_comma_tokens(raw: str) -> list[str]:
+    """Split on commas first, then strip each token; drop empty tokens."""
+    return [token.strip() for token in raw.strip().split(",") if token.strip()]
+
+
+def _default_platform_keys() -> list[str]:
+    return [key for key, _label, default in PLATFORM_OPTIONS if default]
+
 PLATFORM_TEMPLATES = {
     "claude": "platform-instructions/claude.md",
     "cursor": "platform-instructions/cursor.md",
@@ -598,28 +614,62 @@ def _copy_lint_config(target_dir: Path) -> None:
 
 
 def _prompt_platforms() -> list[str]:
-    """Interactive multi-select for AI coding platforms."""
+    """Interactive select-set for AI coding platforms."""
     print("Which AI coding platforms do you use?")
     print()
-    options = [
-        ("claude", "Claude Code", True),
-        ("cursor", "Cursor", False),
-        ("copilot", "GitHub Copilot", False),
-        ("codex", "Codex", False),
-    ]
-    for i, (_key, label, default) in enumerate(options, 1):
-        marker = "x" if default else " "
-        print(f"  {i}) [{marker}] {label}")
+    for i, (_key, label, _default) in enumerate(PLATFORM_OPTIONS, 1):
+        print(f"  {i}) {label}")
     print()
-    raw = input("Toggle by number (e.g. 1,3), enter to confirm defaults: ").strip()
-    selected = [default for _, _, default in options]
-    if raw:
-        for token in raw.replace(" ", "").split(","):
-            if token.isdigit():
-                idx = int(token) - 1
-                if 0 <= idx < len(options):
-                    selected[idx] = not selected[idx]
-    return [key for (key, _, _), sel in zip(options, selected, strict=True) if sel]
+    default_labels = ", ".join(
+        label for _key, label, default in PLATFORM_OPTIONS if default
+    )
+    print(
+        f"Enter numbers to select (e.g. 1,2), or Enter for default [{default_labels}]: ",
+        end="",
+    )
+    raw = input()
+    stripped = raw.strip()
+    if not stripped:
+        return _default_platform_keys()
+
+    selected: set[int] = set()
+    discarded: list[str] = []
+    for token in _split_comma_tokens(stripped):
+        if token.isdigit():
+            idx = int(token) - 1
+            if 0 <= idx < len(PLATFORM_OPTIONS):
+                selected.add(idx)
+                continue
+        discarded.append(token)
+
+    if discarded:
+        kept_keys = (
+            [PLATFORM_OPTIONS[i][0] for i in range(len(PLATFORM_OPTIONS)) if i in selected]
+            if selected
+            else _default_platform_keys()
+        )
+        kept_labels = ", ".join(
+            label
+            for key, label, _d in PLATFORM_OPTIONS
+            if key in kept_keys
+        )
+        discarded_disp = ", ".join(repr(t) for t in discarded)
+        if selected:
+            console.warn(
+                f"Ignored invalid platform selection token(s) {discarded_disp}; "
+                f"using {kept_labels}."
+            )
+        else:
+            console.warn(
+                f"Ignored invalid platform selection {discarded_disp}; "
+                f"using default [{kept_labels}]."
+            )
+
+    if not selected:
+        return _default_platform_keys()
+    return [
+        key for i, (key, _label, _default) in enumerate(PLATFORM_OPTIONS) if i in selected
+    ]
 
 
 def _install_platform_instructions(target_dir: Path, slug: str, platforms: list[str]) -> None:
