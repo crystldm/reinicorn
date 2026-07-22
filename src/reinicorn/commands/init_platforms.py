@@ -77,7 +77,7 @@ def _parse_platform_selection(raw: str) -> tuple[list[str], list[str]]:
     return selected_keys, discarded
 
 
-def _parse_platforms_flag(value: str) -> list[str] | None:
+def parse_platforms_flag(value: str) -> list[str] | None:
     """Parse --platforms KEYS. Returns key list, or None on hard error."""
     if value.strip() == "":
         return []
@@ -97,7 +97,24 @@ def _parse_platforms_flag(value: str) -> list[str] | None:
     return [spec.key for spec in PLATFORM_SPECS if spec.key in selected]
 
 
-def _prompt_platforms() -> list[str]:
+def resolve_platforms_arg(
+    platforms_raw: str | None,
+) -> tuple[bool, list[str] | None]:
+    """Resolve --platforms for asset-setup paths.
+
+    Returns ``(ok, platforms)``. ``platforms`` is ``None`` when the flag was
+    omitted (caller should prompt). ``ok`` is False when the flag was invalid
+    (error already printed).
+    """
+    if platforms_raw is None:
+        return True, None
+    parsed = parse_platforms_flag(platforms_raw)
+    if parsed is None:
+        return False, None
+    return True, parsed
+
+
+def prompt_platforms() -> list[str]:
     """Prompt for a set of AI coding platforms."""
     print("Which AI coding platforms do you use?")
     print()
@@ -135,7 +152,7 @@ def _prompt_platforms() -> list[str]:
     return selected or _default_platform_keys()
 
 
-def _install_platform_instructions(
+def install_platform_instructions(
     target_dir: Path, slug: str, platforms: list[str]
 ) -> None:
     """Generate platform-specific instruction files from templates."""

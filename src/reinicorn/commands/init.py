@@ -20,9 +20,9 @@ from reinicorn import console
 from reinicorn.assets import get_asset_path
 from reinicorn.commands.hooks_install import cmd_hooks_install
 from reinicorn.commands.init_platforms import (
-    _install_platform_instructions,
-    _parse_platforms_flag,
-    _prompt_platforms,
+    install_platform_instructions,
+    prompt_platforms,
+    resolve_platforms_arg,
 )
 from reinicorn.config import KB_DIR_NAME, config_set, kb_scope
 from reinicorn.git import (
@@ -60,23 +60,6 @@ def _init_path(cwd: Path) -> Literal["full", "assets_only", "hooks_only"]:
     if (cwd / MANIFEST_PATH).is_file():
         return "hooks_only"
     return "assets_only"
-
-
-def _resolve_platforms_arg(
-    platforms_raw: str | None,
-) -> tuple[bool, list[str] | None]:
-    """Resolve --platforms for asset-setup paths.
-
-    Returns ``(ok, platforms)``. ``platforms`` is ``None`` when the flag was
-    omitted (caller should prompt). ``ok`` is False when the flag was invalid
-    (error already printed).
-    """
-    if platforms_raw is None:
-        return True, None
-    parsed = _parse_platforms_flag(platforms_raw)
-    if parsed is None:
-        return False, None
-    return True, parsed
 
 
 def _detect_gh_status() -> str:
@@ -170,7 +153,7 @@ def cmd_init(
                 "(assets already installed via manifest) — ignoring."
             )
     else:
-        ok, platforms = _resolve_platforms_arg(platforms_raw)
+        ok, platforms = resolve_platforms_arg(platforms_raw)
         if not ok:
             return 1
 
@@ -305,8 +288,8 @@ def _setup_assets(
     print()
     if not _copy_agent_instructions(r_root, cwd, slug, template=agent_template):
         return None
-    selected = _prompt_platforms() if platforms is None else platforms
-    _install_platform_instructions(cwd, slug, selected)
+    selected = prompt_platforms() if platforms is None else platforms
+    install_platform_instructions(cwd, slug, selected)
     _copy_skills(r_root, cwd)
     _install_session_hook(cwd)
     _copy_lint_config(cwd)

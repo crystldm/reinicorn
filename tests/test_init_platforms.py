@@ -45,7 +45,7 @@ def test_init_generates_claude_md(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo)
 
     assert rc == 0
@@ -63,7 +63,7 @@ def test_init_generates_all_platforms(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms",
+         patch("reinicorn.commands.init.prompt_platforms",
                return_value=["claude", "cursor", "copilot", "codex"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo)
 
@@ -77,10 +77,10 @@ def test_init_generates_all_platforms(tmp_path: Path):
 
 def test_codex_platform_installs_no_extra_file(tmp_path: Path):
     """Codex reads AGENTS.md natively — selecting it must not write any new file."""
-    from reinicorn.commands.init import _install_platform_instructions
+    from reinicorn.commands.init_platforms import install_platform_instructions
 
     before = set(tmp_path.rglob("*"))
-    _install_platform_instructions(tmp_path, "myrepo", ["codex"])
+    install_platform_instructions(tmp_path, "myrepo", ["codex"])
     after = set(tmp_path.rglob("*"))
     assert before == after
 
@@ -109,7 +109,7 @@ def test_init_skips_existing_platform_file(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo)
 
     assert rc == 0
@@ -123,7 +123,7 @@ def test_init_substitutes_repo_slug(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo)
 
     assert rc == 0
@@ -140,7 +140,7 @@ def test_init_platforms_raw_empty_skips_prompt_and_installs_no_platform_files(
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms") as prompt:
+         patch("reinicorn.commands.init.prompt_platforms") as prompt:
         rc = cmd_init(kb_url="unused", local=True, cwd=repo, platforms_raw="")
 
     assert rc == 0
@@ -156,7 +156,7 @@ def test_init_platforms_raw_skips_prompt_and_installs_cursor(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms") as prompt:
+         patch("reinicorn.commands.init.prompt_platforms") as prompt:
         rc = cmd_init(
             kb_url="unused", local=True, cwd=repo, platforms_raw="cursor"
         )
@@ -173,7 +173,7 @@ def test_init_platforms_raw_unknown_key_errors(tmp_path: Path, capsys):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms") as prompt:
+         patch("reinicorn.commands.init.prompt_platforms") as prompt:
         rc = cmd_init(
             kb_url="unused", local=True, cwd=repo, platforms_raw="nope"
         )
@@ -235,7 +235,7 @@ def test_init_platforms_raw_ignored_on_hooks_only_teammate_clone(
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init._setup_assets") as mock_setup, \
-         patch("reinicorn.commands.init._prompt_platforms") as prompt:
+         patch("reinicorn.commands.init.prompt_platforms") as prompt:
         rc = cmd_init(cwd=repo, platforms_raw="nope")
 
     assert rc == 0
@@ -247,22 +247,29 @@ def test_init_platforms_raw_ignored_on_hooks_only_teammate_clone(
 
 
 def test_parse_platforms_flag_dedup_and_order():
-    from reinicorn.commands.init import _parse_platforms_flag
+    from reinicorn.commands.init_platforms import parse_platforms_flag
 
-    assert _parse_platforms_flag("codex, claude,claude") == ["claude", "codex"]
+    assert parse_platforms_flag("codex, claude,claude") == ["claude", "codex"]
 
 
 def test_parse_platforms_flag_case_insensitive():
-    from reinicorn.commands.init import _parse_platforms_flag
+    from reinicorn.commands.init_platforms import parse_platforms_flag
 
-    assert _parse_platforms_flag("Claude") == ["claude"]
-    assert _parse_platforms_flag("CURSOR,Codex") == ["cursor", "codex"]
+    assert parse_platforms_flag("Claude") == ["claude"]
+    assert parse_platforms_flag("CURSOR,Codex") == ["cursor", "codex"]
 
 
 def test_parse_platforms_flag_empty_string():
-    from reinicorn.commands.init import _parse_platforms_flag
+    from reinicorn.commands.init_platforms import parse_platforms_flag
 
-    assert _parse_platforms_flag("") == []
+    assert parse_platforms_flag("") == []
+
+
+def test_resolve_platforms_arg_distinguishes_omitted_and_empty():
+    from reinicorn.commands.init_platforms import resolve_platforms_arg
+
+    assert resolve_platforms_arg(None) == (True, None)
+    assert resolve_platforms_arg("") == (True, [])
 
 
 def test_cli_accepts_platforms_flag():

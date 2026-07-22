@@ -12,7 +12,7 @@ from reinicorn.commands import init_platforms as platforms_mod
 
 def _run(user_input: str, capsys) -> tuple[list[str], str]:
     with patch("builtins.input", return_value=user_input):
-        result = platforms_mod._prompt_platforms()
+        result = platforms_mod.prompt_platforms()
     captured = capsys.readouterr()
     # console.warn/print both go to stdout today
     return result, captured.out

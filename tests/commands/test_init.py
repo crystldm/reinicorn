@@ -66,7 +66,7 @@ def test_init_with_kb_url_flag(existing_repo: Path, seeded_bare: Path, tmp_path:
 
     with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
          patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         def _resolve(name: str) -> Path | None:
             p = r_root / name
             return p if p.exists() else None
@@ -94,7 +94,7 @@ def test_init_renders_generic_agents_once_and_preserves_it(
 
     with patch("reinicorn.commands.init.get_asset_path", side_effect=_resolve), \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=[]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=[]):
         assert cmd_init(
             kb_url=str(seeded_bare), cwd=existing_repo, slug="sample"
         ) == 0
@@ -125,7 +125,7 @@ def test_init_reports_missing_packaged_agents_template(
 
     with patch("reinicorn.commands.init.get_asset_path", side_effect=_resolve), \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=[]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=[]):
         assert cmd_init(
             kb_url=str(seeded_bare), cwd=existing_repo, slug="sample"
         ) == 1
@@ -144,7 +144,7 @@ def test_init_reports_missing_packaged_agents_template(
     template.write_text("# {repo}\n\nRead `kb/{repo}/README.md`.\n")
     with patch("reinicorn.commands.init.get_asset_path", side_effect=_resolve), \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=[]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=[]):
         assert cmd_init(
             kb_url=str(seeded_bare), cwd=existing_repo, slug="sample"
         ) == 0
@@ -223,7 +223,7 @@ def test_init_existing_kb_without_manifest_sets_up_assets(
     with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
          patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
          patch("reinicorn.commands.init.repo_slug", return_value="testproject"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]), \
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]), \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.setup_submodule") as mock_submodule:
         def _resolve(name: str) -> Path | None:
@@ -253,7 +253,7 @@ def test_init_with_local_flag(existing_repo: Path, tmp_path: Path):
     with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
          patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
          patch("reinicorn.commands.init.repo_slug", return_value="existing"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         def _resolve(name: str) -> Path | None:
             p = r_root / name
             return p if p.exists() else None
@@ -278,7 +278,7 @@ def test_init_copies_lint_config(existing_repo: Path, seeded_bare: Path, tmp_pat
 
     with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
          patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         def _resolve(name: str) -> Path | None:
             p = r_root / name
             return p if p.exists() else None
