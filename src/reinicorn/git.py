@@ -136,10 +136,10 @@ def reinicorn_root() -> Path:
 def sanitize_branch(name: str) -> str:
     """Sanitize a branch name for use as a directory name.
 
-    Replaces '/' with '-' so that 'feature/mvp' becomes 'feature-mvp',
-    avoiding nested directories in exec-plan paths. Path-traversal names
-    ('.', '..', empty) collapse to '-' so the result can never escape
-    its parent directory.
+    Replaces '/' and '\' with '-' so that 'feature/mvp' becomes
+    'feature-mvp', avoiding nested directories in exec-plan paths.
+    Path-traversal names ('.', '..', empty) collapse to '-' so the
+    result can never escape its parent directory.
     """
     safe = name.replace("/", "-").replace("\\", "-")
     if safe in ("", ".", ".."):

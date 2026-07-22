@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+            "command": "\"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start.sh\""
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.reinicorn/hooks/enforce-doc-templates.sh"
+            "command": "\"${CLAUDE_PROJECT_DIR}/.reinicorn/hooks/enforce-doc-templates.sh\""
           }
         ]
       },
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.reinicorn/hooks/block-raw-kb-git.sh"
+            "command": "\"${CLAUDE_PROJECT_DIR}/.reinicorn/hooks/block-raw-kb-git.sh\""
           }
         ]
       }
