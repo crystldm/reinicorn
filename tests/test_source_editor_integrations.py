@@ -23,7 +23,7 @@ def test_source_editor_settings_use_reinicorn_hook_directory() -> None:
 
     relative_expected = {f".reinicorn/hooks/{name}" for name in HOOK_NAMES}
     claude_expected = {
-        f"$CLAUDE_PROJECT_DIR/.reinicorn/hooks/{name}" for name in HOOK_NAMES
+        f'"${{CLAUDE_PROJECT_DIR}}/.reinicorn/hooks/{name}"' for name in HOOK_NAMES
     }
     assert set(claude_commands) == claude_expected
     assert set(cursor_commands) == relative_expected
