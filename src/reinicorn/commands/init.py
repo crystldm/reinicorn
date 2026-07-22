@@ -202,6 +202,12 @@ def cmd_init(
     if gitmodules.is_file() and KB_DIR_NAME in gitmodules.read_text():
         if slug is not None and not _validate_scope_name(slug):
             return 1
+        has_manifest = (cwd / MANIFEST_PATH).is_file()
+        platforms: list[str] | None = None
+        if not has_manifest:
+            ok, platforms = _resolve_platforms_arg(platforms_raw)
+            if not ok:
+                return 1
         template_ok, agent_template = _preflight_agent_instructions(cwd)
         if not template_ok:
             return 1
@@ -220,7 +226,7 @@ def cmd_init(
         # the kb submodule exists but Reinicorn assets were never installed (e.g.
         # the submodule was added by hand), so fall through to full asset setup,
         # skipping the submodule creation that is already done.
-        if (cwd / MANIFEST_PATH).is_file():
+        if has_manifest:
             if platforms_raw is not None:
                 console.warn(
                     "--platforms has no effect on hooks-only init "
@@ -239,9 +245,6 @@ def cmd_init(
         )
         asset_slug = effective_slug or kb_scope(cwd)
         if not _validate_scope_name(asset_slug):
-            return 1
-        ok, platforms = _resolve_platforms_arg(platforms_raw)
-        if not ok:
             return 1
         hooks_rc = _setup_assets(
             reinicorn_root(),

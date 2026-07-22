@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 from reinicorn.commands.init import cmd_init
@@ -153,6 +154,36 @@ def test_init_platforms_raw_unknown_key_errors(tmp_path: Path, capsys):
     err = capsys.readouterr().out
     assert "nope" in err
     assert "claude" in err
+
+
+def test_existing_kb_without_manifest_validates_platforms_before_side_effects(
+    tmp_path: Path,
+):
+    """Invalid --platforms must not update submodules or write the scope config."""
+    repo = tmp_path / "existing-kb"
+    _init_repo(repo)
+    (repo / ".gitmodules").write_text(
+        '[submodule "kb"]\n'
+        "\tpath = kb\n"
+        "\turl = https://example.com/kb.git\n"
+    )
+
+    with patch(
+        "reinicorn.commands.init.run_git",
+        return_value=CompletedProcess([], 0),
+    ) as mock_run_git, patch(
+        "reinicorn.commands.init.config_set"
+    ) as mock_config_set, patch(
+        "reinicorn.commands.init._preflight_agent_instructions",
+        return_value=(True, None),
+    ):
+        rc = cmd_init(cwd=repo, slug="existing-kb", platforms_raw="nope")
+
+    assert rc == 1
+    mock_config_set.assert_not_called()
+    mock_run_git.assert_called_once_with(
+        "rev-parse", "--git-dir", check=False, cwd=repo
+    )
 
 
 def test_init_platforms_raw_ignored_on_hooks_only_teammate_clone(

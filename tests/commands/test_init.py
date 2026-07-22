@@ -302,4 +302,5 @@ def test_cli_init_dispatches_with_flags():
         create_remote=False,
         kb_name=None,
         slug=None,
+        platforms_raw=None,
     )
