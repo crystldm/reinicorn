@@ -52,10 +52,28 @@ AGENTS_DESTINATION = "AGENTS.md"
 SKILLS_ASSET = ".agents/skills"
 
 
+def _has_kb_submodule_path(gitmodules_text: str) -> bool:
+    """Return whether a submodule entry is configured at the KB path."""
+    in_submodule_section = False
+    for line in gitmodules_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_submodule_section = stripped.startswith('[submodule "')
+            continue
+        if not in_submodule_section:
+            continue
+        key, _, value = stripped.partition("=")
+        if key.strip().lower() == "path" and value.strip() == KB_DIR_NAME:
+            return True
+    return False
+
+
 def _init_path(cwd: Path) -> Literal["full", "assets_only", "hooks_only"]:
     """Classify the setup path without changing repository state."""
     gitmodules = cwd / ".gitmodules"
-    if not (gitmodules.is_file() and KB_DIR_NAME in gitmodules.read_text()):
+    if not (
+        gitmodules.is_file() and _has_kb_submodule_path(gitmodules.read_text())
+    ):
         return "full"
     if (cwd / MANIFEST_PATH).is_file():
         return "hooks_only"

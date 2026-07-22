@@ -38,6 +38,19 @@ def test_init_path_classifies_platform_handling_paths(tmp_path: Path):
     assert _init_path(tmp_path) == "hooks_only"
 
 
+def test_init_path_ignores_kb_substrings_outside_submodule_path(tmp_path: Path):
+    (tmp_path / ".gitmodules").write_text(
+        '[submodule "docs"]\n'
+        "\tpath = docs\n"
+        "\turl = https://example.com/kb.git\n"
+    )
+    manifest = tmp_path / ".reinicorn" / "manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}")
+
+    assert _init_path(tmp_path) == "full"
+
+
 def test_init_generates_claude_md(tmp_path: Path):
     """When claude platform selected, generates CLAUDE.md containing AGENTS.md and the slug."""
     repo = tmp_path / "my-repo"
