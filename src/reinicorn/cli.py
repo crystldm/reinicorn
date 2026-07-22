@@ -182,8 +182,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--platforms",
         help=(
             "Comma-separated platform keys "
-            "(claude,cursor,copilot,codex; case-insensitive; "
-            "skip interactive prompt)"
+            "(case-insensitive; skip interactive prompt)"
         ),
     )
 

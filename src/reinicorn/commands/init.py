@@ -14,11 +14,16 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from reinicorn import console
 from reinicorn.assets import get_asset_path
 from reinicorn.commands.hooks_install import cmd_hooks_install
+from reinicorn.commands.init_platforms import (
+    _install_platform_instructions,
+    _parse_platforms_flag,
+    _prompt_platforms,
+)
 from reinicorn.config import KB_DIR_NAME, config_set, kb_scope
 from reinicorn.git import (
     file_transport_args,
@@ -46,48 +51,15 @@ AGENTS_ASSET = "templates/AGENTS.md"
 AGENTS_DESTINATION = "AGENTS.md"
 SKILLS_ASSET = ".agents/skills"
 
-PLATFORM_FILES = {
-    "claude": "CLAUDE.md",
-    "cursor": ".cursor/rules/reinicorn.mdc",
-    "copilot": ".github/copilot-instructions.md",
-}
 
-PLATFORM_OPTIONS: list[tuple[str, str, bool]] = [
-    ("claude", "Claude Code", True),
-    ("cursor", "Cursor", False),
-    ("copilot", "GitHub Copilot", False),
-    ("codex", "Codex", False),
-]
-
-
-def _split_comma_tokens(raw: str) -> list[str]:
-    """Split on commas first, then strip each token; drop empty tokens."""
-    return [token.strip() for token in raw.strip().split(",") if token.strip()]
-
-
-def _default_platform_keys() -> list[str]:
-    return [key for key, _label, default in PLATFORM_OPTIONS if default]
-
-
-def _parse_platforms_flag(value: str) -> list[str] | None:
-    """Parse --platforms KEYS. Returns key list, or None on hard error."""
-    if value.strip() == "":
-        return []
-    known = {key for key, _label, _default in PLATFORM_OPTIONS}
-    selected: set[str] = set()
-    for token in _split_comma_tokens(value):
-        key = token.lower()
-        if key not in known:
-            known_list = ", ".join(key for key, _label, _default in PLATFORM_OPTIONS)
-            console.error(
-                f"Unknown platform '{token}'. "
-                f"Known platforms: {known_list}. "
-                f"How to fix: pass a comma-separated subset, "
-                f"e.g. --platforms claude,cursor"
-            )
-            return None
-        selected.add(key)
-    return [key for key, _label, _default in PLATFORM_OPTIONS if key in selected]
+def _init_path(cwd: Path) -> Literal["full", "assets_only", "hooks_only"]:
+    """Classify the setup path without changing repository state."""
+    gitmodules = cwd / ".gitmodules"
+    if not (gitmodules.is_file() and KB_DIR_NAME in gitmodules.read_text()):
+        return "full"
+    if (cwd / MANIFEST_PATH).is_file():
+        return "hooks_only"
+    return "assets_only"
 
 
 def _resolve_platforms_arg(
@@ -105,13 +77,6 @@ def _resolve_platforms_arg(
     if parsed is None:
         return False, None
     return True, parsed
-
-
-PLATFORM_TEMPLATES = {
-    "claude": "platform-instructions/claude.md",
-    "cursor": "platform-instructions/cursor.md",
-    "copilot": "platform-instructions/copilot.md",
-}
 
 
 def _detect_gh_status() -> str:
@@ -196,18 +161,23 @@ def cmd_init(
     print()
 
     kb_dir = cwd / KB_DIR_NAME
-    gitmodules = cwd / ".gitmodules"
+    init_path = _init_path(cwd)
+    platforms: list[str] | None = None
+    if init_path == "hooks_only":
+        if platforms_raw is not None:
+            console.warn(
+                "--platforms has no effect on hooks-only init "
+                "(assets already installed via manifest) — ignoring."
+            )
+    else:
+        ok, platforms = _resolve_platforms_arg(platforms_raw)
+        if not ok:
+            return 1
 
-    # Detect: repo already has kb (teammate clone scenario)
-    if gitmodules.is_file() and KB_DIR_NAME in gitmodules.read_text():
+    # Existing kb setup: either hooks-only teammate setup or missing assets.
+    if init_path != "full":
         if slug is not None and not _validate_scope_name(slug):
             return 1
-        has_manifest = (cwd / MANIFEST_PATH).is_file()
-        platforms: list[str] | None = None
-        if not has_manifest:
-            ok, platforms = _resolve_platforms_arg(platforms_raw)
-            if not ok:
-                return 1
         template_ok, agent_template = _preflight_agent_instructions(cwd)
         if not template_ok:
             return 1
@@ -226,12 +196,7 @@ def cmd_init(
         # the kb submodule exists but Reinicorn assets were never installed (e.g.
         # the submodule was added by hand), so fall through to full asset setup,
         # skipping the submodule creation that is already done.
-        if has_manifest:
-            if platforms_raw is not None:
-                console.warn(
-                    "--platforms has no effect on hooks-only init "
-                    "(assets already installed via manifest) — ignoring."
-                )
+        if init_path == "hooks_only":
             console.info("Kb submodule already configured — setting up hooks.")
             if not _copy_agent_instructions(
                 reinicorn_root(), cwd, effective_slug, template=agent_template
@@ -257,11 +222,6 @@ def cmd_init(
             return 1
         _print_full_summary(hooks_rc, asset_slug)
         return 0
-
-    # Full setup flow — validate --platforms before creating remote/submodule state.
-    ok, platforms = _resolve_platforms_arg(platforms_raw)
-    if not ok:
-        return 1
 
     r_root = reinicorn_root()
 
@@ -681,91 +641,6 @@ def _copy_lint_config(target_dir: Path) -> None:
     lint_dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(lint_src, lint_dest, dirs_exist_ok=True)
     console.success("Copied linters/ config")
-    print()
-
-
-def _prompt_platforms() -> list[str]:
-    """Interactive select-set for AI coding platforms."""
-    print("Which AI coding platforms do you use?")
-    print()
-    for i, (_key, label, _default) in enumerate(PLATFORM_OPTIONS, 1):
-        print(f"  {i}) {label}")
-    print()
-    default_labels = ", ".join(
-        label for _key, label, default in PLATFORM_OPTIONS if default
-    )
-    print(
-        f"Enter numbers to select (e.g. 1,2), or Enter for default [{default_labels}]: ",
-        end="",
-    )
-    raw = input()
-    stripped = raw.strip()
-    if not stripped:
-        return _default_platform_keys()
-
-    selected: set[int] = set()
-    discarded: list[str] = []
-    for token in _split_comma_tokens(stripped):
-        if token.isdigit():
-            idx = int(token) - 1
-            if 0 <= idx < len(PLATFORM_OPTIONS):
-                selected.add(idx)
-                continue
-        discarded.append(token)
-
-    if discarded:
-        kept_keys = (
-            [PLATFORM_OPTIONS[i][0] for i in range(len(PLATFORM_OPTIONS)) if i in selected]
-            if selected
-            else _default_platform_keys()
-        )
-        kept_labels = ", ".join(
-            label
-            for key, label, _d in PLATFORM_OPTIONS
-            if key in kept_keys
-        )
-        discarded_disp = ", ".join(repr(t) for t in discarded)
-        if selected:
-            console.warn(
-                f"Ignored invalid platform selection token(s) {discarded_disp}; "
-                f"using {kept_labels}."
-            )
-        else:
-            console.warn(
-                f"Ignored invalid platform selection {discarded_disp}; "
-                f"using default [{kept_labels}]."
-            )
-
-    if not selected:
-        return _default_platform_keys()
-    return [
-        key for i, (key, _label, _default) in enumerate(PLATFORM_OPTIONS) if i in selected
-    ]
-
-
-def _install_platform_instructions(target_dir: Path, slug: str, platforms: list[str]) -> None:
-    """Generate platform-specific instruction files from templates."""
-    for platform in platforms:
-        if platform == "codex":
-            console.success("Codex: uses AGENTS.md (already installed)")
-            continue
-        template_name = PLATFORM_TEMPLATES.get(platform)
-        dest_rel = PLATFORM_FILES.get(platform)
-        if not template_name or not dest_rel:
-            continue
-        src = get_asset_path(template_name)
-        if src is None:
-            console.warn(f"No template for {platform} — skipping")
-            continue
-        dest = target_dir / dest_rel
-        if dest.is_file():
-            console.info(f"{dest_rel} already exists — keeping existing")
-            continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        content = src.read_text()
-        content = content.replace("{repo}", slug)
-        dest.write_text(content)
-        console.success(f"Generated {dest_rel}")
     print()
 
 

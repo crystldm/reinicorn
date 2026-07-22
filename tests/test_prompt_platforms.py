@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from reinicorn.commands import init as init_mod
+from hypothesis import example, given
+from hypothesis import strategies as st
+
+from reinicorn.commands import init_platforms as platforms_mod
 
 
 def _run(user_input: str, capsys) -> tuple[list[str], str]:
     with patch("builtins.input", return_value=user_input):
-        result = init_mod._prompt_platforms()
+        result = platforms_mod._prompt_platforms()
     captured = capsys.readouterr()
     # console.warn/print both go to stdout today
     return result, captured.out
@@ -45,6 +48,41 @@ def test_select_2_is_cursor_only(capsys):
 def test_select_1_2(capsys):
     result, _ = _run("1,2", capsys)
     assert result == ["claude", "cursor"]
+
+
+def test_parse_platform_selection_orders_keys_and_discards_invalid_tokens():
+    parser = getattr(platforms_mod, "_parse_platform_selection", None)
+    assert parser is not None
+
+    selected, discarded = parser("2, 1, 2, nope, 9")
+
+    assert selected == ["claude", "cursor"]
+    assert discarded == ["nope", "9"]
+
+
+@given(st.text(max_size=100))
+@example("²")
+def test_parse_platform_selection_handles_arbitrary_text(raw: str):
+    selected, discarded = platforms_mod._parse_platform_selection(raw)
+
+    expected_indices: set[int] = set()
+    expected_discarded: list[str] = []
+    for token in (part.strip() for part in raw.strip().split(",")):
+        if not token:
+            continue
+        if token.isascii() and token.isdecimal():
+            index = int(token) - 1
+            if 0 <= index < len(platforms_mod.PLATFORM_SPECS):
+                expected_indices.add(index)
+                continue
+        expected_discarded.append(token)
+
+    assert selected == [
+        spec.key
+        for index, spec in enumerate(platforms_mod.PLATFORM_SPECS)
+        if index in expected_indices
+    ]
+    assert discarded == expected_discarded
 
 
 def test_out_of_range_9_defaults_with_warning(capsys):

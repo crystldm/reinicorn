@@ -6,7 +6,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
-from reinicorn.commands.init import cmd_init
+from reinicorn.commands.init import _init_path, cmd_init
 from reinicorn.git import run_git
 
 
@@ -20,6 +20,22 @@ def _init_repo(path: Path) -> None:
     _git("config", "user.email", "test@test", cwd=path)
     _git("config", "user.name", "Test", cwd=path)
     _git("commit", "--allow-empty", "-m", "init", cwd=path)
+
+
+def test_init_path_classifies_platform_handling_paths(tmp_path: Path):
+    assert _init_path(tmp_path) == "full"
+
+    (tmp_path / ".gitmodules").write_text(
+        '[submodule "kb"]\n'
+        "\tpath = kb\n"
+        "\turl = https://example.com/kb.git\n"
+    )
+    assert _init_path(tmp_path) == "assets_only"
+
+    manifest = tmp_path / ".reinicorn" / "manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text("{}")
+    assert _init_path(tmp_path) == "hooks_only"
 
 
 def test_init_generates_claude_md(tmp_path: Path):
@@ -67,6 +83,19 @@ def test_codex_platform_installs_no_extra_file(tmp_path: Path):
     _install_platform_instructions(tmp_path, "myrepo", ["codex"])
     after = set(tmp_path.rglob("*"))
     assert before == after
+
+
+def test_platform_specs_describe_installable_and_agents_only_platforms():
+    """Each platform either has both install paths or relies on AGENTS.md."""
+    from reinicorn.commands.init_platforms import PLATFORM_SPECS
+
+    codex = next(spec for spec in PLATFORM_SPECS if spec.key == "codex")
+    assert codex.template_path is None
+    assert codex.destination_path is None
+    assert all(
+        (spec.template_path is None) == (spec.destination_path is None)
+        for spec in PLATFORM_SPECS
+    )
 
 
 def test_init_skips_existing_platform_file(tmp_path: Path):
@@ -251,4 +280,7 @@ def test_cli_accepts_platforms_flag():
         for action in parser._actions
         if isinstance(action, argparse._SubParsersAction)
     )
-    assert "case-insensitive" in init_parser.format_help()
+    help_text = init_parser.format_help()
+    assert "case-insensitive" in help_text
+    assert "skip interactive prompt" in help_text
+    assert "claude,cursor,copilot,codex" not in help_text
