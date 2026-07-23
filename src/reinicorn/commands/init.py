@@ -14,11 +14,16 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from reinicorn import console
 from reinicorn.assets import get_asset_path
 from reinicorn.commands.hooks_install import cmd_hooks_install
+from reinicorn.commands.init_platforms import (
+    install_platform_instructions,
+    prompt_platforms,
+    resolve_platforms_arg,
+)
 from reinicorn.config import KB_DIR_NAME, config_set, kb_scope
 from reinicorn.git import (
     file_transport_args,
@@ -46,17 +51,33 @@ AGENTS_ASSET = "templates/AGENTS.md"
 AGENTS_DESTINATION = "AGENTS.md"
 SKILLS_ASSET = ".agents/skills"
 
-PLATFORM_FILES = {
-    "claude": "CLAUDE.md",
-    "cursor": ".cursor/rules/reinicorn.mdc",
-    "copilot": ".github/copilot-instructions.md",
-}
 
-PLATFORM_TEMPLATES = {
-    "claude": "platform-instructions/claude.md",
-    "cursor": "platform-instructions/cursor.md",
-    "copilot": "platform-instructions/copilot.md",
-}
+def _has_kb_submodule_path(gitmodules_text: str) -> bool:
+    """Return whether a submodule entry is configured at the KB path."""
+    in_submodule_section = False
+    for line in gitmodules_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_submodule_section = stripped.startswith('[submodule "')
+            continue
+        if not in_submodule_section:
+            continue
+        key, _, value = stripped.partition("=")
+        if key.strip().lower() == "path" and value.strip() == KB_DIR_NAME:
+            return True
+    return False
+
+
+def _init_path(cwd: Path) -> Literal["full", "assets_only", "hooks_only"]:
+    """Classify the setup path without changing repository state."""
+    gitmodules = cwd / ".gitmodules"
+    if not (
+        gitmodules.is_file() and _has_kb_submodule_path(gitmodules.read_text())
+    ):
+        return "full"
+    if (cwd / MANIFEST_PATH).is_file():
+        return "hooks_only"
+    return "assets_only"
 
 
 def _detect_gh_status() -> str:
@@ -99,6 +120,7 @@ def cmd_init(
     kb_name: str | None = None,
     cwd: Path | None = None,
     slug: str | None = None,
+    platforms_raw: str | None = None,
 ) -> int:
     """Unified init command.
 
@@ -107,6 +129,11 @@ def cmd_init(
         local: Create a local bare repo instead of using a remote.
         cwd: Override working directory (for testing).
         slug: Override the auto-derived repo scope name.
+        platforms_raw: Comma-separated platform keys from ``--platforms``
+            (case-insensitive). When set, skips the interactive platform
+            prompt on asset-setup paths; omitted means prompt. Invalid keys
+            hard-fail before creating kb state. Ignored (with a warning) on
+            hooks-only teammate re-inits.
     """
     if cwd is None:
         from reinicorn.git import repo_root as _repo_root
@@ -135,10 +162,21 @@ def cmd_init(
     print()
 
     kb_dir = cwd / KB_DIR_NAME
-    gitmodules = cwd / ".gitmodules"
+    init_path = _init_path(cwd)
+    platforms: list[str] | None = None
+    if init_path == "hooks_only":
+        if platforms_raw is not None:
+            console.warn(
+                "--platforms has no effect on hooks-only init "
+                "(assets already installed via manifest) — ignoring."
+            )
+    else:
+        ok, platforms = resolve_platforms_arg(platforms_raw)
+        if not ok:
+            return 1
 
-    # Detect: repo already has kb (teammate clone scenario)
-    if gitmodules.is_file() and KB_DIR_NAME in gitmodules.read_text():
+    # Existing kb setup: either hooks-only teammate setup or missing assets.
+    if init_path != "full":
         if slug is not None and not _validate_scope_name(slug):
             return 1
         template_ok, agent_template = _preflight_agent_instructions(cwd)
@@ -159,7 +197,7 @@ def cmd_init(
         # the kb submodule exists but Reinicorn assets were never installed (e.g.
         # the submodule was added by hand), so fall through to full asset setup,
         # skipping the submodule creation that is already done.
-        if (cwd / MANIFEST_PATH).is_file():
+        if init_path == "hooks_only":
             console.info("Kb submodule already configured — setting up hooks.")
             if not _copy_agent_instructions(
                 reinicorn_root(), cwd, effective_slug, template=agent_template
@@ -175,14 +213,17 @@ def cmd_init(
         if not _validate_scope_name(asset_slug):
             return 1
         hooks_rc = _setup_assets(
-            reinicorn_root(), cwd, asset_slug, agent_template=agent_template
+            reinicorn_root(),
+            cwd,
+            asset_slug,
+            agent_template=agent_template,
+            platforms=platforms,
         )
         if hooks_rc is None:
             return 1
         _print_full_summary(hooks_rc, asset_slug)
         return 0
 
-    # Full setup flow
     r_root = reinicorn_root()
 
     # Determine kb URL
@@ -239,7 +280,9 @@ def cmd_init(
             console.warn(f"Could not push repo-scoped dir for '{slug}': {e.stderr or e}")
             console.warn("You can push the kb changes manually later.")
 
-    hooks_rc = _setup_assets(r_root, cwd, slug, agent_template=agent_template)
+    hooks_rc = _setup_assets(
+        r_root, cwd, slug, agent_template=agent_template, platforms=platforms
+    )
     if hooks_rc is None:
         return 1
     local_bare_path = str(cwd.parent / f"{cwd.name}-kb.git") if local else None
@@ -248,7 +291,12 @@ def cmd_init(
 
 
 def _setup_assets(
-    r_root: Path, cwd: Path, slug: str, *, agent_template: Path | None
+    r_root: Path,
+    cwd: Path,
+    slug: str,
+    *,
+    agent_template: Path | None,
+    platforms: list[str] | None = None,
 ) -> int | None:
     """Lay down Reinicorn assets: agent instructions, platform files, skills,
     the session hook, lint config, and the manifest. Shared tail of the
@@ -258,8 +306,8 @@ def _setup_assets(
     print()
     if not _copy_agent_instructions(r_root, cwd, slug, template=agent_template):
         return None
-    platforms = _prompt_platforms()
-    _install_platform_instructions(cwd, slug, platforms)
+    selected = prompt_platforms() if platforms is None else platforms
+    install_platform_instructions(cwd, slug, selected)
     _copy_skills(r_root, cwd)
     _install_session_hook(cwd)
     _copy_lint_config(cwd)
@@ -594,57 +642,6 @@ def _copy_lint_config(target_dir: Path) -> None:
     lint_dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(lint_src, lint_dest, dirs_exist_ok=True)
     console.success("Copied linters/ config")
-    print()
-
-
-def _prompt_platforms() -> list[str]:
-    """Interactive multi-select for AI coding platforms."""
-    print("Which AI coding platforms do you use?")
-    print()
-    options = [
-        ("claude", "Claude Code", True),
-        ("cursor", "Cursor", False),
-        ("copilot", "GitHub Copilot", False),
-        ("codex", "Codex", False),
-    ]
-    for i, (_key, label, default) in enumerate(options, 1):
-        marker = "x" if default else " "
-        print(f"  {i}) [{marker}] {label}")
-    print()
-    raw = input("Toggle by number (e.g. 1,3), enter to confirm defaults: ").strip()
-    selected = [default for _, _, default in options]
-    if raw:
-        for token in raw.replace(" ", "").split(","):
-            if token.isdigit():
-                idx = int(token) - 1
-                if 0 <= idx < len(options):
-                    selected[idx] = not selected[idx]
-    return [key for (key, _, _), sel in zip(options, selected, strict=True) if sel]
-
-
-def _install_platform_instructions(target_dir: Path, slug: str, platforms: list[str]) -> None:
-    """Generate platform-specific instruction files from templates."""
-    for platform in platforms:
-        if platform == "codex":
-            console.success("Codex: uses AGENTS.md (already installed)")
-            continue
-        template_name = PLATFORM_TEMPLATES.get(platform)
-        dest_rel = PLATFORM_FILES.get(platform)
-        if not template_name or not dest_rel:
-            continue
-        src = get_asset_path(template_name)
-        if src is None:
-            console.warn(f"No template for {platform} — skipping")
-            continue
-        dest = target_dir / dest_rel
-        if dest.is_file():
-            console.info(f"{dest_rel} already exists — keeping existing")
-            continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        content = src.read_text()
-        content = content.replace("{repo}", slug)
-        dest.write_text(content)
-        console.success(f"Generated {dest_rel}")
     print()
 
 

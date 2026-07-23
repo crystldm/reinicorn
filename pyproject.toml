@@ -81,6 +81,7 @@ dev = [
     "pyright>=1.1.411",
     "pyyaml>=6.0.3",
     "bashlex>=0.18",
+    "hypothesis>=6.159.0",
 ]
 
 [tool.ruff]

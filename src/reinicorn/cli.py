@@ -178,6 +178,13 @@ def _build_parser() -> argparse.ArgumentParser:
                              help="Create a private GitHub repo for the kb")
     init_p.add_argument("--slug", help="Override the auto-derived repo scope name")
     init_p.add_argument("--kb-name", help="Custom name for the GitHub kb repo")
+    init_p.add_argument(
+        "--platforms",
+        help=(
+            "Comma-separated platform keys "
+            "(case-insensitive; skip interactive prompt)"
+        ),
+    )
 
     hooks_p = sub.add_parser("hooks", help="Git hook management")
     hooks_sub = hooks_p.add_subparsers(dest="hooks_command")
@@ -288,6 +295,7 @@ _DISPATCH = {
         create_remote=getattr(a, "create_remote", False),
         kb_name=getattr(a, "kb_name", None),
         slug=getattr(a, "slug", None),
+        platforms_raw=getattr(a, "platforms", None),
     ),
     ("hooks", "install"): lambda _: _load("hooks_install", "cmd_hooks_install")(),
     ("update", None): lambda a: _load("update", "cmd_update")(
