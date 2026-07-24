@@ -631,6 +631,42 @@ def test_setup_force_repairs_outdated_ruleset(env, monkeypatch, capsys):
     assert captured["body"]["rules"] == [{"type": "pull_request", "parameters": {"custom": True}}]
 
 
+def test_setup_force_replaces_mismatched_bypass_mode(env, monkeypatch, capsys):
+    """An existing bypass actor with the same identity but wrong bypass_mode
+    (e.g., pull_request instead of always) is replaced by the canonical required
+    entry, not duplicated."""
+    _gh_ok(monkeypatch)
+    captured = {}
+    _ruleset_gh(monkeypatch, captured=captured, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        # admin & write have correct mode; maintain is missing; write appears
+        # again with wrong mode to verify identity-based deduplication.
+        "bypass_actors": [
+            _role(5),  # admin: correct
+            {"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"},  # wrong mode
+            {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"},  # unrelated
+        ],
+        "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+        "rules": [{"type": "pull_request", "parameters": {}}],
+    })
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    out = capsys.readouterr().out
+    assert "ruleset updated" in out
+    bypass = captured["body"]["bypass_actors"]
+    # Extract (actor_id, actor_type, bypass_mode) tuples for required roles
+    roles = {
+        (a["actor_id"], a["actor_type"], a["bypass_mode"])
+        for a in bypass
+        if a["actor_type"] == "RepositoryRole"
+    }
+    # All three required roles present with correct mode "always", no duplicates
+    assert roles == {(2, "RepositoryRole", "always"),
+                     (4, "RepositoryRole", "always"),
+                     (5, "RepositoryRole", "always")}
+    # Unrelated Team actor preserved
+    assert any(a["actor_id"] == 99 and a["actor_type"] == "Team" for a in bypass)
+
+
 def test_setup_ruleset_bypass_actors_opaque(env, monkeypatch, capsys):
     """GitHub omits bypass_actors when the token lacks ruleset write access —
     warn with remediation, never assume current, never PUT."""
@@ -652,6 +688,30 @@ def test_setup_ruleset_detail_unreadable(env, monkeypatch, capsys):
     assert review_cmds.cmd_review_setup() == 0
     out = capsys.readouterr().out
     assert "could not be read" in out
+    assert "settings/rules" in out
+
+
+def test_setup_ruleset_detail_malformed_json(env, monkeypatch, capsys):
+    """A successful detail fetch returning malformed JSON warns rather than
+    crashing or assuming the ruleset is current."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail=subprocess.CompletedProcess(
+        ("api",), 0, stdout="{not valid json", stderr=""))
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
+
+
+def test_setup_ruleset_detail_non_dict_json(env, monkeypatch, capsys):
+    """A successful detail fetch returning valid JSON that's not a dict (e.g.,
+    a list) warns rather than crashing."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail=subprocess.CompletedProcess(
+        ("api",), 0, stdout="[1, 2, 3]", stderr=""))
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
     assert "settings/rules" in out
 
 

@@ -474,9 +474,23 @@ def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) 
         return
     # Merge required roles into the installed set, rebuilding the PUT body from
     # the fetched ruleset so user-customized rules/conditions round-trip intact.
-    merged = list(actors) + [
+    # Deduplicate by (actor_id, actor_type): required entries replace any
+    # same-identity actor with a mismatched bypass_mode; unrelated actors pass
+    # through unchanged.
+    required_map = {
+        (aid, atype): (aid, atype, mode)
+        for (aid, atype, mode) in _REQUIRED_BYPASS
+    }
+    deduped = []
+    for a in actors:
+        identity = (a.get("actor_id"), a.get("actor_type"))
+        if identity in required_map:
+            # Skip this actor; the canonical required entry will be added below
+            continue
+        deduped.append(a)
+    merged = deduped + [
         {"actor_id": aid, "actor_type": atype, "bypass_mode": mode}
-        for (aid, atype, mode) in sorted(missing)
+        for (aid, atype, mode) in sorted(_REQUIRED_BYPASS)
     ]
     body = {
         "name": data.get("name", _RULESET["name"]),
