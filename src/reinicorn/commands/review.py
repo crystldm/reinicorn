@@ -285,10 +285,28 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
                 console.next_step(f"rcorn review link {target.slug} <pr-url>")
                 return 1
             decision = pr.get("reviewDecision") or ""
+            self_review = False
             if decision != github.REVIEW_DECISION_APPROVED and not force:
-                if decision:
+                solo = github.gh_repo_is_solo(gh_repo)
+                if solo:
+                    # Structurally unsatisfiable: GitHub forbids approving your
+                    # own PR, so the lone maintainer (always the author) can
+                    # never satisfy the gate. Offer an explicit self-review
+                    # instead of the dead-end.
+                    console.warn(
+                        "solo repo — no second reviewer can approve this PR "
+                        "(GitHub forbids approving your own), so the review "
+                        "gate can only be satisfied by a self-review."
+                    )
+                    print(pr["url"])
+                    if not console.confirm(f"Self-review and merge {target.slug}?"):
+                        console.next_step(f"rcorn review merge {target.slug} --force")
+                        return 1
+                    self_review = True
+                elif decision:
                     console.error(f"PR is not approved (decision: {decision}).")
                     print(pr["url"])
+                    return 1
                 else:
                     # GitHub only populates reviewDecision when a required-review
                     # rule exists; without one (setup not run, or its best-effort
@@ -303,14 +321,21 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
                         "rcorn review setup installs the ruleset."
                     )
                     console.next_step(f"rcorn review merge {target.slug} --force")
-                return 1
+                    return 1
             github.gh_pr_merge(gh_repo, pr["number"])
             pr_url = pr["url"]
-            approved_by = ", ".join(sorted({
+            approvers = sorted({
                 r["author"]["login"]
                 for r in pr.get("latestReviews") or []
                 if r.get("state") == github.REVIEW_DECISION_APPROVED
-            }))
+            })
+            if approvers:
+                approved_by = ", ".join(approvers)
+            elif self_review or force:
+                # Landed without a second party's approval — a solo self-review
+                # or a forced merge. Record it as self-reviewed, not approved,
+                # so the stamp never overstates the review.
+                approved_by = f"{github.gh_login() or 'author'} (self-reviewed)"
         else:
             console.warn("gh unavailable — merge the PR in the GitHub UI, then rerun.")
             if pr_url:
@@ -489,6 +514,15 @@ def cmd_review_setup(force: bool = False) -> int:
             )
             console.next_step(
                 f"gh secret set KB_CLEANUP_TOKEN --repo {gh_repo}"
+            )
+        if applied and github.gh_repo_is_solo(gh_repo):
+            # A required-review gate on a solo repo is structurally
+            # unsatisfiable — GitHub forbids approving your own PR. Say so up
+            # front so the merge-time self-review path is never a surprise.
+            console.warn(
+                "solo repo — the required-review gate can only be satisfied by "
+                "a self-review (no second reviewer exists). `rcorn review "
+                "merge` will offer this; --force also lands it."
             )
     else:
         console.warn("gh unavailable — ruleset skipped; apply manually if wanted")

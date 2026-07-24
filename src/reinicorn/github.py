@@ -157,6 +157,48 @@ def gh_pr_merge(repo: str, number: int) -> None:
     )
 
 
+def gh_repo_is_solo(repo: str) -> bool | None:
+    """True if *repo* has at most one push-capable collaborator.
+
+    Returns False when two or more collaborators can push, and None when it
+    can't be determined (listing failed, or the token can't inspect
+    collaborators) — callers must never treat unknown as solo.
+
+    A solo repo can never satisfy a required-review gate: GitHub forbids
+    approving your own PR, so the lone maintainer (always the PR author) is the
+    only possible reviewer. Callers use this to offer a self-review path
+    instead of a structurally-unsatisfiable dead-end.
+    """
+    r = run_gh(
+        "api", f"repos/{repo}/collaborators?per_page=100", "--paginate",
+        check=False,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        collaborators = json.loads(r.stdout)
+    except ValueError:
+        return None
+    if not isinstance(collaborators, list):
+        return None
+    # Count push-capable collaborators (write/maintain/admin all set push=True).
+    # permissions may be absent for some token scopes — treat missing as unknown
+    # rather than counting it, but if we can't see anyone's push bit at all we
+    # still fall through to a definite count of what we could read.
+    push_capable = sum(
+        1 for c in collaborators
+        if isinstance(c, dict) and (c.get("permissions") or {}).get("push")
+    )
+    return push_capable <= 1
+
+
+def gh_login() -> str | None:
+    """The authenticated GitHub login, or None if it can't be resolved."""
+    r = run_gh("api", "user", "--jq", ".login", check=False)
+    login = r.stdout.strip()
+    return login if r.returncode == 0 and login else None
+
+
 def gh_pr_close(repo: str, number: int, comment: str = "") -> None:
     """Close a PR, optionally with a comment."""
     args = ["pr", "close", str(number), "--repo", repo]

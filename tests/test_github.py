@@ -12,11 +12,13 @@ from reinicorn.github import (
     gh_auth_login,
     gh_authenticated,
     gh_available,
+    gh_login,
     gh_pr_close,
     gh_pr_create,
     gh_pr_merge,
     gh_pr_view,
     gh_repo_create,
+    gh_repo_is_solo,
     run_gh,
 )
 
@@ -226,3 +228,72 @@ def test_run_gh_input_text_passed_to_subprocess_run():
         kwargs = mock.call_args.kwargs
         assert kwargs.get("input") == "{}"
         assert kwargs.get("text") is True
+
+
+# ── gh_repo_is_solo / gh_login ───────────────────────────────
+
+
+def _solo_mock(mock, *, returncode=0, stdout="[]"):
+    mock.return_value.returncode = returncode
+    mock.return_value.stdout = stdout
+
+
+def test_repo_is_solo_true_for_single_push_collaborator():
+    with patch("reinicorn.github.run_gh") as mock:
+        _solo_mock(mock, stdout='[{"login": "owner", "permissions": {"push": true}}]')
+        assert gh_repo_is_solo("o/r") is True
+
+
+def test_repo_is_solo_false_for_two_push_collaborators():
+    with patch("reinicorn.github.run_gh") as mock:
+        _solo_mock(mock, stdout=(
+            '[{"login": "owner", "permissions": {"push": true}}, '
+            '{"login": "alice", "permissions": {"push": true}}]'
+        ))
+        assert gh_repo_is_solo("o/r") is False
+
+
+def test_repo_is_solo_ignores_read_only_collaborators():
+    """A second collaborator with only pull access does not make it non-solo."""
+    with patch("reinicorn.github.run_gh") as mock:
+        _solo_mock(mock, stdout=(
+            '[{"login": "owner", "permissions": {"push": true}}, '
+            '{"login": "bob", "permissions": {"push": false, "pull": true}}]'
+        ))
+        assert gh_repo_is_solo("o/r") is True
+
+
+def test_repo_is_solo_none_on_listing_failure():
+    with patch("reinicorn.github.run_gh") as mock:
+        _solo_mock(mock, returncode=1, stdout="")
+        assert gh_repo_is_solo("o/r") is None
+
+
+def test_repo_is_solo_none_on_unparseable_json():
+    with patch("reinicorn.github.run_gh") as mock:
+        _solo_mock(mock, stdout="not json")
+        assert gh_repo_is_solo("o/r") is None
+
+
+def test_repo_is_solo_paginates_collaborators():
+    with patch("reinicorn.github.run_gh") as mock:
+        _solo_mock(mock, stdout='[{"login": "owner", "permissions": {"push": true}}]')
+        gh_repo_is_solo("o/r")
+        argv = mock.call_args[0]
+        assert argv[0] == "api"
+        assert "repos/o/r/collaborators" in argv[1]
+        assert "--paginate" in argv
+
+
+def test_gh_login_returns_login():
+    with patch("reinicorn.github.run_gh") as mock:
+        mock.return_value.returncode = 0
+        mock.return_value.stdout = "octocat\n"
+        assert gh_login() == "octocat"
+
+
+def test_gh_login_none_on_failure():
+    with patch("reinicorn.github.run_gh") as mock:
+        mock.return_value.returncode = 1
+        mock.return_value.stdout = ""
+        assert gh_login() is None

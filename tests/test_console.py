@@ -83,3 +83,35 @@ def test_indentation_when_tty(capsys, monkeypatch):
     console.info("x")
     out, _ = capsys.readouterr()
     assert out == "  x\n"
+
+
+# ── confirm ──────────────────────────────────────────────────
+
+
+def test_confirm_false_when_not_tty(monkeypatch, capsys):
+    """Agent/CI (non-TTY) callers never block on a prompt — default No."""
+    monkeypatch.setattr(console, "_is_tty", lambda: False)
+    assert console.confirm("Proceed?") is False
+
+
+def test_confirm_true_on_yes(monkeypatch):
+    monkeypatch.setattr(console, "_is_tty", lambda: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda: "y")
+    assert console.confirm("Proceed?") is True
+
+
+def test_confirm_false_on_empty_default_no(monkeypatch):
+    monkeypatch.setattr(console, "_is_tty", lambda: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda: "")
+    assert console.confirm("Proceed?") is False
+
+
+def test_confirm_false_on_eof(monkeypatch):
+    monkeypatch.setattr(console, "_is_tty", lambda: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    def _raise():
+        raise EOFError
+    monkeypatch.setattr("builtins.input", _raise)
+    assert console.confirm("Proceed?") is False

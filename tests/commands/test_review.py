@@ -55,6 +55,10 @@ def _gh(monkeypatch, *, available: bool = True, repo: str | None = "owner/kb", *
     gh = review_cmds.github
     monkeypatch.setattr(gh, "gh_available", lambda: available)
     monkeypatch.setattr(gh, "gh_authenticated", lambda: available)
+    # Default to a multi-collaborator repo with a known login; solo tests
+    # override gh_repo_is_solo. Keeps the merge path off real gh.
+    monkeypatch.setattr(gh, "gh_repo_is_solo", lambda _r: False)
+    monkeypatch.setattr(gh, "gh_login", lambda: "author")
     for name, fn in funcs.items():
         monkeypatch.setattr(gh, name, fn)
     monkeypatch.setattr(review_cmds, "gh_repo_from_url", lambda _url: repo)
@@ -313,6 +317,81 @@ def test_merge_no_review_decision_explains_and_offers_force(
     assert "not approved" not in out
     assert "next: rcorn review merge x --force" in out
     assert _PR_URL in out
+
+
+def test_merge_solo_repo_self_review_confirmed(env: Path, monkeypatch, capsys):
+    """Solo repo (no second reviewer possible): an explicit self-review confirm
+    lands the doc and stamps Approved-by <author> (self-reviewed)."""
+    _draft(env)
+    remote = env.parent / "kb-remote"
+    pr = {
+        "number": 7, "state": "OPEN", "reviewDecision": None,
+        "url": _PR_URL, "latestReviews": [],
+    }
+
+    def fake_merge(repo, number):
+        run_git("branch", "-f", "main", _BRANCH, cwd=remote)
+
+    _gh(monkeypatch, gh_pr_create=_pr_create, gh_pr_view=lambda *_a, **_k: pr,
+        gh_pr_merge=fake_merge, gh_repo_is_solo=lambda _r: True,
+        gh_login=lambda: "solomaint")
+    monkeypatch.setattr(review_cmds.console, "confirm", lambda _p: True)
+    assert review_cmds.cmd_review_start("x", []) == 0
+    capsys.readouterr()
+
+    assert review_cmds.cmd_review_merge("x") == 0
+    out = capsys.readouterr().out
+    assert "solo repo" in out
+    assert "approved and landed" in out
+    landed = _remote_show(remote, "main", "testproject/specs/x.md")
+    assert landed is not None
+    assert "**Approved-by:** solomaint (self-reviewed)" in landed
+
+
+def test_merge_solo_repo_declined_offers_force(env: Path, monkeypatch, capsys):
+    """Declining the solo self-review is not a dead-end — it points at --force
+    and does not merge."""
+    _draft(env)
+    pr = {
+        "number": 7, "state": "OPEN", "reviewDecision": None,
+        "url": _PR_URL, "latestReviews": [],
+    }
+    merged = MagicMock()
+    _gh(monkeypatch, gh_pr_create=_pr_create, gh_pr_view=lambda *_a, **_k: pr,
+        gh_pr_merge=merged, gh_repo_is_solo=lambda _r: True)
+    monkeypatch.setattr(review_cmds.console, "confirm", lambda _p: False)
+    assert review_cmds.cmd_review_start("x", []) == 0
+    capsys.readouterr()
+
+    assert review_cmds.cmd_review_merge("x") == 1
+    out = capsys.readouterr().out
+    assert "solo repo" in out
+    assert "next: rcorn review merge x --force" in out
+    merged.assert_not_called()
+
+
+def test_merge_force_without_approval_stamps_self_reviewed(env: Path, monkeypatch, capsys):
+    """--force with no genuine approval records a self-review, never a phantom
+    approver (honest Approved-by stamp)."""
+    _draft(env)
+    remote = env.parent / "kb-remote"
+    pr = {
+        "number": 7, "state": "OPEN", "reviewDecision": None,
+        "url": _PR_URL, "latestReviews": [],
+    }
+
+    def fake_merge(repo, number):
+        run_git("branch", "-f", "main", _BRANCH, cwd=remote)
+
+    _gh(monkeypatch, gh_pr_create=_pr_create, gh_pr_view=lambda *_a, **_k: pr,
+        gh_pr_merge=fake_merge, gh_login=lambda: "forcer")
+    assert review_cmds.cmd_review_start("x", []) == 0
+    capsys.readouterr()
+
+    assert review_cmds.cmd_review_merge("x", force=True) == 0
+    landed = _remote_show(remote, "main", "testproject/specs/x.md")
+    assert landed is not None
+    assert "**Approved-by:** forcer (self-reviewed)" in landed
 
 
 def test_merge_force_bypasses_divergence(env: Path, monkeypatch, capsys):
@@ -580,6 +659,47 @@ def test_setup_no_secret_hint_when_ruleset_not_applied(env, monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "ruleset not applied" in out
     assert "KB_CLEANUP_TOKEN" not in out
+
+
+def test_setup_warns_on_solo_repo(env, monkeypatch, capsys):
+    """On a solo repo, setup warns up front that the approval gate can only be
+    a self-review — so the merge-time prompt is never a surprise."""
+    import json
+    _gh_ok(monkeypatch)
+    solo = json.dumps([{"login": "owner", "permissions": {"push": True}}])
+
+    def fake_run_gh(*args, **kwargs):
+        if "collaborators" in args[1]:
+            return subprocess.CompletedProcess(args, 0, stdout=solo, stderr="")
+        if "--method" in args:  # POST: create ruleset
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "solo repo" in out
+
+
+def test_setup_no_solo_warning_when_multiple_collaborators(env, monkeypatch, capsys):
+    """A repo with two push-capable collaborators is not solo — no warning."""
+    import json
+    _gh_ok(monkeypatch)
+    team = json.dumps([
+        {"login": "owner", "permissions": {"push": True}},
+        {"login": "alice", "permissions": {"push": True}},
+    ])
+
+    def fake_run_gh(*args, **kwargs):
+        if "collaborators" in args[1]:
+            return subprocess.CompletedProcess(args, 0, stdout=team, stderr="")
+        if "--method" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    assert "solo repo" not in capsys.readouterr().out
 
 
 # ── error surfacing ──────────────────────────────────────────
