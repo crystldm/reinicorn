@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from reinicorn import console
@@ -115,6 +116,28 @@ def cmd_doc_list(doc_type: str, include_drafts: bool = False) -> int:
     return 0
 
 
+def _branch_doc_pattern(doc_type: str) -> str:
+    """Glob matching every branch's doc of a branch-addressed type."""
+    return REGISTRY[doc_type].filename.replace("{branch}", "*")
+
+
+def _missing_branch_doc(doc_type: str, branch: str, branches: set[str]) -> int:
+    """Recovery hints for a missing branch-addressed doc.
+
+    The create commands only operate on the current branch, so the create
+    hint is a dead end for any other branch — list branches that do have
+    the doc instead, mirroring the "valid slugs" hint in cmd_doc_show.
+    """
+    console.error(f"no {doc_type} for branch '{branch}'")
+    if branch == current_branch():
+        console.next_step(REGISTRY[doc_type].create_hint)
+    elif branches:
+        console.info(f"branches with a {doc_type}: {', '.join(sorted(branches))}")
+    else:
+        print(f"{doc_type}s: 0 found")
+    return 1
+
+
 def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
     repo_dir = _repo_dir()
     if repo_dir is None:
@@ -125,9 +148,12 @@ def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
         return 1
     target = branch_doc_path(doc_type, repo_dir, branch)
     if not target.is_file():
-        console.error(f"no {doc_type} for branch '{branch}'")
-        console.next_step(REGISTRY[doc_type].create_hint)
-        return 1
+        dt = REGISTRY[doc_type]
+        branches = {
+            f.parent.name
+            for f in (repo_dir / dt.dir_path).glob(_branch_doc_pattern(doc_type))
+        }
+        return _missing_branch_doc(doc_type, branch, branches)
     _print_doc(target, doc_type, branch_dir_name(branch), full)
     return 0
 
@@ -147,8 +173,15 @@ def cmd_retro_show(branch: str | None = None, full: bool = False) -> int:
     active = branch_doc_path("plan", repo_dir, branch).parent / "retro.md"
     target = active if active.is_file() else branch_doc_path("retro", repo_dir, branch)
     if not target.is_file():
-        console.error(f"no retro for branch '{branch}'")
-        console.next_step(REGISTRY["retro"].create_hint)
-        return 1
+        exec_plans = repo_dir / REGISTRY["retro"].dir_path
+        active_pattern = str(
+            PurePosixPath(_branch_doc_pattern("plan")).with_name("retro.md")
+        )
+        branches = {
+            f.parent.name
+            for pattern in (_branch_doc_pattern("retro"), active_pattern)
+            for f in exec_plans.glob(pattern)
+        }
+        return _missing_branch_doc("retro", branch, branches)
     _print_doc(target, "retro", branch_dir_name(branch), full)
     return 0
