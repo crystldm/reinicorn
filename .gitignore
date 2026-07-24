@@ -18,5 +18,10 @@ build/
 # Test caches
 .pytest_cache/
 
+# Coverage reports
+.coverage
+coverage.xml
+htmlcov/
+
 # Local git worktrees
 .worktrees/
