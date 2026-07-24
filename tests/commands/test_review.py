@@ -550,21 +550,109 @@ def test_setup_hints_cleanup_secret_when_ruleset_applies(env, monkeypatch, capsy
     assert "gh secret set KB_CLEANUP_TOKEN --repo o/kb" in out
 
 
-def test_setup_detects_existing_ruleset(env, monkeypatch, capsys):
-    """An already-installed ruleset is not a failure — report it as such (not
-    'plan/permissions?') and still surface the secret hint."""
-    _gh_ok(monkeypatch)
-    listing = '[{"name": "reinicorn-doc-review", "id": 1}]'
+def _role(actor_id):
+    return {"actor_id": actor_id, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+
+
+def _ruleset_gh(monkeypatch, *, detail, captured=None):
+    """Wire run_gh for a ruleset that already exists (id=1).
+
+    list → [{name, id:1}]; detail-fetch → *detail* (dict → JSON, or a
+    CompletedProcess for failure paths); PUT → records its body into *captured*
+    and succeeds. POST must never happen (the ruleset exists).
+    """
+    import json as _json
+    listing = _json.dumps([{"name": "reinicorn-doc-review", "id": 1}])
 
     def fake_run_gh(*args, **kwargs):
-        assert "--method" not in args, "must not POST a duplicate ruleset"
+        if "--method" in args and "PUT" in args:
+            if captured is not None:
+                captured["body"] = _json.loads(kwargs["input_text"])
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        assert "POST" not in args, "must not POST a duplicate ruleset"
+        if args[:2] == ("api", "repos/o/kb/rulesets/1"):
+            if isinstance(detail, subprocess.CompletedProcess):
+                return detail
+            return subprocess.CompletedProcess(args, 0, stdout=_json.dumps(detail), stderr="")
         return subprocess.CompletedProcess(args, 0, stdout=listing, stderr="")
 
     monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+
+
+def test_setup_detects_existing_ruleset(env, monkeypatch, capsys):
+    """A compliant same-named ruleset (required roles present, extra user actor
+    and all) is a no-op — report it installed and still surface the secret hint,
+    without a PUT."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), _role(4), _role(2),
+                          {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"}],
+    })
     assert review_cmds.cmd_review_setup() == 0
     out = capsys.readouterr().out
     assert "already installed" in out
     assert "KB_CLEANUP_TOKEN" in out
+
+
+def test_setup_detects_outdated_ruleset_without_force(env, monkeypatch, capsys):
+    """A same-named ruleset missing the maintain-role bypass ({4,5} only) is
+    drift — without --force, warn and direct to --force, never mutate."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), _role(4)],
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "outdated" in out
+    assert "rcorn review setup --force" in out
+    assert "KB_CLEANUP_TOKEN" in out  # still active → secret hint stands
+
+
+def test_setup_force_repairs_outdated_ruleset(env, monkeypatch, capsys):
+    """--force merges the missing maintain role into the installed set without
+    dropping unrelated user-added actors."""
+    _gh_ok(monkeypatch)
+    captured = {}
+    _ruleset_gh(monkeypatch, captured=captured, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), _role(4),
+                          {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"}],
+        "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+        "rules": [{"type": "pull_request", "parameters": {"custom": True}}],
+    })
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    out = capsys.readouterr().out
+    assert "ruleset updated" in out
+    roles = {a["actor_id"] for a in captured["body"]["bypass_actors"]}
+    assert roles == {2, 4, 5, 99}  # required merged in, user Team preserved
+    # user-customized rules/conditions round-trip untouched
+    assert captured["body"]["rules"] == [{"type": "pull_request", "parameters": {"custom": True}}]
+
+
+def test_setup_ruleset_bypass_actors_opaque(env, monkeypatch, capsys):
+    """GitHub omits bypass_actors when the token lacks ruleset write access —
+    warn with remediation, never assume current, never PUT."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+    })  # no bypass_actors key
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "not visible to this token" in out
+    assert "KB_CLEANUP_TOKEN" in out  # active → hint stands
+
+
+def test_setup_ruleset_detail_unreadable(env, monkeypatch, capsys):
+    """A failed detail fetch warns rather than assuming the ruleset is current."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail=subprocess.CompletedProcess(
+        ("api",), 1, stdout="", stderr="404"))
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "could not be read" in out
+    assert "settings/rules" in out
 
 
 def test_setup_no_secret_hint_when_ruleset_not_applied(env, monkeypatch, capsys):
