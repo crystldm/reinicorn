@@ -35,7 +35,7 @@ uv run pyright          # type-check (src/ only)
 ### Coverage
 
 `uv run pytest` measures branch coverage of `src/reinicorn` and prints a
-per-file table with the uncovered lines. The run fails below **85%** total.
+per-file table with the uncovered lines. The run fails below **87%** total.
 That floor is a ratchet: raise it as coverage improves, don't lower it to
 turn a red build green.
 
