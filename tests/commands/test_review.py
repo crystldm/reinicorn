@@ -643,7 +643,8 @@ def test_setup_force_replaces_mismatched_bypass_mode(env, monkeypatch, capsys):
         # again with wrong mode to verify identity-based deduplication.
         "bypass_actors": [
             _role(5),  # admin: correct
-            {"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"},  # wrong mode
+            # write, but with the wrong mode
+            {"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"},
             {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"},  # unrelated
         ],
         "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
