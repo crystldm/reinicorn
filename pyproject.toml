@@ -89,10 +89,10 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Ratchet, sitting just under the measured total (85.69% with branch
+# Ratchet, sitting just under the measured total (87.68% with branch
 # coverage on). Raise it as coverage rises; never lower it to make a red
 # build green.
-fail_under = 85
+fail_under = 87
 show_missing = true
 exclude_also = [
     "if TYPE_CHECKING:",
