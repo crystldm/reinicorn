@@ -44,7 +44,8 @@ a browsable line-by-line HTML report as the `coverage-html` artifact. For
 that report locally:
 
 ```bash
-uv run pytest --cov-report=html && open htmlcov/index.html
+uv run pytest --cov-report=html
+# then open htmlcov/index.html in your browser
 ```
 
 Knowledge-base operations go through the CLI, never raw git in `kb/`:
