@@ -5,10 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from reinicorn.commands.internal.pre_push import (
-    _ensure_kb_pushed,
-    _ensure_plan_spec_approved,
-)
+from reinicorn.commands.internal.pre_push import _ensure_kb_pushed
+from reinicorn.commands.internal.spec_gate import ensure_plan_spec_approved
 from reinicorn.git import run_git, sanitize_branch
 
 
@@ -193,17 +191,19 @@ class TestEnsurePlanSpecApproved:
     def _plan(spec_value: str) -> str:
         return f"# Plan\n\n**Spec:** {spec_value}\n**Status:** planning\n\n## Goal\n\nx\n"
 
-    def _run(self, repo: Path) -> int:
+    def _run(self, repo: Path, branches: list[str] | None = None) -> int:
         with patch(
-            "reinicorn.commands.internal.pre_push.kb_scope", return_value=self.SCOPE
+            "reinicorn.commands.internal.spec_gate.kb_scope", return_value=self.SCOPE
         ):
-            return _ensure_plan_spec_approved(repo)
+            if branches is None:
+                branches = ["feat/thing"]
+            return ensure_plan_spec_approved(repo, branches)
 
     def test_no_kb_dir_allows(self, tmp_path: Path):
         with patch(
-            "reinicorn.commands.internal.pre_push.get_kb_dir", return_value=None
+            "reinicorn.commands.internal.spec_gate.get_kb_dir", return_value=None
         ):
-            assert _ensure_plan_spec_approved(tmp_path) == 0
+            assert ensure_plan_spec_approved(tmp_path, ["feat/thing"]) == 0
 
     def test_no_plan_for_branch_allows(self, submodule_repo: Path):
         self._setup(submodule_repo)
@@ -317,7 +317,7 @@ class TestEnsurePlanSpecApproved:
         """
         self._setup(submodule_repo, plan=self._plan("specs/hot.md"))
         with patch(
-            "reinicorn.commands.internal.pre_push.tracked_paths",
+            "reinicorn.commands.internal.spec_gate.tracked_paths",
             side_effect=RuntimeError("boom"),
         ):
             assert self._run(submodule_repo) == 0
@@ -326,3 +326,113 @@ class TestEnsurePlanSpecApproved:
         assert "boom" in out
         assert "feat/thing" in out
         assert "NOT checked" in out
+
+    def test_checks_the_pushed_branch_not_the_checked_out_one(
+        self, submodule_repo: Path, capsys
+    ):
+        """`git push origin other-branch` must check *that* branch's plan.
+
+        Resolving from HEAD would let the gate be bypassed by pushing a branch
+        that is not checked out — an ordinary workflow, not a workaround.
+        """
+        self._setup(
+            submodule_repo, "feat/other",
+            plan=self._plan("specs/hot.md"),
+            spec=("specs/hot.md", "in-review"),
+        )
+        run_git("checkout", "-q", "main", cwd=submodule_repo)
+        assert self._run(submodule_repo, ["feat/other"]) == 1
+        assert "specs/hot.md" in capsys.readouterr().out
+
+    def test_multi_ref_push_blocks_on_any_offending_branch(
+        self, submodule_repo: Path, capsys
+    ):
+        self._setup(submodule_repo, "feat/clean", plan=self._plan("N/A"))
+        self._setup(
+            submodule_repo, "feat/dirty",
+            plan=self._plan("specs/wip.md"),
+            spec=("specs/drafts/wip.md", "draft"),
+        )
+        assert self._run(submodule_repo, ["feat/clean", "feat/dirty"]) == 1
+        assert "feat-dirty" in capsys.readouterr().out
+
+    def test_no_branches_allows(self, submodule_repo: Path):
+        """A push with no branch refs (tags only) has no plan to check."""
+        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
+        assert self._run(submodule_repo, []) == 0
+
+    def test_git_failure_fails_open_loudly(self, submodule_repo: Path, capsys):
+        """A broken kb must not read as 'every spec unresolved' and block.
+
+        tracked_paths raising is what routes this to the loud fail-open path
+        instead of a misleading 'matches no git-tracked kb path' block.
+        """
+        self._setup(
+            submodule_repo,
+            plan=self._plan("specs/ok.md"),
+            spec=("specs/ok.md", "approved"),
+        )
+        with patch(
+            "reinicorn.commands.internal.spec_gate.tracked_paths",
+            side_effect=RuntimeError("git ls-files failed"),
+        ):
+            assert self._run(submodule_repo) == 0
+        out = capsys.readouterr().out
+        assert "did not run" in out
+        assert "NOT checked" in out
+
+
+class TestPushedBranches:
+    """Parsing the pre-push hook's stdin ref list."""
+
+    def _parse(self, monkeypatch, text: str) -> list[str]:
+        import io
+
+        from reinicorn.commands.internal import pre_push
+
+        stream = io.StringIO(text)
+        stream.isatty = lambda: False  # type: ignore[method-assign]
+        monkeypatch.setattr(pre_push.sys, "stdin", stream)
+        return pre_push._pushed_branches()
+
+    def test_parses_single_ref(self, monkeypatch):
+        assert self._parse(
+            monkeypatch,
+            "refs/heads/feat/x abc123 refs/heads/feat/x def456\n",
+        ) == ["feat/x"]
+
+    def test_parses_multiple_refs(self, monkeypatch):
+        out = self._parse(
+            monkeypatch,
+            "refs/heads/a 111 refs/heads/a 222\n"
+            "refs/heads/b 333 refs/heads/b 444\n",
+        )
+        assert out == ["a", "b"]
+
+    def test_skips_deletions(self, monkeypatch):
+        assert self._parse(
+            monkeypatch,
+            f"(delete) {'0' * 40} refs/heads/gone 999\n"
+            f"refs/heads/kept {'0' * 40} refs/heads/kept 888\n"
+            "refs/heads/live 777 refs/heads/live 666\n",
+        ) == ["live"]
+
+    def test_skips_non_branch_refs(self, monkeypatch):
+        assert self._parse(
+            monkeypatch,
+            "refs/tags/v1 abc refs/tags/v1 def\n",
+        ) == []
+
+    def test_empty_stdin_returns_empty(self, monkeypatch):
+        assert self._parse(monkeypatch, "") == []
+
+    def test_tty_stdin_returns_empty(self, monkeypatch):
+        """Invoked by hand, not by the hook — caller falls back to HEAD."""
+        import io
+
+        from reinicorn.commands.internal import pre_push
+
+        stream = io.StringIO("")
+        stream.isatty = lambda: True  # type: ignore[method-assign]
+        monkeypatch.setattr(pre_push.sys, "stdin", stream)
+        assert pre_push._pushed_branches() == []

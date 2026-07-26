@@ -30,7 +30,12 @@ class DraftRefsRule(LintRule):
         if not kb.is_dir():
             return diagnostics
 
-        tracked = tracked_paths(kb)
+        # The runner does not guard built-in rules, so an unreadable kb must
+        # become a diagnostic rather than crash the whole lint run.
+        try:
+            tracked = tracked_paths(kb)
+        except RuntimeError as e:
+            return [f"{KB_DIR_NAME}:1 — cannot enumerate tracked kb paths: {e}"]
 
         active_glob = f"*/{REGISTRY['plan'].dir_path}/active/*/plan.md"
         for plan in sorted(kb.glob(active_glob)):

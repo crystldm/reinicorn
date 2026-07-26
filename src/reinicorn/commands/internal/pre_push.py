@@ -1,26 +1,26 @@
-"""rcorn _pre-push — kb submodule sync."""
+"""rcorn _pre-push — kb submodule sync and the review-lane gate."""
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
-from reinicorn.config import KB_DIR_NAME, kb_scope
+from reinicorn.commands.internal.spec_gate import ensure_plan_spec_approved
+from reinicorn.config import KB_DIR_NAME
 from reinicorn.git import current_branch, explain_failure, repo_root, run_git
-from reinicorn.kb import branch_doc_path, get_kb_dir
-from reinicorn.linter.spec_refs import (
-    declared_spec,
-    is_not_applicable,
-    resolve_ref,
-    tracked_paths,
-    unapproved_reason,
-)
+from reinicorn.kb import get_kb_dir
 from reinicorn.mode import get_mode
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+_NULL_OID = "0" * 40
+
 
 def cmd_pre_push() -> int:
+    # Read the hook's stdin before anything else: git feeds the refs being
+    # pushed and the stream is consumed once.
+    branches = _pushed_branches() or [current_branch()]
     try:
         root = repo_root(quiet=True)
         if root is None:
@@ -28,7 +28,7 @@ def cmd_pre_push() -> int:
         rc = _ensure_kb_pushed(root)
         if rc != 0:
             return rc
-        return _ensure_plan_spec_approved(root)
+        return ensure_plan_spec_approved(root, branches)
     except Exception as e:
         # Fail closed: this guard exists to stop a parent push that would leave
         # a dangling kb submodule pointer. If the check itself errors we cannot
@@ -96,91 +96,34 @@ def _ensure_kb_pushed(root: Path) -> int:
     return 0
 
 
-def _ensure_plan_spec_approved(root: Path) -> int:
-    """Block the push when this branch's plan builds on an unapproved spec.
+def _pushed_branches() -> list[str]:
+    """Local branches being pushed, per the pre-push hook protocol.
 
-    Fails *open*, unlike `_ensure_kb_pushed` above. That asymmetry is deliberate:
-    the kb-pointer check guards data integrity, where a dangling pointer breaks
-    every downstream checkout, so it must fail closed. This one guards a process
-    norm, and a parse hiccup that silently bricks every push in the repo is worse
-    than a missed policy warning.
+    Git feeds one `<local ref> <local oid> <remote ref> <remote oid>` line per
+    ref on stdin. Reading it matters: `git push origin other-branch` pushes a
+    branch that is not checked out, so resolving the plan from HEAD would check
+    the wrong branch and let the gate be bypassed in an ordinary workflow.
 
-    Fail-open is loud, though. A gate that degrades silently is indistinguishable
-    from one that was never wired up, which is exactly how the `reins`-era hooks
-    went unnoticed for weeks — so the exception path names what did not run.
+    Returns empty when invoked outside the hook (no stdin), where the caller
+    falls back to the checked-out branch.
     """
-    branch = plan_path = "<unknown>"
+    if sys.stdin is None or sys.stdin.isatty():
+        return []
     try:
-        kb_dir = get_kb_dir(root)
-        if kb_dir is None or not (kb_dir / ".git").exists():
-            return 0
+        data = sys.stdin.read()
+    except (OSError, ValueError):
+        return []
 
-        if get_mode(root) in ("incognito", "disabled"):
-            return 0
-
-        branch = current_branch(cwd=root)
-        if not branch:
-            return 0
-
-        scope = kb_scope(root)
-        plan = branch_doc_path("plan", kb_dir / scope, branch)
-        if not plan.is_file():
-            return 0
-        plan_path = str(plan.relative_to(root))
-
-        value = declared_spec(plan.read_text())
-
-        if value is None:
-            return _block(
-                plan_path,
-                "its '**Spec:**' field is missing or still the template placeholder",
-                "Declare the spec this plan implements, or 'N/A' if it has none.",
-            )
-        if is_not_applicable(value):
-            return 0
-
-        res = resolve_ref(value, scope, tracked_paths(kb_dir))
-        if res.ambiguous:
-            return _block(
-                plan_path,
-                f"'**Spec:** {value}' is ambiguous — it matches "
-                f"{', '.join(res.ambiguous)}",
-                "Use a path that names exactly one doc.",
-            )
-        if res.path is None:
-            return _block(
-                plan_path,
-                f"'**Spec:** {value}' matches no git-tracked kb path",
-                "Fix the path, or commit and publish the doc it names.",
-            )
-
-        reason = unapproved_reason(res.path, kb_dir)
-        if reason:
-            slug = res.path.rsplit("/", 1)[-1].removesuffix(".md")
-            return _block(
-                plan_path,
-                f"its spec '{res.path}' is {reason}",
-                f"Check the review: rcorn review status {slug}",
-            )
-
-        return 0
-    except Exception as e:
-        print(
-            "\n⚠️  Spec-approval gate did not run"
-            f" (branch {branch}, plan {plan_path}): {e}\n"
-            "   Allowing the push — this gate fails open by design — but the\n"
-            "   review lane was NOT checked for this push.\n",
-            flush=True,
-        )
-        return 0
-
-
-def _block(plan_path: str, problem: str, remedy: str) -> int:
-    print(
-        f"\n❌ Push blocked: {plan_path} builds on an unapproved spec.\n\n"
-        f"   {problem}.\n\n"
-        f"   {remedy}\n"
-        "   Bypass this one push with: git push --no-verify\n",
-        flush=True,
-    )
-    return 1
+    branches: list[str] = []
+    for line in data.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        local_ref, local_oid = parts[0], parts[1]
+        # Deletions carry a null oid and the literal "(delete)" local ref;
+        # there is no plan to check for a branch being removed.
+        if local_ref == "(delete)" or local_oid == _NULL_OID:
+            continue
+        if local_ref.startswith("refs/heads/"):
+            branches.append(local_ref.removeprefix("refs/heads/"))
+    return branches

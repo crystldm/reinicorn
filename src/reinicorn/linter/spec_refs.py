@@ -73,11 +73,28 @@ class Resolution:
 
 
 def tracked_paths(kb_dir: Path) -> frozenset[str]:
-    """kb-relative paths git tracks, or an empty set if the kb is not a repo."""
+    """kb-relative paths git tracks.
+
+    Empty set when the kb is not a git repo at all — there is nothing to
+    resolve against, and callers treat that as "no references resolve".
+
+    A genuine git failure raises instead. Returning an empty set there would
+    make every declared spec look unresolved, which reads as a policy violation:
+    the push gate would block with a misleading message and never reach its
+    documented loud fail-open path.
+    """
     r = run_git("ls-files", "-z", check=False, cwd=kb_dir)
-    if r.returncode != 0:
+    if r.returncode == 0:
+        return frozenset(p for p in r.stdout.split("\0") if p)
+
+    # Only now pay for a second call, to tell the two cases apart. Testing for
+    # a `.git` entry would be wrong: the kb is a submodule in a real checkout
+    # but an ordinary tracked directory in others, and both are enumerable.
+    probe = run_git("rev-parse", "--is-inside-work-tree", check=False, cwd=kb_dir)
+    if probe.returncode != 0:
         return frozenset()
-    return frozenset(p for p in r.stdout.split("\0") if p)
+
+    raise RuntimeError(f"git ls-files failed in {kb_dir}: {(r.stderr or '').strip()}")
 
 
 def _drafts_variant(ref: str) -> str | None:
