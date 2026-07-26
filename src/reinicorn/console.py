@@ -71,3 +71,21 @@ def next_step(*commands: str) -> None:
 
 def header(msg: str) -> None:
     print(_c(_BOLD, msg))
+
+
+def confirm(prompt: str) -> bool:
+    """Ask a y/N question on an interactive TTY; default No.
+
+    Non-interactive (agent/CI) callers get False without blocking — a prompt
+    that will never be answered must not hang the process. Such callers are
+    expected to pass an explicit flag (e.g. --force) instead of relying on this.
+    """
+    stdin_tty = hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+    if not (_is_tty() and stdin_tty):
+        return False
+    print(f"{_pad()}{prompt} [y/N] ", end="", file=sys.stderr, flush=True)
+    try:
+        answer = input()
+    except EOFError:
+        return False
+    return answer.strip().lower() in {"y", "yes"}
