@@ -457,6 +457,12 @@ def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) 
             f"maintain, write, and admin roles bypass it at {manual}"
         )
         return
+    if not isinstance(actors, list) or not all(isinstance(a, dict) for a in actors):
+        console.warn(
+            "doc-review ruleset is installed but returned an unreadable "
+            f"configuration — verify the maintain/write/admin bypass at {manual}"
+        )
+        return
     installed = {
         (a.get("actor_id"), a.get("actor_type"), a.get("bypass_mode"))
         for a in actors

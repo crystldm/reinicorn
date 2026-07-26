@@ -716,6 +716,34 @@ def test_setup_ruleset_detail_non_dict_json(env, monkeypatch, capsys):
     assert "settings/rules" in out
 
 
+def test_setup_ruleset_bypass_actors_non_list(env, monkeypatch, capsys):
+    """bypass_actors present but not a list (e.g., a dict or string) warns
+    rather than crashing."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": {"not": "a list"},
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
+
+
+def test_setup_ruleset_bypass_actors_list_with_non_dict_entries(env, monkeypatch, capsys):
+    """bypass_actors is a list but contains non-dict entries (e.g., strings or
+    numbers) warns rather than crashing."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), "not a dict", 42, _role(4)],
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
+
+
 def test_setup_no_secret_hint_when_ruleset_not_applied(env, monkeypatch, capsys):
     """Unprotected kb main: the runner-token fallback pushes fine, so the
     secret hint would be noise."""
