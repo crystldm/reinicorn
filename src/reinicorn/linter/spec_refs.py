@@ -1,0 +1,154 @@
+"""Resolve doc references against the kb's git-tracked paths.
+
+Shared by the ``kb/draft-refs`` lint rule and the ``_pre-push`` approval gate so
+the two can never disagree about whether a reference is approved.
+
+Resolution is against ``git ls-files``, not the filesystem. That is cheaper than
+stat-ing candidates and disposes of two problems by construction:
+
+* **Containment.** ``git ls-files`` only ever emits repo-relative paths under the
+  kb root, so a reference containing ``..``, an absolute path, or anything
+  outside the kb simply fails to match. No caller-supplied string is joined onto
+  a filesystem path before it has been proven to name a tracked kb file.
+* **Untracked files.** A doc that exists on disk but was never committed is not a
+  real reference. Git is the authority the review lane runs on, so the check
+  agrees with what a reviewer sees on the branch.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from reinicorn.config import KB_DIR_NAME
+from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
+from reinicorn.docmeta import (
+    FIELD_SPEC,
+    FIELD_STATUS,
+    STATUS_DRAFT,
+    STATUS_IN_REVIEW,
+    get_field,
+)
+from reinicorn.git import run_git
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+# Placeholder text the plan template ships with; a plan still carrying it has not
+# declared anything.
+SPEC_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
+
+# Explicit opt-out. Case-insensitive so "n/a" and "N/A" both count.
+SPEC_NOT_APPLICABLE = "n/a"
+
+# Anchor the prose matcher on a known doc-type directory rather than on the "kb/"
+# prefix. That accepts all three path styles while bounding false positives to
+# strings that actually look like doc references.
+_DOC_DIRS = "|".join(
+    re.escape(d)
+    for d in sorted({dt.dir_path for dt in REGISTRY.values() if dt.dir_path != "."})
+)
+REF_RE = re.compile(
+    rf"(?<![\w/])(?:{KB_DIR_NAME}/)?(?:[\w.-]+/)*(?:{_DOC_DIRS})/[\w./-]+\.md"
+)
+
+_UNAPPROVED_STATUSES = frozenset({STATUS_DRAFT, STATUS_IN_REVIEW})
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """Outcome of resolving one reference string.
+
+    Exactly one of ``path`` / ``ambiguous`` is meaningful:
+
+    * ``path`` set          — resolved to a single tracked kb-relative path.
+    * ``ambiguous`` set     — candidate forms hit more than one distinct tracked
+                              path; the caller must not pick a winner.
+    * both empty            — unresolved; no candidate form names a tracked path.
+    """
+
+    path: str | None = None
+    ambiguous: tuple[str, ...] = ()
+
+
+def tracked_paths(kb_dir: Path) -> frozenset[str]:
+    """kb-relative paths git tracks, or an empty set if the kb is not a repo."""
+    r = run_git("ls-files", "-z", check=False, cwd=kb_dir)
+    if r.returncode != 0:
+        return frozenset()
+    return frozenset(p for p in r.stdout.split("\0") if p)
+
+
+def _drafts_variant(ref: str) -> str | None:
+    """``<dir>/<file>.md`` -> ``<dir>/drafts/<file>.md``, or None if already there."""
+    head, sep, tail = ref.rpartition("/")
+    if not sep or head.endswith(f"/{DRAFTS_DIR_NAME}") or head == DRAFTS_DIR_NAME:
+        return None
+    return f"{head}/{DRAFTS_DIR_NAME}/{tail}"
+
+
+def resolve_ref(ref: str, scope: str, tracked: frozenset[str]) -> Resolution:
+    """Resolve one reference string against the tracked-path set.
+
+    ``scope`` is the repo-scope directory of the doc doing the referencing, used
+    for the scope-relative form. Candidate forms, all looked up exactly:
+
+    1. ``kb/``-prefixed  — strip the prefix.
+    2. kb-relative       — ``reinicorn/specs/x.md``, as written.
+    3. scope-relative    — ``specs/x.md`` -> ``<scope>/specs/x.md``.
+
+    The drafts fallback runs only after every exact form misses, so a reference
+    to a genuinely approved ``specs/x.md`` still resolves to the approved doc
+    even when a same-named draft is tracked too.
+    """
+    ref = ref.strip().strip("`")
+    if not ref:
+        return Resolution()
+
+    forms = []
+    prefix = f"{KB_DIR_NAME}/"
+    if ref.startswith(prefix):
+        forms.append(ref[len(prefix):])
+    else:
+        forms.append(ref)
+        if scope:
+            forms.append(f"{scope}/{ref}")
+
+    for candidates in (forms, [v for f in forms if (v := _drafts_variant(f))]):
+        hits = {c for c in candidates if c in tracked}
+        if len(hits) == 1:
+            return Resolution(path=next(iter(hits)))
+        if len(hits) > 1:
+            return Resolution(ambiguous=tuple(sorted(hits)))
+
+    return Resolution()
+
+
+def unapproved_reason(path: str, kb_dir: Path) -> str | None:
+    """Why ``path`` is unapproved, or None when it is fine to build on.
+
+    ``path`` must already have been proven tracked by :func:`resolve_ref`; only
+    then is it safe to read.
+    """
+    if f"/{DRAFTS_DIR_NAME}/" in f"/{path}":
+        return "drafts-annex doc (unapproved; building on a draft needs sign-off)"
+    status = get_field((kb_dir / path).read_text(), FIELD_STATUS)
+    if status in _UNAPPROVED_STATUSES:
+        return f"status '{status}' (approval pending)"
+    return None
+
+
+def declared_spec(text: str) -> str | None:
+    """The plan's declared ``**Spec:**`` value, or None when absent/placeholder."""
+    value = get_field(text, FIELD_SPEC)
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or SPEC_PLACEHOLDER_RE.match(value):
+        return None
+    return value
+
+
+def is_not_applicable(value: str) -> bool:
+    return value.strip().strip("`").lower() == SPEC_NOT_APPLICABLE

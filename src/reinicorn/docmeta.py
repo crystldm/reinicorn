@@ -16,6 +16,7 @@ FIELD_STATUS = "Status"
 FIELD_REVIEW_PR = "Review-PR"
 FIELD_APPROVED_BY = "Approved-by"
 FIELD_REVIEW_CANCELLED = "Review-cancelled"
+FIELD_SPEC = "Spec"
 
 STATUS_DRAFT = "draft"
 STATUS_IN_REVIEW = "in-review"

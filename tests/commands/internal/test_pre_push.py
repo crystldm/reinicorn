@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from reinicorn.commands.internal.pre_push import _ensure_kb_pushed
-from reinicorn.git import run_git
+from reinicorn.commands.internal.pre_push import (
+    _ensure_kb_pushed,
+    _ensure_plan_spec_approved,
+)
+from reinicorn.git import run_git, sanitize_branch
 
 
 class TestEnsureKbPushed:
@@ -131,7 +134,9 @@ def test_cmd_pre_push_does_not_dirty_kb(submodule_repo: Path, monkeypatch):
     slug = "unknown"
     active = kb / slug / "exec-plans" / "active" / "feature-test"
     active.mkdir(parents=True)
-    (active / "plan.md").write_text("# plan\n")
+    # Spec: N/A so the review-lane gate passes — this test is about the kb
+    # staying clean, not about the gate.
+    (active / "plan.md").write_text("# plan\n\n**Spec:** N/A\n**Status:** planning\n")
 
     # Commit the new plan inside the kb so the kb starts clean.
     run_git("add", "-A", cwd=kb)
@@ -156,3 +161,168 @@ def test_cmd_pre_push_does_not_dirty_kb(submodule_repo: Path, monkeypatch):
     assert before == after, (
         f"pre-push dirtied kb:\nbefore={before!r}\nafter={after!r}"
     )
+
+
+class TestEnsurePlanSpecApproved:
+    """The review-lane gate: refuse a push whose plan builds on an unapproved spec."""
+
+    SCOPE = "testproject"
+
+    def _setup(
+        self, repo: Path, branch: str = "feat/thing", *,
+        plan: str | None = None, spec: tuple[str, str] | None = None,
+    ) -> None:
+        """Put the parent on `branch` and stage an optional plan + spec in the kb."""
+        run_git("checkout", "-q", "-b", branch, cwd=repo)
+        kb = repo / "kb"
+
+        if spec is not None:
+            rel, status = spec
+            path = kb / self.SCOPE / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"# Doc\n\n**Status:** {status}\n\n## Problem\n\nbody\n")
+
+        if plan is not None:
+            pdir = kb / self.SCOPE / "exec-plans" / "active" / sanitize_branch(branch)
+            pdir.mkdir(parents=True, exist_ok=True)
+            (pdir / "plan.md").write_text(plan)
+
+        run_git("add", "-A", cwd=kb)
+
+    @staticmethod
+    def _plan(spec_value: str) -> str:
+        return f"# Plan\n\n**Spec:** {spec_value}\n**Status:** planning\n\n## Goal\n\nx\n"
+
+    def _run(self, repo: Path) -> int:
+        with patch(
+            "reinicorn.commands.internal.pre_push.kb_scope", return_value=self.SCOPE
+        ):
+            return _ensure_plan_spec_approved(repo)
+
+    def test_no_kb_dir_allows(self, tmp_path: Path):
+        with patch(
+            "reinicorn.commands.internal.pre_push.get_kb_dir", return_value=None
+        ):
+            assert _ensure_plan_spec_approved(tmp_path) == 0
+
+    def test_no_plan_for_branch_allows(self, submodule_repo: Path):
+        self._setup(submodule_repo)
+        assert self._run(submodule_repo) == 0
+
+    def test_not_applicable_allows(self, submodule_repo: Path):
+        self._setup(submodule_repo, plan=self._plan("N/A"))
+        assert self._run(submodule_repo) == 0
+
+    def test_approved_spec_allows(self, submodule_repo: Path):
+        self._setup(
+            submodule_repo,
+            plan=self._plan("specs/ok.md"),
+            spec=("specs/ok.md", "approved"),
+        )
+        assert self._run(submodule_repo) == 0
+
+    def test_in_review_spec_blocks(self, submodule_repo: Path, capsys):
+        self._setup(
+            submodule_repo,
+            plan=self._plan("specs/hot.md"),
+            spec=("specs/hot.md", "in-review"),
+        )
+        assert self._run(submodule_repo) == 1
+        out = capsys.readouterr().out
+        assert "Push blocked" in out
+        assert "specs/hot.md" in out
+        assert "rcorn review status hot" in out
+        assert "--no-verify" in out
+
+    def test_draft_spec_blocks(self, submodule_repo: Path, capsys):
+        self._setup(
+            submodule_repo,
+            plan=self._plan("specs/drafts/wip.md"),
+            spec=("specs/drafts/wip.md", "draft"),
+        )
+        assert self._run(submodule_repo) == 1
+        assert "drafts" in capsys.readouterr().out
+
+    def test_drafts_fallback_blocks_on_future_approved_path(
+        self, submodule_repo: Path, capsys
+    ):
+        """Citing the path the spec *will* have while it is still a draft."""
+        self._setup(
+            submodule_repo,
+            plan=self._plan("specs/wip.md"),
+            spec=("specs/drafts/wip.md", "in-review"),
+        )
+        assert self._run(submodule_repo) == 1
+        assert "specs/drafts/wip.md" in capsys.readouterr().out
+
+    def test_missing_spec_field_blocks(self, submodule_repo: Path, capsys):
+        """Omitting the field must not be a way to dodge the gate."""
+        self._setup(submodule_repo, plan="# Plan\n\n**Status:** planning\n\n## Goal\n\nx\n")
+        assert self._run(submodule_repo) == 1
+        assert "missing or still the template placeholder" in capsys.readouterr().out
+
+    def test_placeholder_spec_field_blocks(self, submodule_repo: Path):
+        self._setup(
+            submodule_repo,
+            plan=self._plan("[kb path to the spec this implements, or N/A]"),
+        )
+        assert self._run(submodule_repo) == 1
+
+    def test_unresolved_spec_blocks(self, submodule_repo: Path, capsys):
+        """Cannot determine approval is an error state, not a pass."""
+        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
+        assert self._run(submodule_repo) == 1
+        assert "matches no git-tracked kb path" in capsys.readouterr().out
+
+    def test_untracked_spec_blocks(self, submodule_repo: Path):
+        """A spec on disk but never staged does not satisfy the reference."""
+        self._setup(submodule_repo, plan=self._plan("specs/ghost.md"))
+        ghost = submodule_repo / "kb" / self.SCOPE / "specs" / "ghost.md"
+        ghost.parent.mkdir(parents=True, exist_ok=True)
+        ghost.write_text("# Ghost\n\n**Status:** approved\n")  # deliberately unstaged
+        assert self._run(submodule_repo) == 1
+
+    def test_ambiguous_spec_blocks(self, submodule_repo: Path, capsys):
+        self._setup(
+            submodule_repo,
+            plan=self._plan("specs/dup.md"),
+            spec=("specs/dup.md", "approved"),
+        )
+        top = submodule_repo / "kb" / "specs"
+        top.mkdir(parents=True, exist_ok=True)
+        (top / "dup.md").write_text("# Other\n\n**Status:** approved\n")
+        run_git("add", "-A", cwd=submodule_repo / "kb")
+        assert self._run(submodule_repo) == 1
+        assert "ambiguous" in capsys.readouterr().out
+
+    def test_disabled_mode_skips(self, submodule_repo: Path):
+        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
+        state = submodule_repo / ".reinicorn"
+        state.mkdir(exist_ok=True)
+        (state / "mode").write_text("disabled")
+        assert self._run(submodule_repo) == 0
+
+    def test_incognito_mode_skips(self, submodule_repo: Path):
+        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
+        state = submodule_repo / ".reinicorn"
+        state.mkdir(exist_ok=True)
+        (state / "mode").write_text("incognito")
+        assert self._run(submodule_repo) == 0
+
+    def test_exception_fails_open_and_says_so(self, submodule_repo: Path, capsys):
+        """Unlike _ensure_kb_pushed, a policy gate must not brick every push.
+
+        But it must be loud — a silently degraded gate is indistinguishable from
+        one that was never wired up.
+        """
+        self._setup(submodule_repo, plan=self._plan("specs/hot.md"))
+        with patch(
+            "reinicorn.commands.internal.pre_push.tracked_paths",
+            side_effect=RuntimeError("boom"),
+        ):
+            assert self._run(submodule_repo) == 0
+        out = capsys.readouterr().out
+        assert "Spec-approval gate did not run" in out
+        assert "boom" in out
+        assert "feat/thing" in out
+        assert "NOT checked" in out

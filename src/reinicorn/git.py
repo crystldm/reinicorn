@@ -223,10 +223,14 @@ def repo_root(quiet: bool = False) -> Path | None:
         return None
 
 
-def current_branch() -> str:
-    """Return the current branch name, or '' if detached."""
+def current_branch(cwd: Path | None = None) -> str:
+    """Return the current branch name, or '' if detached.
+
+    `cwd` defaults to the process working directory, which is what git hooks
+    give us; pass it explicitly when asking about a specific repo.
+    """
     try:
-        r = run_git("symbolic-ref", "--short", "HEAD")
+        r = run_git("symbolic-ref", "--short", "HEAD", cwd=cwd)
         return r.stdout.strip()
     except subprocess.CalledProcessError:
         return ""

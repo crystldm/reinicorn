@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from reinicorn.config import KB_DIR_NAME
-from reinicorn.git import explain_failure, repo_root, run_git
-from reinicorn.kb import get_kb_dir
+from reinicorn.config import KB_DIR_NAME, kb_scope
+from reinicorn.git import current_branch, explain_failure, repo_root, run_git
+from reinicorn.kb import branch_doc_path, get_kb_dir
+from reinicorn.linter.spec_refs import (
+    declared_spec,
+    is_not_applicable,
+    resolve_ref,
+    tracked_paths,
+    unapproved_reason,
+)
 from reinicorn.mode import get_mode
 
 if TYPE_CHECKING:
@@ -18,7 +25,10 @@ def cmd_pre_push() -> int:
         root = repo_root(quiet=True)
         if root is None:
             return 0
-        return _ensure_kb_pushed(root)
+        rc = _ensure_kb_pushed(root)
+        if rc != 0:
+            return rc
+        return _ensure_plan_spec_approved(root)
     except Exception as e:
         # Fail closed: this guard exists to stop a parent push that would leave
         # a dangling kb submodule pointer. If the check itself errors we cannot
@@ -84,3 +94,93 @@ def _ensure_kb_pushed(root: Path) -> int:
 
     print("\U0001f984 Kb pushed successfully.")
     return 0
+
+
+def _ensure_plan_spec_approved(root: Path) -> int:
+    """Block the push when this branch's plan builds on an unapproved spec.
+
+    Fails *open*, unlike `_ensure_kb_pushed` above. That asymmetry is deliberate:
+    the kb-pointer check guards data integrity, where a dangling pointer breaks
+    every downstream checkout, so it must fail closed. This one guards a process
+    norm, and a parse hiccup that silently bricks every push in the repo is worse
+    than a missed policy warning.
+
+    Fail-open is loud, though. A gate that degrades silently is indistinguishable
+    from one that was never wired up, which is exactly how the `reins`-era hooks
+    went unnoticed for weeks — so the exception path names what did not run.
+    """
+    branch = plan_path = "<unknown>"
+    try:
+        kb_dir = get_kb_dir(root)
+        if kb_dir is None or not (kb_dir / ".git").exists():
+            return 0
+
+        if get_mode(root) in ("incognito", "disabled"):
+            return 0
+
+        branch = current_branch(cwd=root)
+        if not branch:
+            return 0
+
+        scope = kb_scope(root)
+        plan = branch_doc_path("plan", kb_dir / scope, branch)
+        if not plan.is_file():
+            return 0
+        plan_path = str(plan.relative_to(root))
+
+        value = declared_spec(plan.read_text())
+
+        if value is None:
+            return _block(
+                plan_path,
+                "its '**Spec:**' field is missing or still the template placeholder",
+                "Declare the spec this plan implements, or 'N/A' if it has none.",
+            )
+        if is_not_applicable(value):
+            return 0
+
+        res = resolve_ref(value, scope, tracked_paths(kb_dir))
+        if res.ambiguous:
+            return _block(
+                plan_path,
+                f"'**Spec:** {value}' is ambiguous — it matches "
+                f"{', '.join(res.ambiguous)}",
+                "Use a path that names exactly one doc.",
+            )
+        if res.path is None:
+            return _block(
+                plan_path,
+                f"'**Spec:** {value}' matches no git-tracked kb path",
+                "Fix the path, or commit and publish the doc it names.",
+            )
+
+        reason = unapproved_reason(res.path, kb_dir)
+        if reason:
+            slug = res.path.rsplit("/", 1)[-1].removesuffix(".md")
+            return _block(
+                plan_path,
+                f"its spec '{res.path}' is {reason}",
+                f"Check the review: rcorn review status {slug}",
+            )
+
+        return 0
+    except Exception as e:
+        print(
+            "\n⚠️  Spec-approval gate did not run"
+            f" (branch {branch}, plan {plan_path}): {e}\n"
+            "   Allowing the push — this gate fails open by design — but the\n"
+            "   review lane was NOT checked for this push.\n",
+            flush=True,
+        )
+        return 0
+
+
+def _block(plan_path: str, problem: str, remedy: str) -> int:
+    print(
+        f"\n❌ Push blocked: {plan_path} builds on an unapproved spec.\n\n"
+        f"   {problem}.\n\n"
+        f"   {remedy}\n"
+        "   Bypass this one push with: git push --no-verify\n",
+        flush=True,
+    )
+    return 1
