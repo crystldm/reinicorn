@@ -9,11 +9,16 @@ from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.doc_types import REGISTRY
 from reinicorn.git import (
+    GitFailure,
+    classify_result,
+    explain_failure,
     file_transport_args,
     remote_url,
     repo_root,
+    report_failure,
     run_git,
     sanitize_branch,
+    url_protocol,
 )
 
 if TYPE_CHECKING:
@@ -131,6 +136,10 @@ def commit_kb(root: Path, message: str, *, kb_dir: Path | None = None) -> bool:
     if r.returncode == 0:
         stage_kb_pointer(root, resolved)
         return True
+    # Distinct from the "nothing staged" return above: there WAS work and it
+    # did not get saved. Returning False silently made that look identical to
+    # a no-op, so a doc could appear written and never be committed.
+    report_failure("commit the kb", r, warn=True)
     return False
 
 
@@ -148,101 +157,62 @@ def push_main_with_retry(kb_dir: Path) -> subprocess.CompletedProcess[str]:
     return push
 
 
-_AUTH_MARKERS = (
-    "could not read username",
-    "could not read password",
-    "permission denied (publickey)",
-    "authentication failed",
-    "invalid username or password",
-    "terminal prompts disabled",
-)
-_NON_FF_MARKERS = ("non-fast-forward", "fetch first")
-_PROTECTED_MARKERS = ("gh006", "protected branch")
-
-
-def classify_push_failure(stderr: str) -> str:
-    """Why git rejected a push: 'auth', 'non-fast-forward', 'protected', 'unknown'.
-
-    Matched case-insensitively against git's stderr. 'unknown' is a real answer,
-    not a fallback bucket to guess from — see `report_push_failure`.
-    """
-    text = stderr.lower()
-    # Auth first: a credential failure can be reported alongside a rejected ref,
-    # and it is the diagnosis that changes what the user should do next.
-    if any(m in text for m in _AUTH_MARKERS):
-        return "auth"
-    if any(m in text for m in _NON_FF_MARKERS):
-        return "non-fast-forward"
-    if any(m in text for m in _PROTECTED_MARKERS):
-        return "protected"
-    return "unknown"
-
-
-def _remote_protocol(url: str) -> str:
-    if url.startswith("https://") or url.startswith("http://"):
-        return "https"
-    if url.startswith("ssh://") or "@" in url.split("/")[0]:
-        return "ssh"
-    if url.startswith("file://") or url.startswith("/"):
-        return "local"
-    return "unknown"
-
-
-def report_push_failure(
-    push: subprocess.CompletedProcess[str], kb_dir: Path,
-) -> None:
-    """Print an error and next step matched to *why* the kb push failed.
-
-    Shared by `kb publish` and the review lane so the two cannot drift. When the
-    failure cannot be classified, git's stderr is printed verbatim: a wrong
-    diagnosis costs more than no diagnosis, because an agent will act on it.
-    """
-    from reinicorn.kb_remote import adapt_url_to_git_protocol
-
-    stderr = (push.stderr or "").strip()
-    kind = classify_push_failure(stderr)
-    url = remote_url(kb_dir)
-    where = f"  remote: {url or '(none)'} ({_remote_protocol(url)})"
-
+def _push_detail(kind: str, url: str) -> list[str]:
+    """Kb-vocabulary context lines for a push failure, on top of git's own."""
+    lines = [f"remote: {url or '(none)'} ({url_protocol(url)})"]
     if kind == "non-fast-forward":
-        console.error(
-            "Publish failed — kb has conflicting changes. "
-            "Resolve any conflicts in kb/, then retry."
-        )
-        console.next_step("rcorn kb publish")
-        return
+        lines.append("kb has conflicting changes. Resolve any conflicts in kb/, "
+                     "then retry.")
+    elif kind == "protected":
+        lines.append("kb main is protected — the review lane owns this path.")
+    return lines
 
+
+def explain_push_failure(push: GitFailure, kb_dir: Path) -> list[str]:
+    """Message lines for a failed kb push, without printing them.
+
+    Splits from `report_push_failure` because the review lane raises its
+    diagnosis rather than printing it.
+    """
+    kind = classify_result(push)
+    return explain_failure(
+        "push kb main", push, detail=_push_detail(kind, remote_url(kb_dir)),
+    )
+
+
+def push_next_steps(kind: str, kb_dir: Path) -> list[str]:
+    """The commands that actually move a stuck kb push forward.
+
+    Never suggests the command that just failed unless retrying is genuinely
+    the fix: an auth failure retried is an infinite loop, which is exactly how
+    the original misdiagnosis wasted a session.
+    """
+    if kind == "non-fast-forward":
+        return ["rcorn kb publish"]
+    if kind == "protected":
+        return ["rcorn review start <draft>"]
     if kind == "auth":
-        console.error("Publish failed — the kb remote rejected authentication.")
-        console.info(where)
-        for line in stderr.splitlines():
-            console.info(f"  git: {line}")
+        from reinicorn.kb_remote import adapt_url_to_git_protocol
+
+        url = remote_url(kb_dir)
         suggested = adapt_url_to_git_protocol(url) if url else ""
         if suggested and suggested != url:
-            console.next_step(f"rcorn kb git remote set-url origin {suggested}")
-        else:
-            console.next_step("gh auth status")
-        return
+            return [f"rcorn kb git remote set-url origin {suggested}"]
+        return ["gh auth status"]
+    return ["rcorn kb git status"]
 
-    if kind == "protected":
-        console.error(
-            "Publish failed — kb main is protected and rejected a direct push. "
-            "The review lane owns this path."
-        )
-        console.info(where)
-        for line in stderr.splitlines():
-            console.info(f"  git: {line}")
-        console.next_step("rcorn review start <draft>")
-        return
 
-    console.error(
-        "Publish failed — git rejected the push and the cause is not one "
-        "Reinicorn recognizes. Git's own output follows."
+def report_push_failure(push: GitFailure, kb_dir: Path) -> str:
+    """Print why the kb push failed and what to run next. Returns the kind.
+
+    Shared by `kb publish` and the review lane so the two cannot drift.
+    """
+    kind = classify_result(push)
+    report_failure(
+        "push kb main", push, detail=_push_detail(kind, remote_url(kb_dir)),
     )
-    console.info(where)
-    if stderr:
-        print(stderr)
-    console.next_step("rcorn kb git status")
+    console.next_step(*push_next_steps(kind, kb_dir))
+    return kind
 
 
 def branch_changed_files(branch: str, root: Path | None = None) -> set[str]:

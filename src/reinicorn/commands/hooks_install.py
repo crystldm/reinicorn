@@ -8,7 +8,7 @@ import stat
 from pathlib import Path
 
 from reinicorn import console
-from reinicorn.git import reinicorn_root, repo_root, run_git
+from reinicorn.git import GitError, reinicorn_root, repo_root, run_git
 
 MARKER = "# --- reinicorn hooks below ---"
 HOOK_NAMES = ("post-checkout", "post-merge", "pre-push")
@@ -44,7 +44,7 @@ def cmd_hooks_install() -> int:
         # is .git/worktrees/<name>, where git never reads hooks.
         r = run_git("rev-parse", "--git-common-dir")
         git_dir = Path(r.stdout.strip()).resolve()
-    except Exception:
+    except (GitError, FileNotFoundError):
         console.error("Not inside a git repository.")
         return 1
 

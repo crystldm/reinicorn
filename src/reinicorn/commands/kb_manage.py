@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.git import file_transport_args, run_git
+from reinicorn.git import file_transport_args, report_failure, run_git
 from reinicorn.kb import require_kb_dir
 from reinicorn.validation import is_valid_scope_name
 
@@ -115,7 +115,7 @@ def cmd_kb_remove_scope(
             run_git(*ft, "push", "-q", "origin", "HEAD", cwd=kb_dir)
             console.success("Pushed to remote")
         except subprocess.CalledProcessError as e:
-            console.warn(f"Could not push: {e.stderr or e}")
-            console.warn(f"Push the kb manually: cd {KB_DIR_NAME} && git push")
+            report_failure("push the kb", e, warn=True)
+            console.next_step("rcorn kb publish")
 
     return 0
