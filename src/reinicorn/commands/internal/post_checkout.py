@@ -10,6 +10,7 @@ from reinicorn.config import KB_DIR_NAME, config_get
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.identity import TICKET_PATTERN_KEY
 from reinicorn.kb import ensure_kb_on_main, get_kb_dir, stage_kb_pointer
+from reinicorn.kb_remote import apply_kb_remote_url, resolve_kb_remote_url
 from reinicorn.mode import hook_check
 
 
@@ -52,12 +53,22 @@ def cmd_post_checkout(args: list[str]) -> int:
     if kb_dir is not None:
         kb_empty = not kb_dir.is_dir() or not any(kb_dir.iterdir())
         if kb_empty:
+            # Resolve before creating the kb: afterwards the new clone is
+            # itself an "existing kb", and it carries the recorded URL we are
+            # trying to look past.
+            remote = resolve_kb_remote_url(root)
             with contextlib.suppress(Exception):
                 run_git(
                     "submodule", "update", "--init",
                     *_kb_reference_args(root),
                     KB_DIR_NAME, cwd=root, check=False,
                 )
+                # The clone above takes its URL from submodule.kb.url, which git
+                # copied out of .gitmodules — so it loses any local override and
+                # can land on a protocol this machine cannot authenticate with.
+                # Reads still work (objects are borrowed via --reference), so the
+                # breakage would only surface at publish time.
+                apply_kb_remote_url(kb_dir, remote)
                 # checkout main after init (avoid detached HEAD)
                 ensure_kb_on_main(kb_dir)
                 stage_kb_pointer(root, kb_dir)
