@@ -287,8 +287,17 @@ def test_excluded_filenames_are_not_docs(tmp_path, name):
     assert not fm.is_doc(tmp_path / name)
 
 
-def test_template_dir_contents_are_not_docs(tmp_path):
-    assert not fm.is_doc(tmp_path / "_template" / "plan.md")
+@pytest.mark.parametrize("parts", [
+    ("_template", "plan.md"),
+    ("tech-debt", "by-category", "security.md"),
+    ("references", "gh-pr-review-comments.md"),
+])
+def test_aggregate_dirs_hold_no_docs(tmp_path, parts):
+    assert not fm.is_doc(tmp_path.joinpath(*parts))
+
+
+def test_debt_doc_beside_the_by_category_rollup_is_a_doc(tmp_path):
+    assert fm.is_doc(tmp_path / "tech-debt" / "cli-hints.md")
 
 
 def test_ordinary_doc_is_a_doc(tmp_path):

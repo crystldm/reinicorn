@@ -82,7 +82,12 @@ EXCLUDED_FILENAMES = frozenset({
     "README.md", "index.md", "ATTRIBUTION.md", "quality-scores.md",
     "cleanup-queue.md", "progress.md", "decisions.md",
 })
-EXCLUDED_DIRS = frozenset({"_template"})
+# Directories holding aggregates rather than authored docs. `by-category`
+# rolls tech-debt items up per category (## High → ### SEC-08 …) and
+# `references` holds how-tos that no REGISTRY type claims — neither has an
+# author or a lifecycle, and the spec's Non-Goals rule out inventing a type
+# for them. Verified against the corpus 2026-07-27.
+EXCLUDED_DIRS = frozenset({"_template", "by-category", "references"})
 
 
 def _allowed_keys(doc_type: str | None) -> set[str]:
