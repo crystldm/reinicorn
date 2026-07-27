@@ -7,6 +7,7 @@ from pathlib import Path
 from reinicorn.linter.rules.cross_links import CrossLinksRule
 from reinicorn.linter.rules.docs_freshness import DocsFreshnessRule
 from reinicorn.linter.rules.draft_refs import DraftRefsRule
+from reinicorn.linter.rules.frontmatter import FrontmatterRule
 from reinicorn.linter.rules.plan_structure import PlanStructureRule
 from tests.conftest import doc_text
 
@@ -174,3 +175,54 @@ class TestDraftRefs:
         )
         rule = DraftRefsRule()
         assert rule.run(kb_repo) == []
+
+
+class TestFrontmatter:
+    def _spec(self, kb_repo: Path, name: str, text: str) -> Path:
+        d = kb_repo / "kb" / "testproject" / "specs"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_text(text)
+        return d / name
+
+    def test_valid_docs_pass(self, kb_repo: Path):
+        self._spec(kb_repo, "ok.md", doc_text(title="Ok", slug="ok"))
+        assert FrontmatterRule().run(kb_repo) == []
+
+    def test_missing_frontmatter_is_flagged(self, kb_repo: Path):
+        self._spec(kb_repo, "bare.md", "# Bare\n\n**Status:** draft\n")
+        diags = FrontmatterRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "bare.md" in diags[0]
+
+    def test_invalid_field_is_flagged(self, kb_repo: Path):
+        self._spec(kb_repo, "bad.md", doc_text(
+            title="Bad", slug="bad").replace("lifecycle: active",
+                                             "lifecycle: in-progress"))
+        diags = FrontmatterRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "lifecycle" in diags[0]
+
+    def test_reports_every_error_on_one_doc(self, kb_repo: Path):
+        self._spec(kb_repo, "worse.md", "---\ntype: spec\n---\n\n# Worse\n")
+        diags = FrontmatterRule().run(kb_repo)
+        assert len(diags) > 1
+
+    def test_non_docs_are_skipped(self, kb_repo: Path):
+        d = kb_repo / "kb" / "testproject" / "specs"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.md").write_text("# Spec Index\n\nNo provenance here.\n")
+        (kb_repo / "kb" / "testproject" / "README.md").write_text("# Readme\n")
+        assert FrontmatterRule().run(kb_repo) == []
+
+    def test_template_dir_is_skipped(self, kb_repo: Path):
+        # kb_repo's fixture ships a _template/plan.md with placeholders that
+        # are not valid values until plan create substitutes them.
+        assert FrontmatterRule().run(kb_repo) == []
+
+    def test_no_kb_dir_is_not_an_error(self, tmp_path: Path):
+        assert FrontmatterRule().run(tmp_path) == []
+
+    def test_diagnostic_names_the_file_and_line(self, kb_repo: Path):
+        self._spec(kb_repo, "bare.md", "# Bare\n")
+        diags = FrontmatterRule().run(kb_repo)
+        assert diags[0].startswith("kb/testproject/specs/bare.md:1")

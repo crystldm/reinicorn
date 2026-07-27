@@ -56,35 +56,70 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
       - name: Check for orphaned plans
         id: orphans
+        # Reads the exact branch from each plan's frontmatter and asks the
+        # remote for that literal ref. The previous version compared
+        # `basename` of the plan dir against remote heads run through
+        # `tr '/' '-'`; that mapping is lossy and many-to-one, so a deleted
+        # `feature/mvp` plan was not reported as orphaned whenever some
+        # unrelated `feature-mvp` branch existed.
         run: |
-          orphaned=""
+          uv run python - <<'PY' >> "$GITHUB_OUTPUT"
+          import pathlib
+          import secrets
+          import subprocess
 
-          # Plan dirs use sanitized branch names (slashes become dashes), so
-          # sanitize the remote heads the same way before comparing.
-          live_branches=$(git ls-remote --heads origin | awk '{print $2}' \
-            | sed 's|^refs/heads/||' | tr '/' '-')
+          from reinicorn import frontmatter
 
-          for plan_dir in kb/*/exec-plans/active/*/; do
-            [ -d "$plan_dir" ] || continue
-            branch_name=$(basename "$plan_dir")
-            [ "$branch_name" = "*" ] && continue
-            if ! printf '%s\n' "$live_branches" | grep -qxF "$branch_name"; then
-              orphaned="${orphaned}- \`${plan_dir}\` (branch \`${branch_name}\` no longer exists)\n"
-            fi
-          done
+          def one_line(value: str) -> str:
+              """Collapse to a single line. `branch:` is repository-controlled
+              YAML and a multiline scalar could otherwise emit its own
+              heredoc terminator into GITHUB_OUTPUT."""
+              return value.splitlines()[0].strip() if value.strip() else ""
 
-          if [ -n "$orphaned" ]; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            {
-              echo "list<<ORPHAN_EOF"
-              echo -e "$orphaned"
-              echo "ORPHAN_EOF"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-          fi
+          orphaned = []
+          for plan in sorted(pathlib.Path("kb").glob("*/exec-plans/active/*/plan.md")):
+              meta, _ = frontmatter.read(plan)
+              branch = one_line(str(meta.get("branch") or ""))
+              if not branch:
+                  orphaned.append(
+                      f"- `{plan.parent}/` (no `branch:` in frontmatter — cannot verify)"
+                  )
+                  continue
+              # check-ref-format rejects anything git would not accept as a
+              # branch, so a crafted value can never reach ls-remote.
+              if subprocess.run(
+                  ["git", "check-ref-format", "--branch", branch],
+                  capture_output=True, check=False,
+              ).returncode != 0:
+                  orphaned.append(
+                      f"- `{plan.parent}/` (invalid `branch:` value — cannot verify)"
+                  )
+                  continue
+              found = subprocess.run(
+                  ["git", "ls-remote", "--exit-code", "--heads", "origin",
+                   f"refs/heads/{branch}"],
+                  capture_output=True, check=False,
+              ).returncode == 0
+              if not found:
+                  orphaned.append(
+                      f"- `{plan.parent}/` (branch `{branch}` no longer exists)"
+                  )
+
+          if orphaned:
+              # Random delimiter: the payload embeds doc-derived text, and a
+              # fixed terminator is guessable by anything that can write a doc.
+              eof = f"ORPHAN_EOF_{secrets.token_hex(8)}"
+              print("found=true")
+              print(f"list<<{eof}")
+              print("\n".join(orphaned))
+              print(eof)
+          else:
+              print("found=false")
+          PY
 
       - name: Check quality score drift
         id: quality

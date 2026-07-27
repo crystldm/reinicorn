@@ -5,9 +5,10 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
+from reinicorn import frontmatter
 from reinicorn.doc_types import REGISTRY
 from reinicorn.git import repo_root, run_git
-from reinicorn.kb import branch_dir_name, get_kb_dir
+from reinicorn.kb import get_kb_dir
 from reinicorn.mode import hook_check
 
 if TYPE_CHECKING:
@@ -41,8 +42,7 @@ def _archive_stale_plans(root: Path) -> None:
         if not active_dir.is_dir():
             continue
 
-        # Build set of sanitized remote branch names for comparison
-        live_branches = _live_remote_branches_sanitized(root)
+        live_branches = _live_remote_branches(root)
         if live_branches is None:
             return  # error querying remote — don't archive anything
 
@@ -51,7 +51,15 @@ def _archive_stale_plans(root: Path) -> None:
                 continue
             if not any(entry.glob("*.md")):
                 continue
-            if entry.name in live_branches:
+            # Compare the exact branch from frontmatter. Comparing sanitized
+            # directory names instead is lossy and many-to-one — `/` and `\`
+            # both become `-` — so a deleted `feature/mvp` plan looked alive
+            # whenever an unrelated `feature-mvp` branch existed.
+            meta, _ = frontmatter.read(entry / "plan.md")
+            branch = str(meta.get("branch") or "").strip()
+            if not branch:
+                continue  # no recorded branch — never archive on a guess
+            if branch in live_branches:
                 continue
             # No remote branch maps to this dir — archive the plan
             with contextlib.suppress(Exception):
@@ -59,10 +67,12 @@ def _archive_stale_plans(root: Path) -> None:
                 cmd_plan_complete(entry.name, repo_scope=repo_dir.name)
 
 
-def _live_remote_branches_sanitized(root: Path) -> set[str] | None:
-    """Return the set of remote branch names, sanitized to match dir names.
+def _live_remote_branches(root: Path) -> set[str] | None:
+    """The set of remote branch names, exactly as git reports them.
 
-    Returns None on error so the caller can bail out safely (don't archive).
+    Not sanitized: the comparison is against the `branch:` field in plan
+    frontmatter, which holds the unmodified ref. Returns None on error so the
+    caller can bail out safely (don't archive).
     """
     try:
         result = run_git(
@@ -74,7 +84,7 @@ def _live_remote_branches_sanitized(root: Path) -> set[str] | None:
             name = line.strip().removeprefix("origin/")
             if " -> " in name:
                 continue  # skip HEAD pointer
-            branches.add(branch_dir_name(name))
+            branches.add(name)
         return branches
     except Exception:
         return None
