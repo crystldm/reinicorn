@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+from reinicorn import frontmatter as fm
 from reinicorn.commands.idea import cmd_idea
 
 
@@ -28,7 +29,7 @@ def test_idea_creates_file(kb_repo: Path, capsys):
     assert len(files) == 1
     content = files[0].read_text()
     assert "my cool idea for testing" in content
-    assert "**Status:** new" in content
+    assert fm.get(content, "status") == "new"
 
     # Verify commit_kb was called
     mock_commit.assert_called_once()

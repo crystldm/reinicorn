@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
 from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
-from reinicorn.docmeta import FIELD_STATUS, STATUS_IN_REVIEW, get_field
+from reinicorn.frontmatter import FIELD_STATUS, STATUS_IN_REVIEW, get
 from reinicorn.linter.rules.base import LintRule
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class DraftRefsRule(LintRule):
                         continue
                     target = project_root / ref
                     if target.is_file() and \
-                            get_field(target.read_text(), FIELD_STATUS) == STATUS_IN_REVIEW:
+                            get(target.read_text(), FIELD_STATUS) == STATUS_IN_REVIEW:
                         diagnostics.append(
                             f"{rel}:{n} — references in-review doc '{ref}' "
                             "(approval pending)"

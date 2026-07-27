@@ -13,6 +13,7 @@ from reinicorn.commands.doc_show import (
     cmd_retro_show,
 )
 from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
+from tests.conftest import doc_text
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +69,9 @@ def test_show_unknown_slug_lists_valid_slugs(kb_repo, monkeypatch, capsys):
 
 def test_list_shows_count_slug_title_status(kb_repo, monkeypatch, capsys):
     monkeypatch.chdir(kb_repo)
-    _write_spec(kb_repo, "a-spec", "# Alpha Spec\n\n**Status:** approved\n")
+    _write_spec(kb_repo, "a-spec", doc_text(
+        title="Alpha Spec", slug="a-spec", status="approved",
+        body="\n# Alpha Spec\n"))
     assert cmd_doc_list("spec") == 0
     out = capsys.readouterr().out
     assert "specs: 1 total" in out

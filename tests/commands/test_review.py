@@ -10,8 +10,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import reinicorn.commands.review as review_cmds
+from reinicorn import frontmatter as fm
 from reinicorn.git import run_git
 from reinicorn.review import candidate_matches_draft, resolve_draft
+from tests.conftest import doc_text
 
 _PR_URL = "https://github.com/owner/kb/pull/7"
 _BRANCH = "review/testproject/spec-x"
@@ -32,18 +34,10 @@ def _draft(parent: Path, slug: str = "x") -> Path:
     d = kb / "testproject" / "specs" / "drafts"
     d.mkdir(parents=True, exist_ok=True)
     f = d / f"{slug}.md"
-    f.write_text(
-        f"# {slug}\n"
-        "\n"
-        "**Date:** 2026-01-01\n"
-        "**Author:** tester\n"
-        "**Status:** draft\n"
-        "**Origin:** human\n"
-        "\n"
-        "## Problem\n"
-        "\n"
-        "body\n"
-    )
+    f.write_text(doc_text(
+        title=slug, slug=slug, author="tester", origin="human",
+        body=f"\n# {slug}\n\n## Problem\n\nbody\n",
+    ))
     run_git("add", "-A", cwd=kb)
     run_git("commit", "-q", "-m", f"draft {slug}", cwd=kb)
     run_git("push", "-q", "origin", "main", cwd=kb)
@@ -98,12 +92,12 @@ def test_start_happy_path(env: Path, monkeypatch, capsys):
     assert calls["reviewers"] == ["alice"]
 
     text = (env / "kb/testproject/specs/drafts/x.md").read_text()
-    assert "**Status:** in-review" in text
-    assert f"**Review-PR:** {_PR_URL}" in text
+    assert fm.get(text, "status") == "in-review"
+    assert fm.get(text, "review_pr") == _PR_URL
 
     cand = _remote_show(env.parent / "kb-remote", _BRANCH, "testproject/specs/x.md")
     assert cand is not None
-    assert "**Status:** in-review" in cand
+    assert fm.get(cand, "status") == "in-review"
 
     # The stamp commit is published, not just committed locally —
     # teammates and `kb status` must see the in-review state.
@@ -111,7 +105,7 @@ def test_start_happy_path(env: Path, monkeypatch, capsys):
         env.parent / "kb-remote", "main", "testproject/specs/drafts/x.md"
     )
     assert main_draft is not None
-    assert "**Status:** in-review" in main_draft
+    assert fm.get(main_draft, "status") == "in-review"
 
 
 def test_start_without_gh_pushes_ref_and_prints_pull_url(env: Path, monkeypatch, capsys):
@@ -125,7 +119,7 @@ def test_start_without_gh_pushes_ref_and_prints_pull_url(env: Path, monkeypatch,
     assert "next: rcorn review link x <pr-url>" in out
 
     text = (env / "kb/testproject/specs/drafts/x.md").read_text()
-    assert "**Status:** in-review" in text
+    assert fm.get(text, "status") == "in-review"
     assert "Review-PR" not in text
 
     assert _remote_show(env.parent / "kb-remote", _BRANCH, "testproject/specs/x.md") is not None
@@ -184,8 +178,8 @@ def test_link_stamps_status_and_pr(env: Path, capsys):
     assert review_cmds.cmd_review_link("x", _PR_URL) == 0
 
     text = draft.read_text()
-    assert "**Status:** in-review" in text
-    assert f"**Review-PR:** {_PR_URL}" in text
+    assert fm.get(text, "status") == "in-review"
+    assert fm.get(text, "review_pr") == _PR_URL
     assert f"Linked {_PR_URL}" in capsys.readouterr().out
 
     msg = run_git("log", "-1", "--format=%s", cwd=env / "kb").stdout.strip()
@@ -196,7 +190,7 @@ def test_link_stamps_status_and_pr(env: Path, capsys):
         env.parent / "kb-remote", "main", "testproject/specs/drafts/x.md"
     )
     assert main_draft is not None
-    assert f"**Review-PR:** {_PR_URL}" in main_draft
+    assert fm.get(main_draft, "review_pr") == _PR_URL
 
 
 def test_link_resyncs_candidate_so_merge_guard_does_not_trip(env: Path, capsys):
@@ -254,9 +248,9 @@ def test_merge_gh_approved_lands_doc(env: Path, monkeypatch, capsys):
 
     final = _remote_show(remote, "main", "testproject/specs/x.md")
     assert final is not None
-    assert "**Status:** approved" in final
-    assert "**Approved-by:** alice" in final
-    assert f"**Review-PR:** {_PR_URL}" in final
+    assert fm.get(final, "status") == "approved"
+    assert fm.get(final, "approved_by") == "alice"
+    assert fm.get(final, "review_pr") == _PR_URL
     assert _remote_show(remote, "main", "testproject/specs/drafts/x.md") is None
 
     # The post-merge pull fast-forwarded the LOCAL kb cleanly (the start
@@ -265,7 +259,7 @@ def test_merge_gh_approved_lands_doc(env: Path, monkeypatch, capsys):
     kb = env / "kb"
     assert not (kb / "testproject/specs/drafts/x.md").exists()
     local_final = (kb / "testproject/specs/x.md").read_text()
-    assert "**Status:** approved" in local_final
+    assert fm.get(local_final, "status") == "approved"
     porcelain = run_git("status", "--porcelain", cwd=kb).stdout.strip()
     assert porcelain == ""
 
@@ -345,7 +339,7 @@ def test_merge_solo_repo_self_review_confirmed(env: Path, monkeypatch, capsys):
     assert "approved and landed" in out
     landed = _remote_show(remote, "main", "testproject/specs/x.md")
     assert landed is not None
-    assert "**Approved-by:** solomaint (self-reviewed)" in landed
+    assert fm.get(landed, "approved_by") == "solomaint (self-reviewed)"
 
 
 def test_merge_solo_repo_declined_offers_force(env: Path, monkeypatch, capsys):
@@ -391,7 +385,7 @@ def test_merge_force_without_approval_stamps_self_reviewed(env: Path, monkeypatc
     assert review_cmds.cmd_review_merge("x", force=True) == 0
     landed = _remote_show(remote, "main", "testproject/specs/x.md")
     assert landed is not None
-    assert "**Approved-by:** forcer (self-reviewed)" in landed
+    assert fm.get(landed, "approved_by") == "forcer (self-reviewed)"
 
 
 def test_merge_force_bypasses_divergence(env: Path, monkeypatch, capsys):
@@ -477,9 +471,9 @@ def test_cancel_closes_pr_deletes_ref_and_restores_draft(env: Path, monkeypatch,
     assert r.returncode != 0  # ref gone from the remote
 
     text = draft.read_text()
-    assert "**Status:** draft" in text
-    assert f"**Review-cancelled:** {date.today().isoformat()}" in text
-    assert f"**Review-PR:** {_PR_URL}" in text  # gardening trail retained
+    assert fm.get(text, "status") == "draft"
+    assert fm.get(text, "review_cancelled") == date.today()
+    assert fm.get(text  , "review_pr") == _PR_URL# gardening trail retained
 
     assert "review cancelled — x back to draft" in capsys.readouterr().out
 
@@ -497,12 +491,12 @@ def test_restart_after_cancel_clears_cancelled_marker(env: Path, monkeypatch, ca
     _gh(monkeypatch, gh_pr_create=_pr_create, gh_pr_view=fake_view, gh_pr_close=MagicMock())
     assert review_cmds.cmd_review_start("x", []) == 0
     assert review_cmds.cmd_review_cancel("x") == 0
-    assert "Review-cancelled" in draft.read_text()
+    assert fm.get(draft.read_text(), "review_cancelled") is not None
 
     assert review_cmds.cmd_review_start("x", []) == 0
     text = draft.read_text()
     assert "Review-cancelled" not in text
-    assert "**Status:** in-review" in text
+    assert fm.get(text, "status") == "in-review"
 
 
 # ── status ───────────────────────────────────────────────────
@@ -516,16 +510,10 @@ def test_status_zero_open(env: Path, capsys):
 def test_status_lists_in_review_draft_with_url(env: Path, capsys):
     d = env / "kb" / "testproject" / "specs" / "drafts"
     d.mkdir(parents=True)
-    (d / "x.md").write_text(
-        "# x\n"
-        "\n"
-        "**Date:** 2026-01-01\n"
-        "**Author:** tester\n"
-        "**Status:** in-review\n"
-        f"**Review-PR:** {_PR_URL}\n"
-        "\n"
-        "body\n"
-    )
+    (d / "x.md").write_text(doc_text(
+        title="x", slug="x", author="tester", status="in-review",
+        review_pr=_PR_URL, body="\n# x\n\nbody\n",
+    ))
     assert review_cmds.cmd_review_status() == 0
     out = capsys.readouterr().out
     assert "doc reviews: 1" in out
@@ -536,9 +524,10 @@ def test_status_counts_plain_drafts_without_open_label(env: Path, capsys):
     """Nonzero header is a bare count — it includes plain drafts, not just reviews."""
     d = env / "kb" / "testproject" / "specs" / "drafts"
     d.mkdir(parents=True)
-    (d / "wip.md").write_text("# wip\n\n**Status:** draft\n\nbody\n")
+    (d / "wip.md").write_text(doc_text(title="wip", slug="wip", body="\n# wip\n\nbody\n"))
     (d / "hot.md").write_text(
-        f"# hot\n\n**Status:** in-review\n**Review-PR:** {_PR_URL}\n\nbody\n"
+        doc_text(title="hot", slug="hot", status="in-review",
+                 review_pr=_PR_URL, body="\n# hot\n\nbody\n")
     )
     assert review_cmds.cmd_review_status() == 0
     out = capsys.readouterr().out
@@ -725,7 +714,8 @@ def test_merge_refuses_slug_collision(env: Path, monkeypatch, capsys):
     silently deleting the never-reviewed draft."""
     _draft(env)
     kb = env / "kb"
-    (kb / "testproject/specs/x.md").write_text("# Old X\n\n**Status:** approved\n")
+    (kb / "testproject/specs/x.md").write_text(
+        doc_text(title="Old X", status="approved", body="\n# Old X\n"))
     run_git("add", "-A", cwd=kb)
     run_git("commit", "-q", "-m", "old landed doc", cwd=kb)
     run_git("push", "-q", "origin", "main", cwd=kb)
@@ -755,7 +745,7 @@ def test_merge_after_ci_cleanup_syncs_local(env: Path, monkeypatch, capsys, tmp_
     final = sim / "testproject/specs/x.md"
     final.write_text(
         (sim / "testproject/specs/drafts/x.md").read_text().replace(
-            "**Status:** in-review", "**Status:** approved"
+            "status: in-review", "status: approved"
         )
     )
     run_git("rm", "-q", "testproject/specs/drafts/x.md", cwd=sim)
@@ -769,7 +759,7 @@ def test_merge_after_ci_cleanup_syncs_local(env: Path, monkeypatch, capsys, tmp_
     assert "already landed" in out
     # local kb synced: draft gone, approved doc present
     assert not (env / "kb/testproject/specs/drafts/x.md").exists()
-    assert "**Status:** approved" in (env / "kb/testproject/specs/x.md").read_text()
+    assert fm.get((env / "kb/testproject/specs/x.md").read_text(), "status") == "approved"
 
 
 def test_cancel_warns_when_gh_pr_lookup_fails(env: Path, monkeypatch, capsys):

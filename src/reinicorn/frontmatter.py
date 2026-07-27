@@ -46,6 +46,14 @@ STATUS_DRAFT = "draft"
 STATUS_IN_REVIEW = "in-review"
 STATUS_APPROVED = "approved"
 
+# Frontmatter keys the review lane stamps. Named because the lane reads and
+# writes them by constant, exactly as it did for the legacy bold labels.
+FIELD_STATUS = "status"
+FIELD_LIFECYCLE = "lifecycle"
+FIELD_REVIEW_PR = "review_pr"
+FIELD_APPROVED_BY = "approved_by"
+FIELD_REVIEW_CANCELLED = "review_cancelled"
+
 # Core fields every doc carries, in canonical serialization order.
 CORE_ORDER = (
     "type", "title", "slug", "lifecycle", "status",
