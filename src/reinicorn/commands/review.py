@@ -35,7 +35,13 @@ from reinicorn.git import (
     repo_root,
     run_git,
 )
-from reinicorn.kb import commit_kb, ensure_kb_on_main, push_main_with_retry, require_kb_dir
+from reinicorn.kb import (
+    commit_kb,
+    ensure_kb_on_main,
+    push_main_with_retry,
+    report_push_failure,
+    require_kb_dir,
+)
 from reinicorn.meta import reinicorn_source_repo
 from reinicorn.mode import can_publish, get_mode
 from reinicorn.review import (
@@ -111,6 +117,9 @@ def _push_kb_main(kb_dir: Path) -> None:
     """Publish kb main, surfacing a failed push as an agent-readable error."""
     push = push_main_with_retry(kb_dir)
     if push.returncode != 0:
+        # Print the classified diagnosis before unwinding: the RuntimeError text
+        # is what the lane's caller reports, but only this knows *why*.
+        report_push_failure(push, kb_dir)
         raise RuntimeError(f"kb push failed: {push.stderr.strip()}")
 
 

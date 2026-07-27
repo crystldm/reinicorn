@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.doc_types import REGISTRY
-from reinicorn.git import file_transport_args, repo_root, run_git, sanitize_branch
+from reinicorn.git import (
+    file_transport_args,
+    remote_url,
+    repo_root,
+    run_git,
+    sanitize_branch,
+)
 
 if TYPE_CHECKING:
     import subprocess
@@ -140,6 +146,103 @@ def push_main_with_retry(kb_dir: Path) -> subprocess.CompletedProcess[str]:
         run_git(*fta, "pull", "--no-rebase", "origin", "main", check=False, cwd=kb_dir)
         push = run_git(*fta, "push", "origin", "main", check=False, cwd=kb_dir)
     return push
+
+
+_AUTH_MARKERS = (
+    "could not read username",
+    "could not read password",
+    "permission denied (publickey)",
+    "authentication failed",
+    "invalid username or password",
+    "terminal prompts disabled",
+)
+_NON_FF_MARKERS = ("non-fast-forward", "fetch first")
+_PROTECTED_MARKERS = ("gh006", "protected branch")
+
+
+def classify_push_failure(stderr: str) -> str:
+    """Why git rejected a push: 'auth', 'non-fast-forward', 'protected', 'unknown'.
+
+    Matched case-insensitively against git's stderr. 'unknown' is a real answer,
+    not a fallback bucket to guess from — see `report_push_failure`.
+    """
+    text = stderr.lower()
+    # Auth first: a credential failure can be reported alongside a rejected ref,
+    # and it is the diagnosis that changes what the user should do next.
+    if any(m in text for m in _AUTH_MARKERS):
+        return "auth"
+    if any(m in text for m in _NON_FF_MARKERS):
+        return "non-fast-forward"
+    if any(m in text for m in _PROTECTED_MARKERS):
+        return "protected"
+    return "unknown"
+
+
+def _remote_protocol(url: str) -> str:
+    if url.startswith("https://") or url.startswith("http://"):
+        return "https"
+    if url.startswith("ssh://") or "@" in url.split("/")[0]:
+        return "ssh"
+    if url.startswith("file://") or url.startswith("/"):
+        return "local"
+    return "unknown"
+
+
+def report_push_failure(
+    push: subprocess.CompletedProcess[str], kb_dir: Path,
+) -> None:
+    """Print an error and next step matched to *why* the kb push failed.
+
+    Shared by `kb publish` and the review lane so the two cannot drift. When the
+    failure cannot be classified, git's stderr is printed verbatim: a wrong
+    diagnosis costs more than no diagnosis, because an agent will act on it.
+    """
+    from reinicorn.kb_remote import adapt_url_to_git_protocol
+
+    stderr = (push.stderr or "").strip()
+    kind = classify_push_failure(stderr)
+    url = remote_url(kb_dir)
+    where = f"  remote: {url or '(none)'} ({_remote_protocol(url)})"
+
+    if kind == "non-fast-forward":
+        console.error(
+            "Publish failed — kb has conflicting changes. "
+            "Resolve any conflicts in kb/, then retry."
+        )
+        console.next_step("rcorn kb publish")
+        return
+
+    if kind == "auth":
+        console.error("Publish failed — the kb remote rejected authentication.")
+        console.info(where)
+        for line in stderr.splitlines():
+            console.info(f"  git: {line}")
+        suggested = adapt_url_to_git_protocol(url) if url else ""
+        if suggested and suggested != url:
+            console.next_step(f"rcorn kb git remote set-url origin {suggested}")
+        else:
+            console.next_step("gh auth status")
+        return
+
+    if kind == "protected":
+        console.error(
+            "Publish failed — kb main is protected and rejected a direct push. "
+            "The review lane owns this path."
+        )
+        console.info(where)
+        for line in stderr.splitlines():
+            console.info(f"  git: {line}")
+        console.next_step("rcorn review start <draft>")
+        return
+
+    console.error(
+        "Publish failed — git rejected the push and the cause is not one "
+        "Reinicorn recognizes. Git's own output follows."
+    )
+    console.info(where)
+    if stderr:
+        print(stderr)
+    console.next_step("rcorn kb git status")
 
 
 def branch_changed_files(branch: str, root: Path | None = None) -> set[str]:
