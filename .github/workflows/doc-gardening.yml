@@ -71,8 +71,10 @@ jobs:
           import pathlib
           import secrets
           import subprocess
+          import sys
 
           from reinicorn import frontmatter
+          from reinicorn.doc_types import REGISTRY
 
           def one_line(value: str) -> str:
               """Collapse to a single line. `branch:` is repository-controlled
@@ -80,8 +82,29 @@ jobs:
               heredoc terminator into GITHUB_OUTPUT."""
               return value.splitlines()[0].strip() if value.strip() else ""
 
+          # One query, not one per plan. `ls-remote --exit-code` per branch
+          # cannot distinguish "ref absent" from "network or auth failure", so
+          # a transient outage would report every active plan as orphaned.
+          # Mirrors _live_remote_branches in commands/internal/post_merge.py.
+          probe = subprocess.run(
+              ["git", "ls-remote", "--heads", "origin"],
+              capture_output=True, text=True, check=False,
+          )
+          if probe.returncode != 0:
+              print("found=false")
+              print(f"::warning::could not list remote branches; "
+                    f"skipping orphan detection: {probe.stderr.strip()[:200]}")
+              sys.exit(0)
+
+          live = {
+              line.split("refs/heads/", 1)[1]
+              for line in probe.stdout.splitlines()
+              if "refs/heads/" in line
+          }
+
+          plan_glob = f"*/{REGISTRY['plan'].dir_path}/active/*/plan.md"
           orphaned = []
-          for plan in sorted(pathlib.Path("kb").glob("*/exec-plans/active/*/plan.md")):
+          for plan in sorted(pathlib.Path("kb").glob(plan_glob)):
               meta, _ = frontmatter.read(plan)
               branch = one_line(str(meta.get("branch") or ""))
               if not branch:
@@ -89,22 +112,7 @@ jobs:
                       f"- `{plan.parent}/` (no `branch:` in frontmatter — cannot verify)"
                   )
                   continue
-              # check-ref-format rejects anything git would not accept as a
-              # branch, so a crafted value can never reach ls-remote.
-              if subprocess.run(
-                  ["git", "check-ref-format", "--branch", branch],
-                  capture_output=True, check=False,
-              ).returncode != 0:
-                  orphaned.append(
-                      f"- `{plan.parent}/` (invalid `branch:` value — cannot verify)"
-                  )
-                  continue
-              found = subprocess.run(
-                  ["git", "ls-remote", "--exit-code", "--heads", "origin",
-                   f"refs/heads/{branch}"],
-                  capture_output=True, check=False,
-              ).returncode == 0
-              if not found:
+              if branch not in live:
                   orphaned.append(
                       f"- `{plan.parent}/` (branch `{branch}` no longer exists)"
                   )

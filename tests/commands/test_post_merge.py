@@ -27,6 +27,7 @@ def test_archive_stale_plans_removes_deleted_branch(kb_repo: Path, capsys):
          patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
          patch("reinicorn.commands.plan.repo_root", return_value=kb_repo):
         # No remote branches — everything should be archived
+        mock_git.return_value.returncode = 0
         mock_git.return_value.stdout = ""
         _archive_stale_plans(kb_repo)
 
@@ -47,6 +48,7 @@ def test_archive_stale_plans_keeps_existing_branch(kb_repo: Path):
     ))
 
     with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git:
+        mock_git.return_value.returncode = 0
         mock_git.return_value.stdout = "  origin/feature/open\n"
         _archive_stale_plans(kb_repo)
 
@@ -74,6 +76,7 @@ def test_lookalike_dashed_branch_does_not_keep_a_deleted_plan_alive(
          patch("reinicorn.kb.kb_scope", return_value="testproject"), \
          patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
          patch("reinicorn.commands.plan.repo_root", return_value=kb_repo):
+        mock_git.return_value.returncode = 0
         mock_git.return_value.stdout = "  origin/feature-mvp\n"
         _archive_stale_plans(kb_repo)
 
@@ -88,6 +91,7 @@ def test_plan_without_a_branch_field_is_never_archived(kb_repo: Path):
     (active / "plan.md").write_text("# Plan\n\nno frontmatter at all\n")
 
     with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git:
+        mock_git.return_value.returncode = 0
         mock_git.return_value.stdout = ""
         _archive_stale_plans(kb_repo)
 
@@ -96,6 +100,7 @@ def test_plan_without_a_branch_field_is_never_archived(kb_repo: Path):
 
 def test_live_remote_branches(kb_repo: Path):
     with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git:
+        mock_git.return_value.returncode = 0
         mock_git.return_value.stdout = (
             "  origin/main\n"
             "  origin/feature/mvp\n"
@@ -132,3 +137,25 @@ def test_archive_stale_plans_skips_on_git_error(kb_repo: Path):
     # Plan must still be in active/ — NOT archived
     assert active.is_dir()
     assert (active / "plan.md").is_file()
+
+
+def test_malformed_branch_value_is_not_archived(kb_repo: Path):
+    """Archiving is destructive, so an unusable ref means "cannot verify".
+
+    A malformed value would match nothing in live_branches and otherwise be
+    read as a deleted branch.
+    """
+    active = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "weird"
+    active.mkdir(parents=True)
+    (active / "plan.md").write_text(doc_text(
+        type="plan", title="Plan", slug="weird",
+        status="in-progress", branch="not a valid ref~^:",
+        body="\n# Plan\n",
+    ))
+
+    with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git:
+        mock_git.return_value.returncode = 1   # check-ref-format rejects it
+        mock_git.return_value.stdout = ""
+        _archive_stale_plans(kb_repo)
+
+    assert active.is_dir()

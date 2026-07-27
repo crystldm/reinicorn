@@ -43,7 +43,7 @@ def cmd_idea(idea_text: str) -> int:
 
     title = idea_text.split("\n")[0][:80]
 
-    filepath.write_text(frontmatter.dumps(
+    filepath.write_text(frontmatter.render(
         {
             "type": "idea",
             "title": title,

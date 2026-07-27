@@ -98,12 +98,21 @@ EXCLUDED_FILENAMES = frozenset({
 EXCLUDED_DIRS = frozenset({"_template", "by-category", "references"})
 
 
-def _allowed_keys(doc_type: str | None) -> set[str]:
-    keys = set(CORE_ORDER) | set(TRAILING_ORDER)
-    keys |= set(PER_TYPE.get(doc_type or "", ()))
+def _extra_fields(doc_type: str | None) -> tuple[str, ...]:
+    """Per-type fields, plus the review stamps when the type is review-gated.
+
+    The single derivation shared by the allow-list and the serialization
+    order — computing it twice would let a future gating change make
+    `validate` and `dumps` disagree about which keys are legal.
+    """
+    per_type = PER_TYPE.get(doc_type or "", ())
     if doc_type in REGISTRY and REGISTRY[doc_type].gated:
-        keys |= set(REVIEW_FIELDS)
-    return keys
+        return (*per_type, *REVIEW_FIELDS)
+    return per_type
+
+
+def _allowed_keys(doc_type: str | None) -> set[str]:
+    return set(CORE_ORDER) | set(TRAILING_ORDER) | set(_extra_fields(doc_type))
 
 
 def _key_order(meta: dict[str, Any]) -> list[str]:
@@ -112,13 +121,9 @@ def _key_order(meta: dict[str, Any]) -> list[str]:
     Unknown keys are appended (sorted) rather than dropped, so a hand-edited
     field survives a round trip and `validate` can report it.
     """
-    doc_type = meta.get("type")
-    per_type = PER_TYPE.get(doc_type or "", ())
-    review = REVIEW_FIELDS if (
-        doc_type in REGISTRY and REGISTRY[doc_type].gated
-    ) else ()
     ordered = [
-        k for k in (*CORE_ORDER, *per_type, *review, *TRAILING_ORDER)
+        k for k in (*CORE_ORDER, *_extra_fields(meta.get("type")),
+                    *TRAILING_ORDER)
         if k in meta
     ]
     return ordered + sorted(set(meta) - set(ordered))
@@ -169,6 +174,20 @@ def dumps(meta: dict[str, Any], body: str) -> str:
         width=float("inf"),     # never fold long values onto continuations
     )
     return f"{FENCE}\n{block}{FENCE}\n{body}"
+
+
+def render(meta: dict[str, Any], body: str) -> str:
+    """Serialize, refusing to emit a doc that would fail `validate`.
+
+    Every create path goes through here, so the schema the `kb/frontmatter`
+    lint rule enforces and the schema creation produces are the same object.
+    A doc can never be born failing the check that guards it.
+    """
+    if errors := validate(meta):
+        raise ValueError(
+            "refusing to create an invalid doc: " + "; ".join(errors)
+        )
+    return dumps(meta, body)
 
 
 def get(text: str, key: str) -> Any | None:

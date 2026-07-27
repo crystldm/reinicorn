@@ -98,12 +98,12 @@ def cmd_plan_create() -> int:
                     "branch": branch,
                     "ticket": ticket_id or "N/A",
                 })
-                (pdir / tmpl.name).write_text(frontmatter.dumps(meta, body))
+                (pdir / tmpl.name).write_text(frontmatter.render(meta, body))
             else:
                 (pdir / tmpl.name).write_text(body)
         console.success("Created plan files from templates.")
     else:
-        (pdir / "plan.md").write_text(frontmatter.dumps(
+        (pdir / "plan.md").write_text(frontmatter.render(
             {
                 "type": "plan",
                 "title": f"Execution Plan: {branch}",

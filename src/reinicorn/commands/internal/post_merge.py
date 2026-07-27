@@ -57,14 +57,30 @@ def _archive_stale_plans(root: Path) -> None:
             # whenever an unrelated `feature-mvp` branch existed.
             meta, _ = frontmatter.read(entry / "plan.md")
             branch = str(meta.get("branch") or "").strip()
-            if not branch:
-                continue  # no recorded branch — never archive on a guess
+            # Archiving is destructive, so anything short of a usable ref means
+            # "cannot verify", never "gone". A malformed or multi-line value
+            # would otherwise match nothing in live_branches and be read as a
+            # deleted branch.
+            if not _usable_ref(branch, root):
+                continue
             if branch in live_branches:
                 continue
             # No remote branch maps to this dir — archive the plan
             with contextlib.suppress(Exception):
                 from reinicorn.commands.plan import cmd_plan_complete
                 cmd_plan_complete(entry.name, repo_scope=repo_dir.name)
+
+
+def _usable_ref(branch: str, root: Path) -> bool:
+    """Whether *branch* is a value git would accept as a branch name.
+
+    `branch:` comes from a kb doc, so it is external input at a boundary that
+    gates a destructive action.
+    """
+    if not branch or "\n" in branch:
+        return False
+    r = run_git("check-ref-format", "--branch", branch, cwd=root, check=False)
+    return r.returncode == 0
 
 
 def _live_remote_branches(root: Path) -> set[str] | None:

@@ -35,9 +35,8 @@ def _provenance(
 ) -> str:
     """Frontmatter block plus the `# title` H1 that opens every doc body.
 
-    Validated on the way out: the create paths and the `kb/frontmatter` lint
-    rule share one definition of valid, so a doc can never be born failing the
-    check that guards it.
+    frontmatter.render validates on the way out, so this path and the
+    `kb/frontmatter` lint rule share one definition of valid.
     """
     meta: dict[str, object] = {
         "type": doc_type,
@@ -51,9 +50,7 @@ def _provenance(
         "human_validated": False,
     }
     meta.update(extra or {})
-    if errors := frontmatter.validate(meta):
-        raise ValueError(f"refusing to create an invalid doc: {'; '.join(errors)}")
-    return frontmatter.dumps(meta, f"\n# {title}\n")
+    return frontmatter.render(meta, f"\n# {title}\n")
 
 
 def _typed_dir(doc_type: str, repo_dir: Path) -> Path:
