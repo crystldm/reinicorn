@@ -52,9 +52,11 @@ def test_git_protocol_preference_queries_the_host_scope():
     """
     with patch("reinicorn.kb_remote.run_gh", return_value=_gh("ssh\n")) as mock_gh:
         assert git_protocol_preference() == "ssh"
-    args = mock_gh.call_args.args
-    assert "-h" in args and "github.com" in args
-    assert "git_protocol" in args
+    # Pin the whole argv: "-h github.com" appearing *somewhere* would also be
+    # satisfied by a global query that happens to mention the host.
+    assert mock_gh.call_args.args == (
+        "config", "get", "-h", "github.com", "git_protocol",
+    )
 
 
 def test_git_protocol_preference_empty_when_gh_fails():
@@ -244,19 +246,19 @@ def test_resolve_empty_when_nothing_is_known(tmp_path: Path):
 
 def test_apply_sets_the_origin_url(submodule_repo: Path):
     kb = submodule_repo / "kb"
-    assert apply_kb_remote_url(kb, "/srv/kb-elsewhere.git") is True
+    assert apply_kb_remote_url(kb, "/srv/kb-elsewhere.git") == "updated"
     assert remote_url(kb) == "/srv/kb-elsewhere.git"
 
 
 def test_apply_is_a_noop_when_already_correct(submodule_repo: Path):
     kb = submodule_repo / "kb"
-    assert apply_kb_remote_url(kb, remote_url(kb)) is False
+    assert apply_kb_remote_url(kb, remote_url(kb)) == "unchanged"
 
 
 def test_apply_is_a_noop_for_an_empty_url(submodule_repo: Path):
     kb = submodule_repo / "kb"
     before = remote_url(kb)
-    assert apply_kb_remote_url(kb, "") is False
+    assert apply_kb_remote_url(kb, "") == "unchanged"
     assert remote_url(kb) == before
 
 
@@ -264,7 +266,7 @@ def test_apply_refuses_an_unsafe_url(submodule_repo: Path, capsys):
     """.gitmodules is repository-controlled: never hand it to git unvalidated."""
     kb = submodule_repo / "kb"
     before = remote_url(kb)
-    assert apply_kb_remote_url(kb, "ext::sh -c 'touch /tmp/pwned'") is False
+    assert apply_kb_remote_url(kb, "ext::sh -c 'touch /tmp/pwned'") == "failed"
     assert remote_url(kb) == before
     assert "Refusing" in capsys.readouterr().out
 
@@ -273,8 +275,47 @@ def test_apply_adds_origin_when_the_clone_has_none(tmp_path: Path):
     kb = tmp_path / "orphan-kb"
     kb.mkdir()
     run_git("init", "-q", "-b", "main", str(kb))
-    assert apply_kb_remote_url(kb, "/srv/kb.git") is True
+    assert apply_kb_remote_url(kb, "/srv/kb.git") == "updated"
     assert remote_url(kb) == "/srv/kb.git"
+
+
+def test_apply_reports_a_failed_remote_update(tmp_path: Path, capsys):
+    """A remote that could not be set must not fail silently.
+
+    This is the exact class of bug the branch exists to remove: the kb keeps a
+    remote the user cannot push to, reads still work, and the breakage only
+    surfaces at publish time.
+    """
+    not_a_repo = tmp_path / "not-a-repo"
+    not_a_repo.mkdir()
+    assert apply_kb_remote_url(not_a_repo, "/srv/kb.git") == "failed"
+    out = capsys.readouterr().out
+    assert "Could not point the kb remote at /srv/kb.git" in out
+    assert "git: " in out
+    assert "next: rcorn kb git remote set-url origin /srv/kb.git" in out
+
+
+def test_post_checkout_reports_a_failed_remote_update(
+    submodule_repo: Path, monkeypatch, capsys,
+):
+    """The hook surfaces the failure and still exits 0 — a post-checkout hook
+    that fails would fail the user's `git checkout`."""
+    from reinicorn.commands.internal.post_checkout import cmd_post_checkout
+
+    run_git("config", "protocol.file.allow", "always", cwd=submodule_repo)
+    wt = _add_worktree(submodule_repo, "wt-apply-fail")
+
+    monkeypatch.chdir(wt)
+    with patch(
+        "reinicorn.commands.internal.post_checkout.hook_check", return_value=True,
+    ), patch(
+        "reinicorn.commands.internal.post_checkout.apply_kb_remote_url",
+        return_value="failed",
+    ):
+        assert cmd_post_checkout(["", "", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "remote could not be set" in out
+    assert "publishing from here will fail" in out
 
 
 # --------------------------------------------------------------------------

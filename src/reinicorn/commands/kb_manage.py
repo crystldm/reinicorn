@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.git import file_transport_args, report_failure, run_git
-from reinicorn.kb import require_kb_dir
+from reinicorn.git import file_transport_args, run_git
+from reinicorn.kb import report_push_failure, require_kb_dir
 from reinicorn.validation import is_valid_scope_name
 
 if TYPE_CHECKING:
@@ -115,7 +115,13 @@ def cmd_kb_remove_scope(
             run_git(*ft, "push", "-q", "origin", "HEAD", cwd=kb_dir)
             console.success("Pushed to remote")
         except subprocess.CalledProcessError as e:
-            report_failure("push the kb", e, warn=True)
-            console.next_step("rcorn kb publish")
+            # This is a kb push like any other, so it gets the kb reporter:
+            # the remote and its protocol, and the fix for *this* failure. An
+            # auth failure here has the same cause as one from `kb publish`,
+            # and "try again" is not the fix for it. Warning, not error — the
+            # scope is already removed locally and the command still succeeds.
+            report_push_failure(
+                e, kb_dir, action="push the kb scope removal", warn=True,
+            )
 
     return 0

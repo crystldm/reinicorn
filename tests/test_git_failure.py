@@ -118,6 +118,12 @@ def test_classifies_protected_branch_wording_as_protected():
     )
 
 
+def test_classifies_not_a_git_repository_as_no_repo():
+    assert classify_failure(
+        "fatal: not a git repository (or any of the parent directories): .git\n"
+    ) == "no-repo"
+
+
 def test_classifies_anything_else_as_unknown():
     assert classify_failure(DNS) == "unknown"
 

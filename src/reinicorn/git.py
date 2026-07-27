@@ -92,6 +92,7 @@ _AUTH_MARKERS = (
 )
 _NON_FF_MARKERS = ("non-fast-forward", "fetch first")
 _PROTECTED_MARKERS = ("gh006", "protected branch")
+_NO_REPO_MARKERS = ("not a git repository", "not a working tree")
 
 # Domain-free on purpose: this module knows git, not the kb. Callers add their
 # own detail lines for what the failure means in their vocabulary.
@@ -99,14 +100,19 @@ _HEADLINES = {
     "auth": "the remote rejected authentication",
     "non-fast-forward": "the remote has commits this push does not contain",
     "protected": "the branch is protected and rejected a direct push",
+    "no-repo": "this is not a git repository",
 }
 
 
 def classify_failure(stderr: str) -> str:
-    """Why git failed: 'auth', 'non-fast-forward', 'protected', or 'unknown'.
+    """Why git failed: 'auth', 'non-fast-forward', 'protected', 'no-repo', or
+    'unknown'.
 
     'unknown' is a real answer, not a bucket to guess from — callers must show
-    git's own output for it rather than substituting a plausible cause.
+    git's own output for it rather than substituting a plausible cause. So is
+    'no-repo': it exists because callers were reporting *every* failure of a
+    repo lookup as "not inside a git repository", which turned dubious
+    ownership and a corrupt repo into the same wrong sentence.
     """
     text = (stderr or "").lower()
     if any(m in text for m in _AUTH_MARKERS):
@@ -115,6 +121,8 @@ def classify_failure(stderr: str) -> str:
         return "non-fast-forward"
     if any(m in text for m in _PROTECTED_MARKERS):
         return "protected"
+    if any(m in text for m in _NO_REPO_MARKERS):
+        return "no-repo"
     return "unknown"
 
 

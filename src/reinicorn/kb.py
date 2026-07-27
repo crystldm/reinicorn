@@ -168,7 +168,9 @@ def _push_detail(kind: str, url: str) -> list[str]:
     return lines
 
 
-def explain_push_failure(push: GitFailure, kb_dir: Path) -> list[str]:
+def explain_push_failure(
+    push: GitFailure, kb_dir: Path, *, action: str = "push kb main",
+) -> list[str]:
     """Message lines for a failed kb push, without printing them.
 
     Splits from `report_push_failure` because the review lane raises its
@@ -176,7 +178,7 @@ def explain_push_failure(push: GitFailure, kb_dir: Path) -> list[str]:
     """
     kind = classify_result(push)
     return explain_failure(
-        "push kb main", push, detail=_push_detail(kind, remote_url(kb_dir)),
+        action, push, detail=_push_detail(kind, remote_url(kb_dir)),
     )
 
 
@@ -202,14 +204,21 @@ def push_next_steps(kind: str, kb_dir: Path) -> list[str]:
     return ["rcorn kb git status"]
 
 
-def report_push_failure(push: GitFailure, kb_dir: Path) -> str:
+def report_push_failure(
+    push: GitFailure, kb_dir: Path, *,
+    action: str = "push kb main", warn: bool = False,
+) -> str:
     """Print why the kb push failed and what to run next. Returns the kind.
 
-    Shared by `kb publish` and the review lane so the two cannot drift.
+    Every lane that pushes the kb goes through here, so the diagnosis and the
+    next step cannot drift between them. *warn* is for flows where the push is
+    the last, non-fatal step and the command still succeeds — the text is
+    identical, only the channel changes; *action* names the specific push when
+    it is not kb main.
     """
     kind = classify_result(push)
     report_failure(
-        "push kb main", push, detail=_push_detail(kind, remote_url(kb_dir)),
+        action, push, detail=_push_detail(kind, remote_url(kb_dir)), warn=warn,
     )
     console.next_step(*push_next_steps(kind, kb_dir))
     return kind

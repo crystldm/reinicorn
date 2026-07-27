@@ -27,17 +27,26 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "reinicorn"
 
-#: The module that owns git-failure→message conversion.
+#: The module that owns git-failure→message conversion, as a path relative to
+#: the package root.
 SEAM = "git.py"
 
 #: One owner per external CLI. git.py wraps git; github.py's `run_gh` is the
 #: single place gh's stderr becomes a message. Two tools, two seams — but only
 #: these two, which is what the tests below pin down.
+#:
+#: Root-relative POSIX paths, never basenames: matching on `path.name` would
+#: exempt any nested `commands/git.py` somebody adds later, which is precisely
+#: the module most likely to want to format git errors.
 SEAMS = frozenset({SEAM, "github.py"})
 
 #: `sys.stderr` is the output stream, not a subprocess result — console.py
 #: writes progress there by design (see test_output_conventions.py).
 STREAM_HOLDERS = frozenset({"sys"})
+
+
+def _rel(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix()
 
 
 def _stderr_reads(tree: ast.Module) -> list[int]:
@@ -52,23 +61,51 @@ def _stderr_reads(tree: ast.Module) -> list[int]:
     return hits
 
 
+def _getattr_stderr_reads(tree: ast.Module) -> list[int]:
+    """Line numbers of `getattr(x, "stderr")` calls."""
+    hits = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not (isinstance(node.func, ast.Name) and node.func.id == "getattr"):
+            continue
+        if any(
+            isinstance(a, ast.Constant) and a.value == "stderr" for a in node.args
+        ):
+            hits.append(node.lineno)
+    return hits
+
+
+def _scan(root: Path, approved: frozenset[str]) -> tuple[list[str], set[str]]:
+    """(offending "path:line" strings, approved paths that actually read stderr).
+
+    Takes *root* so the rule itself can be tested against a synthetic tree.
+    """
+    offenders: list[str] = []
+    readers: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        hits = _stderr_reads(tree) + _getattr_stderr_reads(tree)
+        if not hits:
+            continue
+        rel = _rel(path, root)
+        if rel in approved:
+            readers.add(rel)
+            continue
+        offenders.extend(f"{rel}:{line}" for line in sorted(hits))
+    return offenders, readers
+
+
 def test_subprocess_stderr_is_read_only_in_the_seams() -> None:
     """Every other module must go through explain_failure/report_failure.
 
     Reading a subprocess's stderr is how an ad-hoc error format starts: once a
     caller holds the text it will format it its own way, and the next caller
-    will format it differently.
+    will format it differently. Covers `getattr(r, "stderr")` too — both seams
+    legitimately use it (a CompletedProcess from capture=False has no stderr at
+    all), so the escape hatch is real and has to be closed for everyone else.
     """
-    offenders: list[str] = []
-    readers: set[str] = set()
-    for path in sorted(SRC.rglob("*.py")):
-        hits = _stderr_reads(ast.parse(path.read_text()))
-        if not hits:
-            continue
-        readers.add(path.name)
-        if path.name in SEAMS:
-            continue
-        offenders.extend(f"{path.relative_to(SRC)}:{line}" for line in hits)
+    offenders, readers = _scan(SRC, SEAMS)
 
     assert offenders == [], (
         f"subprocess stderr must only be read in {sorted(SEAMS)}; "
@@ -81,32 +118,23 @@ def test_subprocess_stderr_is_read_only_in_the_seams() -> None:
     )
 
 
-def test_getattr_is_not_used_to_dodge_the_rule() -> None:
-    """`getattr(r, "stderr")` reads stderr without an ast.Attribute node.
+def test_a_nested_module_cannot_borrow_a_seam_name(tmp_path: Path) -> None:
+    """The rule matches root-relative paths, not basenames.
 
-    Both seams use it (a CompletedProcess from capture=False has no stderr at
-    all), so the escape hatch is real and has to be closed for everyone else.
+    Exempting by basename would let a new `commands/git.py` read stderr
+    undetected — a hole in the enforcement defeats the enforcement.
     """
-    offenders: list[str] = []
-    for path in sorted(SRC.rglob("*.py")):
-        if path.name in SEAMS:
-            continue
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if not (isinstance(node.func, ast.Name) and node.func.id == "getattr"):
-                continue
-            if any(
-                isinstance(a, ast.Constant) and a.value == "stderr"
-                for a in node.args
-            ):
-                offenders.append(f"{path.relative_to(SRC)}:{node.lineno}")
-
-    assert offenders == [], (
-        f"getattr(..., 'stderr') outside {sorted(SEAMS)}: {offenders}. "
-        "Use git.explain_failure() / git.report_failure() instead."
+    (tmp_path / "commands").mkdir()
+    (tmp_path / "git.py").write_text("def f(r):\n    return r.stderr\n")
+    (tmp_path / "commands" / "git.py").write_text("def f(r):\n    return r.stderr\n")
+    (tmp_path / "commands" / "other.py").write_text(
+        'def f(r):\n    return getattr(r, "stderr")\n'
     )
+
+    offenders, readers = _scan(tmp_path, frozenset({"git.py"}))
+
+    assert readers == {"git.py"}
+    assert offenders == ["commands/git.py:2", "commands/other.py:2"]
 
 
 def test_the_seam_exports_what_callers_need() -> None:

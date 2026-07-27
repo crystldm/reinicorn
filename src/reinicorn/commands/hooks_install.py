@@ -8,7 +8,14 @@ import stat
 from pathlib import Path
 
 from reinicorn import console
-from reinicorn.git import GitError, reinicorn_root, repo_root, run_git
+from reinicorn.git import (
+    GitError,
+    classify_result,
+    reinicorn_root,
+    repo_root,
+    report_failure,
+    run_git,
+)
 
 MARKER = "# --- reinicorn hooks below ---"
 HOOK_NAMES = ("post-checkout", "post-merge", "pre-push")
@@ -44,8 +51,20 @@ def cmd_hooks_install() -> int:
         # is .git/worktrees/<name>, where git never reads hooks.
         r = run_git("rev-parse", "--git-common-dir")
         git_dir = Path(r.stdout.strip()).resolve()
-    except (GitError, FileNotFoundError):
-        console.error("Not inside a git repository.")
+    except FileNotFoundError:
+        console.error(
+            "git was not found on PATH.\n"
+            "  How to fix: install git, or add it to PATH."
+        )
+        return 1
+    except GitError as e:
+        # run_git raises on *any* nonzero exit, so only git's own "not a git
+        # repository" earns that message. Dubious ownership, a corrupt repo,
+        # and a broken config are different problems with different fixes.
+        if classify_result(e) == "no-repo":
+            console.error("Not inside a git repository.")
+        else:
+            report_failure("locate the git directory", e)
         return 1
 
     # --- Git hooks ---

@@ -63,7 +63,14 @@ def _init_kb(root: Path, kb_dir: Path) -> None:
         # protocol this machine cannot authenticate with. Reads still work
         # (objects are borrowed via --reference), so without this the breakage
         # would only surface at publish time.
-        apply_kb_remote_url(kb_dir, remote)
+        if apply_kb_remote_url(kb_dir, remote) == "failed":
+            # apply_kb_remote_url has already reported the cause and the fix.
+            # Say what it means for the kb that was just created, and carry on:
+            # the kb is usable for reads, only publishing is at risk.
+            console.warn(
+                f"{KB_DIR_NAME}/ was created but its remote could not be set — "
+                "publishing from here will fail until it is."
+            )
         ensure_kb_on_main(kb_dir)  # avoid a detached HEAD
         stage_kb_pointer(root, kb_dir)
     except Exception as e:

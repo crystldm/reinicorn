@@ -17,15 +17,26 @@ fallback and goes away with the submodule.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_get
-from reinicorn.git import gh_repo_from_url, https_to_ssh, remote_url, run_git
+from reinicorn.git import (
+    gh_repo_from_url,
+    https_to_ssh,
+    remote_url,
+    report_failure,
+    run_git,
+)
 from reinicorn.github import run_gh
 from reinicorn.validation import validate_git_url
 
 KB_REMOTE_KEY = "REINICORN_KB_REMOTE"
 GITHUB_HOST = "github.com"
+
+#: Outcome of `apply_kb_remote_url` — see its docstring for why this is not a
+#: bool.
+ApplyResult = Literal["updated", "unchanged", "failed"]
 
 
 def git_protocol_preference(host: str = GITHUB_HOST) -> str:
@@ -143,15 +154,23 @@ def resolve_kb_remote_url(root: Path) -> str:
     return adapt_url_to_git_protocol(configured)
 
 
-def apply_kb_remote_url(kb_dir: Path, url: str) -> bool:
-    """Point *kb_dir*'s origin at *url*. Returns True if the remote changed.
+def apply_kb_remote_url(kb_dir: Path, url: str) -> ApplyResult:
+    """Point *kb_dir*'s origin at *url*.
+
+    Returns 'updated', 'unchanged' (nothing to do — no URL resolved, or the
+    remote is already correct), or 'failed'. Three states rather than a bool
+    because a bool made "already right" and "could not set it" identical, and
+    the second one leaves the kb pointing somewhere the user cannot push:
+    reads still work, so it would only surface at publish time. That is the
+    exact failure this module exists to prevent, so it reports rather than
+    returning quietly.
 
     *url* can originate in `.gitmodules`, which is repository-controlled, so it
     is validated before it reaches git — the same reason `get_kb_dir()` guards
     the submodule path.
     """
     if not url:
-        return False
+        return "unchanged"
     url_error = validate_git_url(url)
     if url_error is not None:
         console.error(
@@ -159,10 +178,14 @@ def apply_kb_remote_url(kb_dir: Path, url: str) -> bool:
             f"  How to fix: set {KB_REMOTE_KEY} in .reinicorn-config to an "
             f"https://, ssh://, git@host:path, or local URL."
         )
-        return False
+        return "failed"
     current = remote_url(kb_dir)
     if current == url:
-        return False
+        return "unchanged"
     verb = "set-url" if current else "add"
     r = run_git("remote", verb, "origin", url, cwd=kb_dir, check=False)
-    return r.returncode == 0
+    if r.returncode != 0:
+        report_failure(f"point the kb remote at {url}", r, warn=True)
+        console.next_step(f"rcorn kb git remote set-url origin {url}")
+        return "failed"
+    return "updated"
