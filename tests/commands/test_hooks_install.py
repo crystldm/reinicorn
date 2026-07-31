@@ -110,6 +110,130 @@ def test_hooks_install_missing_sources_is_not_noop(kb_repo: Path, capsys):
     assert "(no-op)" not in capsys.readouterr().out
 
 
+# --- stale-hook repair and append safety (issue #24) ---
+
+
+_REINS_HOOK = (
+    "#!/usr/bin/env bash\n"
+    "if command -v reins &>/dev/null; then\n"
+    "    reins _pre-push\n"
+    "    exit $?\n"
+    "fi\n"
+    "\n"
+    "exit 0\n"
+)
+
+
+def _run_install(kb_repo: Path) -> int:
+    git_dir = kb_repo / ".git"
+    with patch("reinicorn.commands.hooks_install.run_git") as mock_git, \
+         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo):
+        mock_git.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=str(git_dir) + "\n"
+        )
+        return cmd_hooks_install()
+
+
+def _seed_sources(kb_repo: Path) -> None:
+    hooks_src = kb_repo / "hooks"
+    hooks_src.mkdir(exist_ok=True)
+    for name in HOOK_NAMES:
+        (hooks_src / name).write_text(
+            f"#!/usr/bin/env bash\nrcorn _{name}\nexit $?\n"
+        )
+
+
+def test_hooks_install_replaces_stale_reins_hook(kb_repo: Path, capsys):
+    """A reins-era hook is stale, not foreign — overwrite it with the
+    current hook instead of appending after its unconditional exit."""
+    _seed_sources(kb_repo)
+    hooks_dest = kb_repo / ".git" / "hooks"
+    hooks_dest.mkdir(parents=True, exist_ok=True)
+    for name in HOOK_NAMES:
+        (hooks_dest / name).write_text(_REINS_HOOK)
+
+    result = _run_install(kb_repo)
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "REPLACED" in out
+    for name in HOOK_NAMES:
+        text = (hooks_dest / name).read_text()
+        assert "reins " not in text
+        assert f"rcorn _{name}" in text
+
+
+def test_hooks_install_replaces_stale_hook_with_dead_append(kb_repo: Path, capsys):
+    """A reins hook that already got the old broken append (marker after
+    exit 0) is repaired by replacement, not skipped for carrying the marker."""
+    _seed_sources(kb_repo)
+    hooks_dest = kb_repo / ".git" / "hooks"
+    hooks_dest.mkdir(parents=True, exist_ok=True)
+    damaged = _REINS_HOOK + f"\n{MARKER}\n\nrcorn _pre-push\nexit $?\n"
+    (hooks_dest / "pre-push").write_text(damaged)
+
+    result = _run_install(kb_repo)
+
+    assert result == 0
+    assert "REPLACED" in capsys.readouterr().out
+    text = (hooks_dest / "pre-push").read_text()
+    assert "reins " not in text
+    assert "rcorn _pre-push" in text
+
+
+def test_hooks_install_refuses_append_after_unconditional_exit(kb_repo: Path, capsys):
+    """Appending after a foreign hook's unconditional exit would be
+    unreachable — refuse loudly, never report success."""
+    _seed_sources(kb_repo)
+    hooks_dest = kb_repo / ".git" / "hooks"
+    hooks_dest.mkdir(parents=True, exist_ok=True)
+    foreign = "#!/bin/sh\necho other-tool\nexit 0\n"
+    (hooks_dest / "pre-push").write_text(foreign)
+
+    result = _run_install(kb_repo)
+
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "APPENDED: pre-push" not in out
+    assert "FAILED: pre-push" in out
+    # File untouched — no dead content appended
+    assert (hooks_dest / "pre-push").read_text() == foreign
+
+
+def test_hooks_install_appends_to_fall_through_hook(kb_repo: Path, capsys):
+    """A foreign hook that can fall through still gets the chained append."""
+    _seed_sources(kb_repo)
+    hooks_dest = kb_repo / ".git" / "hooks"
+    hooks_dest.mkdir(parents=True, exist_ok=True)
+    foreign = "#!/bin/sh\necho other-tool\n"
+    (hooks_dest / "pre-push").write_text(foreign)
+
+    result = _run_install(kb_repo)
+
+    assert result == 0
+    assert "APPENDED: pre-push" in capsys.readouterr().out
+    text = (hooks_dest / "pre-push").read_text()
+    assert text.startswith(foreign)
+    assert MARKER in text
+    assert "rcorn _pre-push" in text
+
+
+def test_hooks_install_rerun_over_verbatim_copy_is_noop(kb_repo: Path, capsys):
+    """A fresh install copies the template verbatim (no marker); re-running
+    must recognize it as already installed, not refuse it as a foreign hook
+    ending in an unconditional exit."""
+    _seed_sources(kb_repo)
+
+    assert _run_install(kb_repo) == 0
+    capsys.readouterr()
+    result = _run_install(kb_repo)
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "FAILED" not in out
+    assert "already installed" in out
+
+
 # --- _merge_claude_settings tests ---
 
 
