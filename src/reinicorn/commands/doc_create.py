@@ -194,7 +194,7 @@ def _create_typed(doc_type: str, title: str) -> int:
     slug = filepath.parent.name if branch_addressed else _slugify(title)
     if REGISTRY[doc_type].gated:
         console.next_step(f"rcorn review start {slug}")
-    commit_kb(root, f"doc({doc_type}): {slug}")
+    commit_kb(root, f"doc({doc_type}): {slug}", paths=[filepath])
     console.next_step("rcorn kb publish")
     return 0
 

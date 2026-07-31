@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from reinicorn.git import run_git
@@ -53,3 +54,76 @@ def test_commit_kb_stages_parent_pointer(submodule_repo: Path) -> None:
     # Parent should have kb staged (not committed, just in index)
     r = run_git("diff", "--cached", "--name-only", cwd=submodule_repo)
     assert "kb" in r.stdout
+
+
+def test_commit_kb_paths_leaves_unrelated_changes_uncommitted(
+    submodule_repo: Path,
+) -> None:
+    """With paths given, only those files land in the commit; a pre-existing
+    dirty file stays modified in the working tree (issue #35)."""
+    kb = submodule_repo / "kb"
+    run_git("commit", "-q", "--allow-empty", "-m", "base", cwd=kb)
+    (kb / "README.md").write_text("# Kb\n\nunrelated pre-existing edit\n")
+
+    (kb / "ideas").mkdir()
+    idea = kb / "ideas" / "scoped.md"
+    idea.write_text("# Scoped idea\n")
+
+    result = commit_kb(submodule_repo, "idea: scoped", paths=[idea])
+
+    assert result is True
+    shown = run_git(
+        "show", "--name-only", "--format=", "HEAD", cwd=kb
+    ).stdout.split()
+    assert shown == ["ideas/scoped.md"]
+    # The unrelated edit is still uncommitted in the working tree.
+    status = run_git("status", "--porcelain", cwd=kb).stdout
+    assert " M README.md" in status
+
+
+def test_commit_kb_paths_returns_false_when_paths_unchanged(
+    submodule_repo: Path,
+) -> None:
+    """Dirt elsewhere in the tree must not trigger a commit when the given
+    paths have no changes."""
+    kb = submodule_repo / "kb"
+    (kb / "README.md").write_text("# Kb\n\nunrelated edit\n")
+
+    result = commit_kb(
+        submodule_repo, "idea: nothing", paths=[kb / "ideas" / "absent.md"]
+    )
+
+    assert result is False
+    status = run_git("status", "--porcelain", cwd=kb).stdout
+    assert " M README.md" in status
+
+
+def test_commit_kb_paths_stages_deletions_for_moves(
+    submodule_repo: Path,
+) -> None:
+    """A directory move (plan complete) commits both the deletion and the
+    addition when both dirs are passed as paths."""
+    kb = submodule_repo / "kb"
+    active = kb / "active" / "my-plan"
+    active.mkdir(parents=True)
+    (active / "plan.md").write_text("# Plan\n")
+    run_git("add", "-A", cwd=kb)
+    run_git("commit", "-q", "-m", "seed plan", cwd=kb)
+    (kb / "README.md").write_text("# Kb\n\nunrelated edit\n")
+
+    completed = kb / "completed" / "my-plan"
+    completed.parent.mkdir(parents=True)
+    shutil.move(str(active), str(completed))
+
+    result = commit_kb(
+        submodule_repo, "plan: complete my-plan", paths=[active, completed]
+    )
+
+    assert result is True
+    # --no-renames so the move shows as an explicit delete + add pair.
+    shown = run_git(
+        "show", "--name-status", "--no-renames", "--format=", "HEAD", cwd=kb
+    ).stdout.split()
+    assert shown == ["D", "active/my-plan/plan.md", "A", "completed/my-plan/plan.md"]
+    status = run_git("status", "--porcelain", cwd=kb).stdout
+    assert " M README.md" in status

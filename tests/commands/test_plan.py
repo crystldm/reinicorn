@@ -49,9 +49,10 @@ def test_plan_create_on_feature_branch(kb_repo: Path, capsys):
     captured = capsys.readouterr().out
     assert "PROJ-123" in captured
 
-    # Verify commit_kb called
+    # Verify commit_kb called, scoped to the plan dir (issue #35)
     mock_commit.assert_called_once()
     assert "feature/PROJ-123-foo" in mock_commit.call_args[0][1]
+    assert mock_commit.call_args.kwargs["paths"] == [pdir]
 
 
 def test_plan_create_rejects_main_branch(kb_repo: Path, capsys):
@@ -132,9 +133,10 @@ def test_plan_complete_moves_to_completed(kb_repo: Path, capsys):
     assert completed.is_dir()
     assert "complete" in (completed / "plan.md").read_text()
 
-    # Verify commit_kb called
+    # Verify commit_kb called, scoped to both ends of the move (issue #35)
     mock_commit.assert_called_once()
     assert "feature/done" in mock_commit.call_args[0][1]
+    assert mock_commit.call_args.kwargs["paths"] == [active, completed]
 
 
 def test_plan_complete_updates_status(kb_repo: Path, capsys):

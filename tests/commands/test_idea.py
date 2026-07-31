@@ -30,10 +30,11 @@ def test_idea_creates_file(kb_repo: Path, capsys):
     assert "my cool idea for testing" in content
     assert "**Status:** new" in content
 
-    # Verify commit_kb was called
+    # Verify commit_kb was called, scoped to the created file (issue #35)
     mock_commit.assert_called_once()
     assert mock_commit.call_args[0][0] == kb_repo
     assert "my-cool-idea-for-testing" in mock_commit.call_args[0][1]
+    assert mock_commit.call_args.kwargs["paths"] == files
 
 
 def test_idea_empty_text_fails(capsys):

@@ -109,7 +109,7 @@ def cmd_plan_create() -> int:
     check_overlap(branch, root)
     console.success(f"Plan created. Edit {pdir}/plan.md to add your goals and tasks.")
 
-    commit_kb(root, f"plan: create {branch}")
+    commit_kb(root, f"plan: create {branch}", paths=[pdir])
     return 0
 
 
@@ -196,5 +196,6 @@ def cmd_plan_complete(branch: str | None = None, *, repo_scope: str | None = Non
         console.warn("No retro captured for this branch — lessons learned will be lost.")
         console.next_step("rcorn retro create")
 
-    commit_kb(root, f"plan: complete {branch}")
+    # Both dirs: the deletion from active/ and the addition under completed/.
+    commit_kb(root, f"plan: complete {branch}", paths=[pdir, completed_dir])
     return 0
