@@ -41,6 +41,7 @@ SPEC_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
 
 # Explicit opt-out. Case-insensitive so "n/a" and "N/A" both count.
 SPEC_NOT_APPLICABLE = "n/a"
+_NOT_APPLICABLE_RE = re.compile(rf"{re.escape(SPEC_NOT_APPLICABLE)}\b", re.IGNORECASE)
 
 # Anchor the prose matcher on a known doc-type directory rather than on the "kb/"
 # prefix. That accepts all three path styles while bounding false positives to
@@ -173,4 +174,11 @@ def declared_spec(text: str) -> str | None:
 
 
 def is_not_applicable(value: str) -> bool:
-    return value.strip().strip("`").lower() == SPEC_NOT_APPLICABLE
+    """True when the plan declares that it implements no spec.
+
+    A trailing rationale counts: "N/A (fixes two ideas)" is a better
+    declaration than a bare "N/A", and a gate that rejects it only teaches
+    people to delete the reason. The word boundary keeps the prefix from
+    swallowing a real path — no kb doc directory begins "n/a".
+    """
+    return bool(_NOT_APPLICABLE_RE.match(value.strip().strip("`")))

@@ -172,6 +172,25 @@ class TestDraftRefs:
         self._make_plan(kb_repo, "feature-d", self._plan("n/a"))
         assert DraftRefsRule().run(kb_repo) == []
 
+    def test_not_applicable_may_carry_a_rationale(self, kb_repo: Path):
+        """'N/A (why)' is a better declaration than a bare 'N/A', so it passes.
+
+        Rejecting it would only teach people to delete the reason, which is the
+        part worth keeping.
+        """
+        self._make_plan(
+            kb_repo, "feature-d2",
+            self._plan("N/A (fixes two ideas; no spec of its own)"),
+        )
+        assert DraftRefsRule().run(kb_repo) == []
+
+    def test_path_merely_starting_with_na_is_not_exempt(self, kb_repo: Path):
+        """The 'n/a' prefix must not swallow a real path that happens to begin so."""
+        self._make_plan(kb_repo, "feature-d3", self._plan("n/august/specs/wip.md"))
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "matches no git-tracked kb path" in diags[0]
+
     # ── path styles all resolve to the same doc ──────────────
 
     @pytest.mark.parametrize("ref", [
