@@ -14,17 +14,18 @@ from pathlib import Path
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.git import run_git, scratch_clone
+from reinicorn.git import explain_failure, run_git, scratch_clone
 from reinicorn.kb_seed import generate_seed_tree
 from reinicorn.validation import validate_git_url
 
 
 class SubmoduleError(Exception):
-    """Raised when submodule setup fails with diagnostic info."""
+    """Raised when submodule setup fails.
 
-    def __init__(self, message: str, stderr: str = ""):
-        super().__init__(message)
-        self.stderr = stderr
+    The message carries the whole diagnosis, git's own output included — built
+    by `git.explain_failure`, never assembled here. Nothing outside git.py
+    reads a git result's stderr (see tests/test_git_error_surface.py).
+    """
 
 
 def is_remote_empty(url: str) -> bool:
@@ -118,13 +119,13 @@ def setup_submodule(
             run_git(*file_allow, "submodule", "update", "--init", KB_DIR_NAME, cwd=target_dir)
         else:
             cleanup_failed_submodule(target_dir)
-            raise SubmoduleError(
-                f"Failed to add kb submodule.\n"
-                f"  URL: {url}\n"
-                f"  Git error: {r.stderr.strip()}\n"
-                f"  How to fix: Check the URL is correct and you have access.",
-                stderr=r.stderr,
-            )
+            raise SubmoduleError("\n".join(explain_failure(
+                "add the kb submodule", r,
+                detail=[
+                    f"URL: {url}",
+                    "How to fix: Check the URL is correct and you have access.",
+                ],
+            )))
 
     # Configure submodule
     run_git("config", "-f", ".gitmodules", f"submodule.{KB_DIR_NAME}.branch", "main",

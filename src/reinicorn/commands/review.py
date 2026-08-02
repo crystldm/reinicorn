@@ -33,9 +33,16 @@ from reinicorn.git import (
     gh_repo_from_url,
     remote_url,
     repo_root,
+    report_failure,
     run_git,
 )
-from reinicorn.kb import commit_kb, ensure_kb_on_main, push_main_with_retry, require_kb_dir
+from reinicorn.kb import (
+    commit_kb,
+    ensure_kb_on_main,
+    push_main_with_retry,
+    report_push_failure,
+    require_kb_dir,
+)
 from reinicorn.meta import reinicorn_source_repo
 from reinicorn.mode import can_publish, get_mode
 from reinicorn.review import (
@@ -56,21 +63,28 @@ if TYPE_CHECKING:
     from reinicorn.review import ReviewTarget
 
 
+class _AlreadyReportedError(RuntimeError):
+    """The failure has been printed in full; the decorator must not repeat it."""
+
+
 def _surfacing_errors[**P](fn: Callable[P, int]) -> Callable[P, int]:
     """Surface remote/git failures as structured errors — never raw tracebacks.
 
     RuntimeError is the review.py/github.py error contract for remote-facing
-    failures; CalledProcessError covers local temp-clone git ops.
+    failures; CalledProcessError (and its GitError subclass) covers local
+    temp-clone git ops, whose text comes from the git.py seam.
     """
     @functools.wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> int:
         try:
             return fn(*args, **kwargs)
+        except _AlreadyReportedError:
+            return 1
         except RuntimeError as e:
             console.error(str(e))
             return 1
         except subprocess.CalledProcessError as e:
-            console.error(f"git failed: {e}\n{(e.stderr or '').strip()}")
+            report_failure("complete the review operation", e)
             return 1
     return wrapper
 
@@ -111,7 +125,10 @@ def _push_kb_main(kb_dir: Path) -> None:
     """Publish kb main, surfacing a failed push as an agent-readable error."""
     push = push_main_with_retry(kb_dir)
     if push.returncode != 0:
-        raise RuntimeError(f"kb push failed: {push.stderr.strip()}")
+        # Report here (only this knows the diagnosis and the next step), then
+        # unwind with a marker so the decorator does not print it a second time.
+        report_push_failure(push, kb_dir)
+        raise _AlreadyReportedError("kb push failed")
 
 
 def _stamp_draft(

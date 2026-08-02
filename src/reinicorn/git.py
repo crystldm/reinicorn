@@ -2,6 +2,15 @@
 
 Every module that needs git goes through run_git().  This gives tests a
 single mock-point.
+
+This module also owns every git-failure→message conversion. Reading
+`.stderr` off a git result is confined here (enforced by
+tests/test_git_error_surface.py): callers describe *what they were doing* and
+hand the failure to `explain_failure`/`report_failure`, which classify it and
+always print git's own words. Six modules used to invent their own shape, and
+one of them substituted a guess ("kb has conflicting changes") for an
+authentication error — the guess cost more than no diagnosis would have,
+because agents act on it.
 """
 
 from __future__ import annotations
@@ -10,6 +19,10 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Git env vars that override cwd-based repo discovery. When a git hook invokes
 # reinicorn, git sets these to point at the *invoking* worktree's gitdir — so any
@@ -24,22 +37,166 @@ _GIT_DISCOVERY_ENV_VARS = (
 )
 
 
+class GitError(subprocess.CalledProcessError):
+    """A git command that was expected to succeed did not.
+
+    Subclasses CalledProcessError on purpose: the error contract documented in
+    review.py ("local git operations may raise subprocess.CalledProcessError")
+    keeps holding for every existing handler, while new code can catch the
+    narrower type. cmd/returncode/stdout/stderr come from the base class.
+    """
+
+
 def run_git(
     *args: str,
     capture: bool = True,
     check: bool = True,
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a git command and return the CompletedProcess."""
+    """Run a git command and return the CompletedProcess.
+
+    Raises GitError when *check* is set and git fails.
+    """
     env = {k: v for k, v in os.environ.items() if k not in _GIT_DISCOVERY_ENV_VARS}
-    return subprocess.run(
+    r = subprocess.run(
         ["git", *args],
         capture_output=capture,
         text=True,
-        check=check,
+        check=False,
         cwd=cwd,
         env=env,
     )
+    if check and r.returncode != 0:
+        raise GitError(r.returncode, ["git", *args], r.stdout, r.stderr)
+    return r
+
+
+# --------------------------------------------------------------------------
+# The one git-failure→message seam
+# --------------------------------------------------------------------------
+
+#: Either shape a failed git call arrives in: a result the caller chose not to
+#: check, or the GitError raised when it did.
+GitFailure = subprocess.CompletedProcess[str] | subprocess.CalledProcessError
+
+# Ordered by precedence, not by likelihood. Auth is checked first because a
+# credential failure is often reported alongside a rejected ref, and it is the
+# diagnosis that changes what the user should do next.
+_AUTH_MARKERS = (
+    "could not read username",
+    "could not read password",
+    "permission denied (publickey)",
+    "authentication failed",
+    "invalid username or password",
+    "terminal prompts disabled",
+)
+_NON_FF_MARKERS = ("non-fast-forward", "fetch first")
+_PROTECTED_MARKERS = ("gh006", "protected branch")
+_NO_REPO_MARKERS = ("not a git repository", "not a working tree")
+
+# Domain-free on purpose: this module knows git, not the kb. Callers add their
+# own detail lines for what the failure means in their vocabulary.
+_HEADLINES = {
+    "auth": "the remote rejected authentication",
+    "non-fast-forward": "the remote has commits this push does not contain",
+    "protected": "the branch is protected and rejected a direct push",
+    "no-repo": "this is not a git repository",
+}
+
+
+def classify_failure(stderr: str) -> str:
+    """Why git failed: 'auth', 'non-fast-forward', 'protected', 'no-repo', or
+    'unknown'.
+
+    'unknown' is a real answer, not a bucket to guess from — callers must show
+    git's own output for it rather than substituting a plausible cause. So is
+    'no-repo': it exists because callers were reporting *every* failure of a
+    repo lookup as "not inside a git repository", which turned dubious
+    ownership and a corrupt repo into the same wrong sentence.
+    """
+    text = (stderr or "").lower()
+    if any(m in text for m in _AUTH_MARKERS):
+        return "auth"
+    if any(m in text for m in _NON_FF_MARKERS):
+        return "non-fast-forward"
+    if any(m in text for m in _PROTECTED_MARKERS):
+        return "protected"
+    if any(m in text for m in _NO_REPO_MARKERS):
+        return "no-repo"
+    return "unknown"
+
+
+def _stderr_of(
+    failure: subprocess.CompletedProcess[str] | subprocess.CalledProcessError,
+) -> str:
+    """git's stderr from either result shape. The only read of it in the tree."""
+    return (getattr(failure, "stderr", None) or "").strip()
+
+
+def classify_result(
+    failure: subprocess.CompletedProcess[str] | subprocess.CalledProcessError,
+) -> str:
+    """classify_failure() for a git result, so callers never touch stderr."""
+    return classify_failure(_stderr_of(failure))
+
+
+def url_protocol(url: str) -> str:
+    """The transport a remote URL uses: 'https', 'ssh', 'local', or 'unknown'."""
+    if url.startswith(("https://", "http://")):
+        return "https"
+    if url.startswith("ssh://") or (url and "@" in url.split("/")[0]):
+        return "ssh"
+    if url.startswith(("file://", "/")):
+        return "local"
+    return "unknown"
+
+
+def explain_failure(
+    action: str,
+    failure: subprocess.CompletedProcess[str] | subprocess.CalledProcessError,
+    *,
+    detail: Sequence[str] = (),
+) -> list[str]:
+    """Render a git failure as lines: headline, caller detail, then git.
+
+    *action* is what the caller was trying to do, phrased to follow "Could not"
+    ("push kb main", "merge origin/main"). Every line of git's stderr is
+    reproduced under a `git:` prefix — nothing is summarized away, and an
+    unclassifiable failure gets no invented cause at all.
+    """
+    stderr = _stderr_of(failure)
+    kind = classify_failure(stderr)
+    reason = _HEADLINES.get(kind)
+    if reason is None:
+        rc = getattr(failure, "returncode", 1)
+        reason = f"git exited {rc} and Reinicorn cannot classify why"
+    lines = [f"Could not {action} — {reason}."]
+    lines.extend(f"  {d}" for d in detail)
+    lines.extend(f"  git: {line}" for line in stderr.splitlines())
+    return lines
+
+
+def report_failure(
+    action: str,
+    failure: subprocess.CompletedProcess[str] | subprocess.CalledProcessError,
+    *,
+    detail: Sequence[str] = (),
+    warn: bool = False,
+) -> str:
+    """Print explain_failure() and return the classification.
+
+    Callers add their own `console.next_step(...)` from the returned kind: the
+    seam owns *what went wrong*, the caller owns *what to run next*, because
+    only the caller knows its command vocabulary.
+    """
+    from reinicorn import console
+
+    lines = explain_failure(action, failure, detail=detail)
+    emit = console.warn if warn else console.error
+    emit(lines[0])
+    for line in lines[1:]:
+        console.info(line)
+    return classify_result(failure)
 
 
 def repo_root(quiet: bool = False) -> Path | None:

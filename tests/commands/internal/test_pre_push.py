@@ -83,8 +83,12 @@ class TestEnsureKbPushed:
         assert result == 1
 
         captured = capsys.readouterr()
-        assert "Kb push failed" in captured.out
-        assert "cd kb && git push origin main" in captured.out
+        assert "Could not push the kb" in captured.out
+        # The hook used to print only its own prose; git's reason for refusing
+        # is what actually tells the user what to fix.
+        assert "git: " in captured.out
+        assert "/nonexistent/path" in captured.out
+        assert "rcorn kb publish" in captured.out
 
     def test_no_git_dir_in_kb_skips(self, submodule_repo: Path):
         """Kb exists but no .git → skip (not a real submodule)."""

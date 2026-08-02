@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.git import repo_root, run_git
+from reinicorn.git import explain_failure, repo_root, run_git
 from reinicorn.kb import get_kb_dir
 from reinicorn.mode import get_mode
 
@@ -70,10 +70,14 @@ def _ensure_kb_pushed(root: Path) -> int:
     print("\U0001f984 Kb submodule has unpushed commits, pushing now...")
     r = run_git("push", "origin", "main", check=False, cwd=kb_dir)
     if r.returncode != 0:
+        # A git hook writes straight to the user's terminal, so this prints
+        # rather than going through console \u2014 but the text still comes from the
+        # one seam, so "why" is never guessed at and git's own words survive.
+        print("\n\u274c " + "\n".join(explain_failure("push the kb", r)))
         print(
-            "\n\u274c Kb push failed. The parent push would create a dangling\n"
-            "   submodule pointer that breaks CI and other checkouts.\n\n"
-            f"   Fix: cd {KB_DIR_NAME} && git push origin main\n",
+            "\n   The parent push would create a dangling submodule pointer\n"
+            "   that breaks CI and other checkouts.\n"
+            "   Fix: rcorn kb publish (or bypass once with git push --no-verify)\n",
             flush=True,
         )
         return 1

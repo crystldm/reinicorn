@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
-from reinicorn.git import run_git
+from reinicorn.git import GitError, run_git
 from reinicorn.kb_seed import generate_seed_tree
 
 
@@ -68,6 +69,55 @@ def test_remove_scope_deletes_dir_and_commits(tmp_path: Path, capsys):
     assert (kb / "keep-this").is_dir(), "other scope should remain"
     out = capsys.readouterr().out
     assert "remove-this" in out
+
+
+def test_remove_scope_push_failure_gets_the_kb_push_diagnosis(
+    tmp_path: Path, capsys,
+):
+    """A failed scope-removal push is still a failed kb push.
+
+    It must carry the remote and its protocol and the classification-specific
+    next step — an auth failure here has the same fix as one from `kb publish`,
+    and "try again" is not it. Reported as a warning: the scope is already
+    removed locally and the command still succeeds.
+    """
+    from reinicorn.commands.kb_manage import cmd_kb_remove_scope
+
+    kb = tmp_path / "kb"
+    kb.mkdir()
+    _git("init", "-q", cwd=kb)
+    _git("config", "user.email", "test@test", cwd=kb)
+    _git("config", "user.name", "Test", cwd=kb)
+    _git("remote", "add", "origin", "https://github.com/crystldm/reinicorn-kb.git",
+         cwd=kb)
+    generate_seed_tree(kb, "remove-this")
+    _git("add", "-A", cwd=kb)
+    _git("commit", "-q", "-m", "init", cwd=kb)
+
+    real_run_git = run_git
+
+    def only_push_fails(*args: str, **kwargs):
+        if "push" in args:
+            raise GitError(
+                128, ["git", "push"], "",
+                "fatal: could not read Username for 'https://github.com': "
+                "No such device or address\n",
+            )
+        return real_run_git(*args, **kwargs)
+
+    with patch("reinicorn.kb_remote.git_protocol_preference", return_value="ssh"), \
+         patch("reinicorn.commands.kb_manage.run_git", side_effect=only_push_fails):
+        rc = cmd_kb_remove_scope("remove-this", kb_dir=kb, push=True, force=True)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "error:" not in out, "the scope was removed; this is a warning"
+    assert "https://github.com/crystldm/reinicorn-kb.git (https)" in out
+    assert "could not read Username" in out
+    assert (
+        "next: rcorn kb git remote set-url origin "
+        "git@github.com:crystldm/reinicorn-kb.git" in out
+    )
 
 
 def test_remove_scope_rejects_path_traversal(tmp_path: Path, capsys):
