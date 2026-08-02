@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_get
@@ -154,6 +155,27 @@ def resolve_kb_remote_url(root: Path) -> str:
     return adapt_url_to_git_protocol(configured)
 
 
+def _redact_url_credentials(url: str) -> str:
+    """Strip userinfo (user:pass@ or user@) from a URL for display purposes.
+
+    Preserves the original URL verbatim if it doesn't parse as a URL with
+    a netloc component (e.g., scp-like git@host:path or local paths).
+    """
+    if not url.startswith(("https://", "http://", "ssh://")):
+        return url
+    try:
+        parts = urlsplit(url)
+        if parts.username or parts.password:
+            # Reconstruct netloc without credentials
+            netloc = parts.hostname or ""
+            if parts.port:
+                netloc = f"{netloc}:{parts.port}"
+            return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except (ValueError, AttributeError):
+        pass
+    return url
+
+
 def apply_kb_remote_url(kb_dir: Path, url: str) -> ApplyResult:
     """Point *kb_dir*'s origin at *url*.
 
@@ -185,7 +207,8 @@ def apply_kb_remote_url(kb_dir: Path, url: str) -> ApplyResult:
     verb = "set-url" if current else "add"
     r = run_git("remote", verb, "origin", url, cwd=kb_dir, check=False)
     if r.returncode != 0:
-        report_failure(f"point the kb remote at {url}", r, warn=True)
-        console.next_step(f"rcorn kb git remote set-url origin {url}")
+        display_url = _redact_url_credentials(url)
+        report_failure(f"point the kb remote at {display_url}", r, warn=True)
+        console.next_step(f"rcorn kb git remote set-url origin {display_url}")
         return "failed"
     return "updated"
