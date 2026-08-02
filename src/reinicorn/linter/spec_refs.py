@@ -30,7 +30,7 @@ from reinicorn.docmeta import (
     STATUS_IN_REVIEW,
     get_field,
 )
-from reinicorn.git import run_git
+from reinicorn.git import explain_failure, run_git
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -94,7 +94,12 @@ def tracked_paths(kb_dir: Path) -> frozenset[str]:
     if probe.returncode != 0:
         return frozenset()
 
-    raise RuntimeError(f"git ls-files failed in {kb_dir}: {(r.stderr or '').strip()}")
+    # Both callers render this on one line (a lint diagnostic, and the push
+    # gate's fail-open notice), so the seam's lines are joined rather than
+    # printed as a block — git's own words still survive verbatim.
+    raise RuntimeError(
+        " ".join(explain_failure(f"enumerate tracked paths in {kb_dir}", r))
+    )
 
 
 def _drafts_variant(ref: str) -> str | None:
