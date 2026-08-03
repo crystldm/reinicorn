@@ -259,6 +259,21 @@ def branch_changed_files(branch: str, root: Path | None = None) -> set[str]:
     return {line for line in r.stdout.splitlines() if line}
 
 
+def kb_gitlink(root: Path, rev: str) -> str | None:
+    """The kb commit pinned by ``rev``'s tree, or None when it pins none.
+
+    ``<rev>:kb`` resolves the gitlink recorded in that revision — the kb
+    content a checkout of ``rev`` actually sees, regardless of what happens
+    to be staged or checked out right now. Pre-push checks anchor on this:
+    what ships with a pushed branch is its pinned kb commit, not the desk
+    state of the kb worktree.
+    """
+    r = run_git("rev-parse", f"{rev}:{KB_DIR_NAME}", check=False, cwd=root)
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
 def branch_dir_name(branch: str) -> str:
     """Directory name a branch's exec-plan docs live under."""
     return sanitize_branch(branch)

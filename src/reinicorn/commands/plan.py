@@ -87,6 +87,7 @@ def cmd_plan_create() -> int:
             f"**Author:** {author}\n"
             f"**Date:** {date_today}\n"
             f"**Ticket:** {ticket_id or 'N/A'}\n"
+            f"**Spec:** [kb path to the spec this implements, or N/A]\n"
             f"**Status:** planning\n"
         )
         console.success("Created minimal plan.md (no templates found).")
