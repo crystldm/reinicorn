@@ -55,6 +55,10 @@ def _gh(monkeypatch, *, available: bool = True, repo: str | None = "owner/kb", *
     gh = review_cmds.github
     monkeypatch.setattr(gh, "gh_available", lambda: available)
     monkeypatch.setattr(gh, "gh_authenticated", lambda: available)
+    # Default to a multi-collaborator repo with a known login; solo tests
+    # override gh_repo_is_solo. Keeps the merge path off real gh.
+    monkeypatch.setattr(gh, "gh_repo_is_solo", lambda _r: False)
+    monkeypatch.setattr(gh, "gh_login", lambda: "author")
     for name, fn in funcs.items():
         monkeypatch.setattr(gh, name, fn)
     monkeypatch.setattr(review_cmds, "gh_repo_from_url", lambda _url: repo)
@@ -315,6 +319,81 @@ def test_merge_no_review_decision_explains_and_offers_force(
     assert _PR_URL in out
 
 
+def test_merge_solo_repo_self_review_confirmed(env: Path, monkeypatch, capsys):
+    """Solo repo (no second reviewer possible): an explicit self-review confirm
+    lands the doc and stamps Approved-by <author> (self-reviewed)."""
+    _draft(env)
+    remote = env.parent / "kb-remote"
+    pr = {
+        "number": 7, "state": "OPEN", "reviewDecision": None,
+        "url": _PR_URL, "latestReviews": [],
+    }
+
+    def fake_merge(repo, number):
+        run_git("branch", "-f", "main", _BRANCH, cwd=remote)
+
+    _gh(monkeypatch, gh_pr_create=_pr_create, gh_pr_view=lambda *_a, **_k: pr,
+        gh_pr_merge=fake_merge, gh_repo_is_solo=lambda _r: True,
+        gh_login=lambda: "solomaint")
+    monkeypatch.setattr(review_cmds.console, "confirm", lambda _p: True)
+    assert review_cmds.cmd_review_start("x", []) == 0
+    capsys.readouterr()
+
+    assert review_cmds.cmd_review_merge("x") == 0
+    out = capsys.readouterr().out
+    assert "solo repo" in out
+    assert "approved and landed" in out
+    landed = _remote_show(remote, "main", "testproject/specs/x.md")
+    assert landed is not None
+    assert "**Approved-by:** solomaint (self-reviewed)" in landed
+
+
+def test_merge_solo_repo_declined_offers_force(env: Path, monkeypatch, capsys):
+    """Declining the solo self-review is not a dead-end — it points at --force
+    and does not merge."""
+    _draft(env)
+    pr = {
+        "number": 7, "state": "OPEN", "reviewDecision": None,
+        "url": _PR_URL, "latestReviews": [],
+    }
+    merged = MagicMock()
+    _gh(monkeypatch, gh_pr_create=_pr_create, gh_pr_view=lambda *_a, **_k: pr,
+        gh_pr_merge=merged, gh_repo_is_solo=lambda _r: True)
+    monkeypatch.setattr(review_cmds.console, "confirm", lambda _p: False)
+    assert review_cmds.cmd_review_start("x", []) == 0
+    capsys.readouterr()
+
+    assert review_cmds.cmd_review_merge("x") == 1
+    out = capsys.readouterr().out
+    assert "solo repo" in out
+    assert "next: rcorn review merge x --force" in out
+    merged.assert_not_called()
+
+
+def test_merge_force_without_approval_stamps_self_reviewed(env: Path, monkeypatch, capsys):
+    """--force with no genuine approval records a self-review, never a phantom
+    approver (honest Approved-by stamp)."""
+    _draft(env)
+    remote = env.parent / "kb-remote"
+    pr = {
+        "number": 7, "state": "OPEN", "reviewDecision": None,
+        "url": _PR_URL, "latestReviews": [],
+    }
+
+    def fake_merge(repo, number):
+        run_git("branch", "-f", "main", _BRANCH, cwd=remote)
+
+    _gh(monkeypatch, gh_pr_create=_pr_create, gh_pr_view=lambda *_a, **_k: pr,
+        gh_pr_merge=fake_merge, gh_login=lambda: "forcer")
+    assert review_cmds.cmd_review_start("x", []) == 0
+    capsys.readouterr()
+
+    assert review_cmds.cmd_review_merge("x", force=True) == 0
+    landed = _remote_show(remote, "main", "testproject/specs/x.md")
+    assert landed is not None
+    assert "**Approved-by:** forcer (self-reviewed)" in landed
+
+
 def test_merge_force_bypasses_divergence(env: Path, monkeypatch, capsys):
     """--force merges a diverged (edited-after-start) draft without re-pushing."""
     draft = _draft(env)
@@ -550,21 +629,198 @@ def test_setup_hints_cleanup_secret_when_ruleset_applies(env, monkeypatch, capsy
     assert "gh secret set KB_CLEANUP_TOKEN --repo o/kb" in out
 
 
-def test_setup_detects_existing_ruleset(env, monkeypatch, capsys):
-    """An already-installed ruleset is not a failure — report it as such (not
-    'plan/permissions?') and still surface the secret hint."""
-    _gh_ok(monkeypatch)
-    listing = '[{"name": "reinicorn-doc-review", "id": 1}]'
+def _role(actor_id):
+    return {"actor_id": actor_id, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+
+
+def _ruleset_gh(monkeypatch, *, detail, captured=None):
+    """Wire run_gh for a ruleset that already exists (id=1).
+
+    list → [{name, id:1}]; detail-fetch → *detail* (dict → JSON, or a
+    CompletedProcess for failure paths); PUT → records its body into *captured*
+    and succeeds. POST must never happen (the ruleset exists).
+    """
+    import json as _json
+    listing = _json.dumps([{"name": "reinicorn-doc-review", "id": 1}])
 
     def fake_run_gh(*args, **kwargs):
-        assert "--method" not in args, "must not POST a duplicate ruleset"
+        if "--method" in args and "PUT" in args:
+            if captured is not None:
+                captured["body"] = _json.loads(kwargs["input_text"])
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        assert "POST" not in args, "must not POST a duplicate ruleset"
+        if args[:2] == ("api", "repos/o/kb/rulesets/1"):
+            if isinstance(detail, subprocess.CompletedProcess):
+                return detail
+            return subprocess.CompletedProcess(args, 0, stdout=_json.dumps(detail), stderr="")
         return subprocess.CompletedProcess(args, 0, stdout=listing, stderr="")
 
     monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+
+
+def test_setup_detects_existing_ruleset(env, monkeypatch, capsys):
+    """A compliant same-named ruleset (required roles present, extra user actor
+    and all) is a no-op — report it installed and still surface the secret hint,
+    without a PUT."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), _role(4), _role(2),
+                          {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"}],
+    })
     assert review_cmds.cmd_review_setup() == 0
     out = capsys.readouterr().out
     assert "already installed" in out
     assert "KB_CLEANUP_TOKEN" in out
+
+
+def test_setup_detects_outdated_ruleset_without_force(env, monkeypatch, capsys):
+    """A same-named ruleset missing the maintain-role bypass ({4,5} only) is
+    drift — without --force, warn and direct to --force, never mutate."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), _role(4)],
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "outdated" in out
+    assert "rcorn review setup --force" in out
+    assert "KB_CLEANUP_TOKEN" in out  # still active → secret hint stands
+
+
+def test_setup_force_repairs_outdated_ruleset(env, monkeypatch, capsys):
+    """--force merges the missing maintain role into the installed set without
+    dropping unrelated user-added actors."""
+    _gh_ok(monkeypatch)
+    captured = {}
+    _ruleset_gh(monkeypatch, captured=captured, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), _role(4),
+                          {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"}],
+        "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+        "rules": [{"type": "pull_request", "parameters": {"custom": True}}],
+    })
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    out = capsys.readouterr().out
+    assert "ruleset updated" in out
+    roles = {a["actor_id"] for a in captured["body"]["bypass_actors"]}
+    assert roles == {2, 4, 5, 99}  # required merged in, user Team preserved
+    # user-customized rules/conditions round-trip untouched
+    assert captured["body"]["rules"] == [{"type": "pull_request", "parameters": {"custom": True}}]
+
+
+def test_setup_force_replaces_mismatched_bypass_mode(env, monkeypatch, capsys):
+    """An existing bypass actor with the same identity but wrong bypass_mode
+    (e.g., pull_request instead of always) is replaced by the canonical required
+    entry, not duplicated."""
+    _gh_ok(monkeypatch)
+    captured = {}
+    _ruleset_gh(monkeypatch, captured=captured, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        # admin & write have correct mode; maintain is missing; write appears
+        # again with wrong mode to verify identity-based deduplication.
+        "bypass_actors": [
+            _role(5),  # admin: correct
+            # write, but with the wrong mode
+            {"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"},
+            {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"},  # unrelated
+        ],
+        "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+        "rules": [{"type": "pull_request", "parameters": {}}],
+    })
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    out = capsys.readouterr().out
+    assert "ruleset updated" in out
+    bypass = captured["body"]["bypass_actors"]
+    # Extract (actor_id, actor_type, bypass_mode) tuples for required roles
+    roles = {
+        (a["actor_id"], a["actor_type"], a["bypass_mode"])
+        for a in bypass
+        if a["actor_type"] == "RepositoryRole"
+    }
+    # All three required roles present with correct mode "always", no duplicates
+    assert roles == {(2, "RepositoryRole", "always"),
+                     (4, "RepositoryRole", "always"),
+                     (5, "RepositoryRole", "always")}
+    # Unrelated Team actor preserved
+    assert any(a["actor_id"] == 99 and a["actor_type"] == "Team" for a in bypass)
+
+
+def test_setup_ruleset_bypass_actors_opaque(env, monkeypatch, capsys):
+    """GitHub omits bypass_actors when the token lacks ruleset write access —
+    warn with remediation, never assume current, never PUT."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+    })  # no bypass_actors key
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "not visible to this token" in out
+    assert "KB_CLEANUP_TOKEN" in out  # active → hint stands
+
+
+def test_setup_ruleset_detail_unreadable(env, monkeypatch, capsys):
+    """A failed detail fetch warns rather than assuming the ruleset is current."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail=subprocess.CompletedProcess(
+        ("api",), 1, stdout="", stderr="404"))
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "could not be read" in out
+    assert "settings/rules" in out
+
+
+def test_setup_ruleset_detail_malformed_json(env, monkeypatch, capsys):
+    """A successful detail fetch returning malformed JSON warns rather than
+    crashing or assuming the ruleset is current."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail=subprocess.CompletedProcess(
+        ("api",), 0, stdout="{not valid json", stderr=""))
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
+
+
+def test_setup_ruleset_detail_non_dict_json(env, monkeypatch, capsys):
+    """A successful detail fetch returning valid JSON that's not a dict (e.g.,
+    a list) warns rather than crashing."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail=subprocess.CompletedProcess(
+        ("api",), 0, stdout="[1, 2, 3]", stderr=""))
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
+
+
+def test_setup_ruleset_bypass_actors_non_list(env, monkeypatch, capsys):
+    """bypass_actors present but not a list (e.g., a dict or string) warns
+    rather than crashing."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": {"not": "a list"},
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
+
+
+def test_setup_ruleset_bypass_actors_list_with_non_dict_entries(env, monkeypatch, capsys):
+    """bypass_actors is a list but contains non-dict entries (e.g., strings or
+    numbers) warns rather than crashing."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), "not a dict", 42, _role(4)],
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
 
 
 def test_setup_no_secret_hint_when_ruleset_not_applied(env, monkeypatch, capsys):
@@ -580,6 +836,47 @@ def test_setup_no_secret_hint_when_ruleset_not_applied(env, monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "ruleset not applied" in out
     assert "KB_CLEANUP_TOKEN" not in out
+
+
+def test_setup_warns_on_solo_repo(env, monkeypatch, capsys):
+    """On a solo repo, setup warns up front that the approval gate can only be
+    a self-review — so the merge-time prompt is never a surprise."""
+    import json
+    _gh_ok(monkeypatch)
+    solo = json.dumps([{"login": "owner", "permissions": {"push": True}}])
+
+    def fake_run_gh(*args, **kwargs):
+        if "collaborators" in args[1]:
+            return subprocess.CompletedProcess(args, 0, stdout=solo, stderr="")
+        if "--method" in args:  # POST: create ruleset
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "solo repo" in out
+
+
+def test_setup_no_solo_warning_when_multiple_collaborators(env, monkeypatch, capsys):
+    """A repo with two push-capable collaborators is not solo — no warning."""
+    import json
+    _gh_ok(monkeypatch)
+    team = json.dumps([
+        {"login": "owner", "permissions": {"push": True}},
+        {"login": "alice", "permissions": {"push": True}},
+    ])
+
+    def fake_run_gh(*args, **kwargs):
+        if "collaborators" in args[1]:
+            return subprocess.CompletedProcess(args, 0, stdout=team, stderr="")
+        if "--method" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    assert "solo repo" not in capsys.readouterr().out
 
 
 # ── error surfacing ──────────────────────────────────────────

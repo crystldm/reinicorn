@@ -53,7 +53,7 @@ def test_multi_repo_init_creates_scope_dir(tmp_path: Path):
     from unittest.mock import patch
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="repo-b"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url=str(bare), cwd=repo_b)
 
     assert rc == 0
@@ -99,7 +99,7 @@ def test_multi_repo_init_idempotent(tmp_path: Path):
     from unittest.mock import patch
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="repo-b"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc1 = cmd_init(kb_url=str(bare), cwd=repo_b)
 
     assert rc1 == 0
@@ -108,7 +108,7 @@ def test_multi_repo_init_idempotent(tmp_path: Path):
     # Run init again — should succeed without errors
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="repo-b"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc2 = cmd_init(kb_url=str(bare), cwd=repo_b)
 
     assert rc2 == 0

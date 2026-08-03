@@ -119,6 +119,12 @@ if [ -f pyproject.toml ]; then poetry install; fi
 if [ -f go.mod ]; then go mod download; fi
 ```
 
+**Kb submodule (Reinicorn repos):** the post-checkout git hook initializes
+`kb/` automatically on `git worktree add`, borrowing objects from the main
+checkout via `--reference` (no network fetch). If `kb/` is empty, hooks
+aren't installed — run `git submodule update --init kb` manually, or
+`rcorn hooks install` (from any worktree) to fix it permanently.
+
 ## Step 3: Verify Clean Baseline
 
 Run tests to ensure workspace starts clean:

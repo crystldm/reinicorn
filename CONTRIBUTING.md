@@ -27,9 +27,25 @@ management.
 
 ```bash
 uv sync                 # install deps into .venv
-uv run pytest           # run the test suite
+uv run pytest           # run the test suite (reports coverage)
 uv run ruff check .     # lint
 uv run pyright          # type-check (src/ only)
+```
+
+### Coverage
+
+`uv run pytest` measures branch coverage of `src/reinicorn` and prints a
+per-file table with the uncovered lines. The run fails below **87%** total.
+That floor is a ratchet: raise it as coverage improves, don't lower it to
+turn a red build green.
+
+CI publishes the same table to the workflow run's summary page, and attaches
+a browsable line-by-line HTML report as the `coverage-html` artifact. For
+that report locally:
+
+```bash
+uv run pytest --cov-report=html
+# then open htmlcov/index.html in your browser
 ```
 
 Knowledge-base operations go through the CLI, never raw git in `kb/`:

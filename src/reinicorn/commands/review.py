@@ -33,9 +33,16 @@ from reinicorn.git import (
     gh_repo_from_url,
     remote_url,
     repo_root,
+    report_failure,
     run_git,
 )
-from reinicorn.kb import commit_kb, ensure_kb_on_main, push_main_with_retry, require_kb_dir
+from reinicorn.kb import (
+    commit_kb,
+    ensure_kb_on_main,
+    push_main_with_retry,
+    report_push_failure,
+    require_kb_dir,
+)
 from reinicorn.meta import reinicorn_source_repo
 from reinicorn.mode import can_publish, get_mode
 from reinicorn.review import (
@@ -56,21 +63,28 @@ if TYPE_CHECKING:
     from reinicorn.review import ReviewTarget
 
 
+class _AlreadyReportedError(RuntimeError):
+    """The failure has been printed in full; the decorator must not repeat it."""
+
+
 def _surfacing_errors[**P](fn: Callable[P, int]) -> Callable[P, int]:
     """Surface remote/git failures as structured errors — never raw tracebacks.
 
     RuntimeError is the review.py/github.py error contract for remote-facing
-    failures; CalledProcessError covers local temp-clone git ops.
+    failures; CalledProcessError (and its GitError subclass) covers local
+    temp-clone git ops, whose text comes from the git.py seam.
     """
     @functools.wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> int:
         try:
             return fn(*args, **kwargs)
+        except _AlreadyReportedError:
+            return 1
         except RuntimeError as e:
             console.error(str(e))
             return 1
         except subprocess.CalledProcessError as e:
-            console.error(f"git failed: {e}\n{(e.stderr or '').strip()}")
+            report_failure("complete the review operation", e)
             return 1
     return wrapper
 
@@ -111,7 +125,10 @@ def _push_kb_main(kb_dir: Path) -> None:
     """Publish kb main, surfacing a failed push as an agent-readable error."""
     push = push_main_with_retry(kb_dir)
     if push.returncode != 0:
-        raise RuntimeError(f"kb push failed: {push.stderr.strip()}")
+        # Report here (only this knows the diagnosis and the next step), then
+        # unwind with a marker so the decorator does not print it a second time.
+        report_push_failure(push, kb_dir)
+        raise _AlreadyReportedError("kb push failed")
 
 
 def _stamp_draft(
@@ -285,10 +302,28 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
                 console.next_step(f"rcorn review link {target.slug} <pr-url>")
                 return 1
             decision = pr.get("reviewDecision") or ""
+            self_review = False
             if decision != github.REVIEW_DECISION_APPROVED and not force:
-                if decision:
+                solo = github.gh_repo_is_solo(gh_repo)
+                if solo:
+                    # Structurally unsatisfiable: GitHub forbids approving your
+                    # own PR, so the lone maintainer (always the author) can
+                    # never satisfy the gate. Offer an explicit self-review
+                    # instead of the dead-end.
+                    console.warn(
+                        "solo repo — no second reviewer can approve this PR "
+                        "(GitHub forbids approving your own), so the review "
+                        "gate can only be satisfied by a self-review."
+                    )
+                    print(pr["url"])
+                    if not console.confirm(f"Self-review and merge {target.slug}?"):
+                        console.next_step(f"rcorn review merge {target.slug} --force")
+                        return 1
+                    self_review = True
+                elif decision:
                     console.error(f"PR is not approved (decision: {decision}).")
                     print(pr["url"])
+                    return 1
                 else:
                     # GitHub only populates reviewDecision when a required-review
                     # rule exists; without one (setup not run, or its best-effort
@@ -303,14 +338,21 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
                         "rcorn review setup installs the ruleset."
                     )
                     console.next_step(f"rcorn review merge {target.slug} --force")
-                return 1
+                    return 1
             github.gh_pr_merge(gh_repo, pr["number"])
             pr_url = pr["url"]
-            approved_by = ", ".join(sorted({
+            approvers = sorted({
                 r["author"]["login"]
                 for r in pr.get("latestReviews") or []
                 if r.get("state") == github.REVIEW_DECISION_APPROVED
-            }))
+            })
+            if approvers:
+                approved_by = ", ".join(approvers)
+            elif self_review or force:
+                # Landed without a second party's approval — a solo self-review
+                # or a forced merge. Record it as self-reviewed, not approved,
+                # so the stamp never overstates the review.
+                approved_by = f"{github.gh_login() or 'author'} (self-reviewed)"
         else:
             console.warn("gh unavailable — merge the PR in the GitHub UI, then rerun.")
             if pr_url:
@@ -410,6 +452,118 @@ _RULESET = {
     ],
 }
 
+# The push-capable bypasses every kb collaborator needs, as comparable tuples —
+# one source of truth shared by ruleset creation and drift reconciliation.
+_REQUIRED_BYPASS = frozenset(
+    (a["actor_id"], a["actor_type"], a["bypass_mode"])
+    for a in _RULESET["bypass_actors"]
+)
+
+
+def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) -> None:
+    """Repair a same-named ruleset that is missing required bypass actors.
+
+    Name-matching alone is not enough: a ruleset from an earlier Reinicorn
+    version can retain the same name while lacking the maintain-role bypass,
+    silently blocking `kb publish` for some collaborators. This fetches the
+    installed ruleset, compares its bypass actors against _REQUIRED_BYPASS as a
+    subset, and — only under --force — merges the missing required roles in
+    while preserving every user-added actor (additive, never destructive).
+    """
+    import json
+    detail = github.run_gh("api", f"repos/{gh_repo}/rulesets/{ruleset_id}", check=False)
+    manual = f"https://github.com/{gh_repo}/settings/rules"
+    if detail.returncode != 0:
+        console.warn(
+            "doc-review ruleset is installed but its configuration could not be "
+            f"read — verify the maintain/write/admin bypass manually at {manual}"
+        )
+        return
+    try:
+        data = json.loads(detail.stdout)
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        console.warn(
+            "doc-review ruleset is installed but returned an unreadable "
+            f"configuration — verify the maintain/write/admin bypass at {manual}"
+        )
+        return
+    actors = data.get("bypass_actors")
+    if actors is None:
+        # GitHub omits bypass_actors unless the token has write access to the
+        # ruleset — can't verify, so never assume current and never overwrite.
+        console.warn(
+            "doc-review ruleset is installed but its bypass actors are not "
+            "visible to this token (needs ruleset write access) — verify that "
+            f"maintain, write, and admin roles bypass it at {manual}"
+        )
+        return
+    if not isinstance(actors, list) or not all(isinstance(a, dict) for a in actors):
+        console.warn(
+            "doc-review ruleset is installed but returned an unreadable "
+            f"configuration — verify the maintain/write/admin bypass at {manual}"
+        )
+        return
+    installed = {
+        (a.get("actor_id"), a.get("actor_type"), a.get("bypass_mode"))
+        for a in actors
+    }
+    missing = _REQUIRED_BYPASS - installed
+    if not missing:
+        console.info("doc-review ruleset already installed")
+        return
+    if not force:
+        console.warn(
+            "doc-review ruleset is outdated — it lacks the maintain/write/admin "
+            "bypass, so some collaborators cannot push to kb main."
+        )
+        console.next_step("rcorn review setup --force")
+        return
+    # Merge required roles into the installed set, rebuilding the PUT body from
+    # the fetched ruleset so user-customized rules/conditions round-trip intact.
+    # Deduplicate by (actor_id, actor_type): required entries replace any
+    # same-identity actor with a mismatched bypass_mode; unrelated actors pass
+    # through unchanged.
+    required_map = {
+        (aid, atype): (aid, atype, mode)
+        for (aid, atype, mode) in _REQUIRED_BYPASS
+    }
+    deduped = []
+    for a in actors:
+        identity = (a.get("actor_id"), a.get("actor_type"))
+        if identity in required_map:
+            # Skip this actor; the canonical required entry will be added below
+            continue
+        deduped.append(a)
+    merged = deduped + [
+        {"actor_id": aid, "actor_type": atype, "bypass_mode": mode}
+        for (aid, atype, mode) in sorted(_REQUIRED_BYPASS)
+    ]
+    body = {
+        "name": data.get("name", _RULESET["name"]),
+        "target": data.get("target", _RULESET["target"]),
+        "enforcement": data.get("enforcement", _RULESET["enforcement"]),
+        "bypass_actors": merged,
+    }
+    for optional in ("conditions", "rules"):
+        if data.get(optional) is not None:
+            body[optional] = data[optional]
+    r = github.run_gh(
+        "api", f"repos/{gh_repo}/rulesets/{ruleset_id}", "--method", "PUT",
+        "--input", "-", check=False, input_text=json.dumps(body),
+    )
+    if r.returncode == 0:
+        console.success(
+            "doc-review ruleset updated — merged the missing maintain/write/admin "
+            "bypass actors (existing actors preserved)"
+        )
+    else:
+        console.warn(
+            "ruleset update failed (plan/permissions?) — Reinicorn's own "
+            "divergence check remains the guardrail"
+        )
+
 
 def cmd_review_setup(force: bool = False) -> int:
     """Install the doc-review CI cleanup workflow and a best-effort ruleset.
@@ -457,14 +611,21 @@ def cmd_review_setup(force: bool = False) -> int:
         existing = github.run_gh(
             "api", f"repos/{gh_repo}/rulesets", check=False,
         )
+        existing_id = None
         if existing.returncode == 0:
             try:
-                names = {rs.get("name") for rs in json.loads(existing.stdout)}
-            except ValueError:
-                names = set()
-            applied = _RULESET["name"] in names
-        if applied:
-            console.info("doc-review ruleset already installed")
+                for rs in json.loads(existing.stdout):
+                    if rs.get("name") == _RULESET["name"]:
+                        existing_id = rs.get("id")
+                        break
+            except (ValueError, AttributeError, TypeError):
+                existing_id = None
+        if existing_id is not None:
+            # Same name is not proof of a current config — an earlier version's
+            # ruleset can be missing a required bypass. Verify and, under
+            # --force, repair rather than trusting the name.
+            applied = True
+            _reconcile_ruleset_bypass(gh_repo, existing_id, force=force)
         else:
             r = github.run_gh(
                 "api", f"repos/{gh_repo}/rulesets", "--method", "POST",
@@ -489,6 +650,15 @@ def cmd_review_setup(force: bool = False) -> int:
             )
             console.next_step(
                 f"gh secret set KB_CLEANUP_TOKEN --repo {gh_repo}"
+            )
+        if applied and github.gh_repo_is_solo(gh_repo):
+            # A required-review gate on a solo repo is structurally
+            # unsatisfiable — GitHub forbids approving your own PR. Say so up
+            # front so the merge-time self-review path is never a surprise.
+            console.warn(
+                "solo repo — the required-review gate can only be satisfied by "
+                "a self-review (no second reviewer exists). `rcorn review "
+                "merge` will offer this; --force also lands it."
             )
     else:
         console.warn("gh unavailable — ruleset skipped; apply manually if wanted")

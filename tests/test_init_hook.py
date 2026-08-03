@@ -31,7 +31,7 @@ def test_init_installs_session_hook(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo)
 
     assert rc == 0
@@ -62,7 +62,7 @@ def test_init_preserves_existing_settings(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo)
 
     assert rc == 0
@@ -81,7 +81,7 @@ def test_init_idempotent_hook(tmp_path: Path):
     for _ in range(2):
         with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
              patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-             patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+             patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
             cmd_init(kb_url="unused", local=True, cwd=repo)
 
     data = json.loads((repo / ".claude" / "settings.json").read_text())

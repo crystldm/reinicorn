@@ -22,7 +22,7 @@ def test_init_writes_manifest(tmp_path: Path):
     with patch("reinicorn.commands.init.setup_submodule"), \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="test-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="https://example.com/kb.git", cwd=repo)
 
     assert rc == 0

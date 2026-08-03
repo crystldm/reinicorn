@@ -44,7 +44,7 @@ def test_init_slug_override(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="auto-derived"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo, slug="custom-name")
 
     assert rc == 0
@@ -214,7 +214,7 @@ def test_init_without_slug_uses_repo_slug(tmp_path: Path):
 
     with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="auto-derived"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         rc = cmd_init(kb_url="unused", local=True, cwd=repo)
 
     assert rc == 0
@@ -234,7 +234,7 @@ def test_init_substitutes_repo_in_agents_md(tmp_path: Path):
     with patch("reinicorn.commands.init.get_asset_path") as asset_path, \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="my-repo"), \
-         patch("reinicorn.commands.init._prompt_platforms", return_value=["claude"]):
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
         asset_path.side_effect = (
             lambda name: template if name == "templates/AGENTS.md" else None
         )
