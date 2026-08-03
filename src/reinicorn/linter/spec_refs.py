@@ -3,16 +3,24 @@
 Shared by the ``kb/draft-refs`` lint rule and the ``_pre-push`` approval gate so
 the two can never disagree about whether a reference is approved.
 
-Resolution is against ``git ls-files``, not the filesystem. That is cheaper than
-stat-ing candidates and disposes of two problems by construction:
+Resolution is against git, not the filesystem — but the two callers ask about
+different revisions, because they answer different questions:
 
-* **Containment.** ``git ls-files`` only ever emits repo-relative paths under the
-  kb root, so a reference containing ``..``, an absolute path, or anything
-  outside the kb simply fails to match. No caller-supplied string is joined onto
-  a filesystem path before it has been proven to name a tracked kb file.
-* **Untracked files.** A doc that exists on disk but was never committed is not a
-  real reference. Git is the authority the review lane runs on, so the check
-  agrees with what a reviewer sees on the branch.
+* The **lint** asks "is what I am working on clean?" and resolves against the
+  index (:func:`tracked_paths`), so work in progress lints before it is
+  committed. In CI the index equals the committed tree.
+* The **push gate** asks "is what I am shipping clean?" and resolves against
+  the kb commit the pushed branch pins (:func:`tracked_paths_at`), because that
+  commit — not the kb index or worktree — is what a reviewer checks out.
+
+Either way, git-emitted paths dispose of two problems by construction:
+
+* **Containment.** Git only ever emits repo-relative paths under the kb root,
+  so a reference containing ``..``, an absolute path, or anything outside the
+  kb simply fails to match. No caller-supplied string is joined onto a
+  filesystem path before it has been proven to name a tracked kb file.
+* **Untracked files.** A doc that exists on disk but was never staged (for the
+  lint) or committed and pinned (for the gate) is not a real reference.
 """
 
 from __future__ import annotations
@@ -105,6 +113,37 @@ def tracked_paths(kb_dir: Path) -> frozenset[str]:
     )
 
 
+def tracked_paths_at(kb_dir: Path, rev: str) -> frozenset[str]:
+    """kb-relative paths in the tree of kb revision ``rev``.
+
+    The committed truth: a staged-but-uncommitted doc, a worktree edit, or
+    anything newer than ``rev`` is invisible here. A failure raises — ``rev``
+    comes from a gitlink the caller just resolved, so an unlistable tree is an
+    internal error for the gate's loud fail-open path, not "every spec
+    unresolved".
+    """
+    r = run_git("ls-tree", "-r", "--name-only", "-z", rev, check=False, cwd=kb_dir)
+    if r.returncode != 0:
+        raise RuntimeError(
+            " ".join(explain_failure(f"list the kb tree at {rev}", r))
+        )
+    return frozenset(p for p in r.stdout.split("\0") if p)
+
+
+def doc_text_at(kb_dir: Path, rev: str, path: str) -> str:
+    """Content of ``rev:path`` in the kb.
+
+    ``path`` must already have been proven present in ``rev``'s tree (via
+    :func:`tracked_paths_at`), so a failure here is an internal error too.
+    """
+    r = run_git("cat-file", "blob", f"{rev}:{path}", check=False, cwd=kb_dir)
+    if r.returncode != 0:
+        raise RuntimeError(
+            " ".join(explain_failure(f"read {path} from kb revision {rev}", r))
+        )
+    return r.stdout
+
+
 def _drafts_variant(ref: str) -> str | None:
     """``<dir>/<file>.md`` -> ``<dir>/drafts/<file>.md``, or None if already there."""
     head, sep, tail = ref.rpartition("/")
@@ -165,15 +204,28 @@ def is_spec_path(path: str) -> bool:
     return SPEC_DIR_NAME in path.split("/")[:-1]
 
 
-def unapproved_reason(path: str, kb_dir: Path) -> str | None:
+def unapproved_reason(
+    path: str, kb_dir: Path, rev: str | None = None
+) -> str | None:
     """Why ``path`` is unapproved, or None when it is fine to build on.
 
-    ``path`` must already have been proven tracked by :func:`resolve_ref`; only
-    then is it safe to read.
+    ``path`` must already have been proven tracked by :func:`resolve_ref`.
+    With ``rev``, the status is read from that kb revision — the push gate's
+    view. Without it, from the worktree — the lint's view — where a tracked
+    file missing from disk is a *finding*, not a crash: ``rm`` without
+    ``git rm`` is ordinary user state, and the lint runner does not guard
+    built-in rules.
     """
     if f"/{DRAFTS_DIR_NAME}/" in f"/{path}":
         return "drafts-annex doc (unapproved; building on a draft needs sign-off)"
-    status = get_field((kb_dir / path).read_text(), FIELD_STATUS)
+    if rev is not None:
+        text = doc_text_at(kb_dir, rev, path)
+    else:
+        try:
+            text = (kb_dir / path).read_text()
+        except OSError as e:
+            return f"tracked but unreadable in the worktree ({e})"
+    status = get_field(text, FIELD_STATUS)
     if status in _UNAPPROVED_STATUSES:
         return f"status '{status}' (approval pending)"
     return None

@@ -7,27 +7,31 @@ branches being pushed, decide whether the review lane was respected.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
-from reinicorn.config import kb_scope
-from reinicorn.kb import branch_doc_path, get_kb_dir
+from reinicorn.config import KB_DIR_NAME, kb_scope
+from reinicorn.kb import branch_doc_path, get_kb_dir, kb_gitlink
 from reinicorn.linter.spec_refs import (
     SPEC_DIR_NAME,
     declared_spec,
+    doc_text_at,
     is_not_applicable,
     is_spec_path,
     resolve_ref,
-    tracked_paths,
+    tracked_paths_at,
     unapproved_reason,
 )
 from reinicorn.mode import get_mode
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 def ensure_plan_spec_approved(root: Path, branches: list[str]) -> int:
     """Block the push when any pushed branch's plan builds on an unapproved spec.
+
+    Everything here is read from the kb commit each pushed branch pins
+    (``<branch>:kb``) — never from the kb index or worktree. What a reviewer
+    checks out is that pinned commit, so a staged-but-uncommitted spec, an
+    uncommitted status edit, or a kb commit the branch never pointed at must
+    not satisfy the gate.
 
     Fails *open*, unlike `_ensure_kb_pushed`. That asymmetry is deliberate: the
     kb-pointer check guards data integrity, where a dangling pointer breaks every
@@ -56,14 +60,25 @@ def ensure_plan_spec_approved(root: Path, branches: list[str]) -> int:
         branch = ", ".join(branches)
 
         scope = kb_scope(root)
-        tracked = tracked_paths(kb_dir)
 
         for branch in branches:
-            plan = branch_doc_path("plan", kb_dir / scope, branch)
-            if not plan.is_file():
+            if not branch:
+                # A bare '' would make rev-parse read ':kb' — the index, the
+                # exact desk state this gate must not consult.
                 continue
-            plan_path = str(plan.relative_to(root))
-            rc = _check_plan(plan, plan_path, scope, kb_dir, tracked)
+            rev = kb_gitlink(root, branch)
+            if rev is None:
+                continue
+            # A relative base yields the kb-relative path for tree lookup.
+            plan_rel = branch_doc_path("plan", Path(scope), branch).as_posix()
+            tracked = tracked_paths_at(kb_dir, rev)
+            if plan_rel not in tracked:
+                continue
+            plan_path = f"{KB_DIR_NAME}/{plan_rel}"
+            rc = _check_plan(
+                doc_text_at(kb_dir, rev, plan_rel),
+                plan_path, scope, kb_dir, rev, tracked,
+            )
             if rc != 0:
                 return rc
 
@@ -80,9 +95,10 @@ def ensure_plan_spec_approved(root: Path, branches: list[str]) -> int:
 
 
 def _check_plan(
-    plan: Path, plan_path: str, scope: str, kb_dir: Path, tracked: frozenset[str]
+    text: str, plan_path: str, scope: str, kb_dir: Path, rev: str,
+    tracked: frozenset[str],
 ) -> int:
-    value = declared_spec(plan.read_text())
+    value = declared_spec(text)
 
     if value is None:
         return _block(
@@ -104,8 +120,10 @@ def _check_plan(
     if res.path is None:
         return _block(
             plan_path,
-            f"'**Spec:** {value}' matches no git-tracked kb path",
-            "Fix the path, or commit and publish the doc it names.",
+            f"'**Spec:** {value}' matches no path in the kb commit this "
+            "branch pins",
+            "Fix the path, or commit the doc to the kb and update the "
+            "branch's kb pointer.",
         )
 
     if not is_spec_path(res.path):
@@ -115,7 +133,7 @@ def _check_plan(
             f"Name a doc under '{SPEC_DIR_NAME}/', or 'N/A' if there is none.",
         )
 
-    reason = unapproved_reason(res.path, kb_dir)
+    reason = unapproved_reason(res.path, kb_dir, rev=rev)
     if reason:
         slug = res.path.rsplit("/", 1)[-1].removesuffix(".md")
         return _block(
