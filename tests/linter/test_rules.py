@@ -351,6 +351,19 @@ class TestDraftRefs:
         )
         assert DraftRefsRule().run(kb_repo) == []
 
+    def test_tracked_but_deleted_doc_is_a_finding_not_a_crash(self, kb_repo: Path):
+        """`rm` without `git rm` leaves a tracked path with no file behind it.
+
+        The runner does not guard built-in rules, so an unguarded read here
+        would abort the whole lint run instead of reporting one diagnostic.
+        """
+        self._make_spec(kb_repo, "specs/gone.md", "approved")
+        self._make_plan(kb_repo, "feature-s", self._plan("specs/gone.md"))
+        (kb_repo / "kb" / "testproject" / "specs" / "gone.md").unlink()
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "unreadable" in diags[0]
+
     def test_unresolvable_prose_is_ignored(self, kb_repo: Path):
         """Prose is not a contract — only the declared field is held to that."""
         self._make_plan(
