@@ -114,6 +114,7 @@ def cmd_plan_create() -> int:
                 "author": author,
                 "branch": branch,
                 "ticket": ticket_id or "N/A",
+                "spec": "[kb path to the spec this implements, or N/A]",
             },
             f"\n# Execution Plan: {branch}\n",
         ))

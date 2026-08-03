@@ -31,6 +31,7 @@ from reinicorn.git import (
     reinicorn_root,
     remote_uses_ssh,
     repo_slug,
+    report_failure,
     run_git,
 )
 from reinicorn.github import (
@@ -277,7 +278,7 @@ def cmd_init(
             run_git(*ft, "push", "-q", "origin", "HEAD", cwd=kb_dir)
             console.success(f"Created {KB_DIR_NAME}/{slug}/ in shared kb")
         except subprocess.CalledProcessError as e:
-            console.warn(f"Could not push repo-scoped dir for '{slug}': {e.stderr or e}")
+            report_failure(f"push the repo-scoped kb dir for '{slug}'", e, warn=True)
             console.warn("You can push the kb changes manually later.")
 
     hooks_rc = _setup_assets(

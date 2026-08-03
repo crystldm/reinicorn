@@ -182,9 +182,10 @@ def test_push_candidate_failure_surfaces_stderr(kb_pair):
     hook = bare / "hooks" / "pre-receive"
     hook.write_text("#!/bin/sh\necho 'rejected by test hook' >&2\nexit 1\n")
     hook.chmod(0o755)
-    with pytest.raises(RuntimeError, match="review ref push failed") as exc:
+    with pytest.raises(RuntimeError, match="Could not push the review ref") as exc:
         push_candidate(local, t)
     assert "rejected by test hook" in str(exc.value)
+    assert t.branch in str(exc.value)
 
 
 def test_missing_origin_remote_raises(tmp_path):

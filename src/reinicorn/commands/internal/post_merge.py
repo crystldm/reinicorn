@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING
 
-from reinicorn import frontmatter
+from reinicorn import console, frontmatter
 from reinicorn.doc_types import REGISTRY
 from reinicorn.git import repo_root, run_git
 from reinicorn.kb import get_kb_dir
@@ -66,9 +65,14 @@ def _archive_stale_plans(root: Path) -> None:
             if branch in live_branches:
                 continue
             # No remote branch maps to this dir — archive the plan
-            with contextlib.suppress(Exception):
-                from reinicorn.commands.plan import cmd_plan_complete
+            from reinicorn.commands.plan import cmd_plan_complete
+            try:
                 cmd_plan_complete(entry.name, repo_scope=repo_dir.name)
+            except Exception as e:
+                # Broad on purpose: a post-merge hook must not fail the merge.
+                # Report and keep going — one unarchivable plan must not stop
+                # the rest, and it must not vanish without a word either.
+                console.warn(f"Could not archive plan '{entry.name}': {e}")
 
 
 def _usable_ref(branch: str, root: Path) -> bool:

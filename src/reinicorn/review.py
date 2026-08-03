@@ -4,9 +4,10 @@ Pure logic — no console printing (commands/review.py owns UX). The local kb
 checkout never leaves main; all ref work happens in a temp clone.
 
 Error contract: remote-facing failures (push, missing origin) raise
-RuntimeError with git's stderr in the message so agents can act on them;
-local git operations (clone/checkout/commit in temp clones) are exceptional
-and may raise subprocess.CalledProcessError.
+RuntimeError whose message comes from `git.explain_failure` — so it always
+carries git's own words — and agents can act on them; local git operations
+(clone/checkout/commit in temp clones) are exceptional and may raise
+subprocess.CalledProcessError (in practice its GitError subclass).
 """
 
 from __future__ import annotations
@@ -27,7 +28,14 @@ from reinicorn.frontmatter import (
     get,
     set_meta,
 )
-from reinicorn.git import file_transport_args, remote_url, run_git, scratch_clone
+from reinicorn.git import (
+    GitFailure,
+    explain_failure,
+    file_transport_args,
+    remote_url,
+    run_git,
+    scratch_clone,
+)
 
 REVIEW_REF_PREFIX = "review/"
 
@@ -174,7 +182,9 @@ def push_candidate(kb_dir: Path, target: ReviewTarget) -> None:
         r = run_git(*allow, "push", "-q", "-f", "origin", target.branch,
                     check=False, cwd=clone)
         if r.returncode != 0:
-            raise RuntimeError(f"review ref push failed: {r.stderr.strip()}")
+            raise RuntimeError("\n".join(explain_failure(
+                f"push the review ref '{target.branch}'", r,
+            )))
 
 
 def delete_review_ref(kb_dir: Path, target: ReviewTarget) -> bool:
@@ -272,7 +282,7 @@ def cleanup_after_merge(
     if not url:
         raise RuntimeError("kb has no origin remote")
     allow = file_transport_args(cwd=kb_dir)
-    last_stderr = ""
+    last_push: GitFailure | None = None
     for _ in range(retries + 1):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             clone = _clone_into(url, tmp, allow)
@@ -290,7 +300,9 @@ def cleanup_after_merge(
                 # GitHub's auto-delete may already have removed it.
                 delete_review_ref(kb_dir, target)
                 return True
-            last_stderr = push.stderr.strip()
-    raise RuntimeError(
-        f"cleanup push kept failing after retries:\n{last_stderr}"
-    )
+            last_push = push
+    if last_push is None:  # pragma: no cover - range(retries + 1) always runs
+        raise RuntimeError("cleanup push never ran")
+    raise RuntimeError("\n".join(explain_failure(
+        "publish the post-merge cleanup (retried and still failing)", last_push,
+    )))

@@ -4,7 +4,7 @@
     "kb/cross-links": { "enabled": true, "severity": "error" },
     "kb/plan-structure": { "enabled": true, "severity": "warning" },
     "kb/frontmatter": { "enabled": true, "severity": "error" },
-    "kb/draft-refs": { "enabled": true, "severity": "warning" },
+    "kb/draft-refs": { "enabled": true, "severity": "error" },
     "scripts/shellcheck": { "enabled": true, "severity": "error" }
   }
 }

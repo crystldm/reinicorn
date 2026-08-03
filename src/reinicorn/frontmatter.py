@@ -49,6 +49,7 @@ STATUS_APPROVED = "approved"
 # Frontmatter keys the review lane stamps. Named because the lane reads and
 # writes them by constant, exactly as it did for the legacy bold labels.
 FIELD_STATUS = "status"
+FIELD_SPEC = "spec"
 FIELD_LIFECYCLE = "lifecycle"
 FIELD_REVIEW_PR = "review_pr"
 FIELD_APPROVED_BY = "approved_by"

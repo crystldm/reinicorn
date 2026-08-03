@@ -9,6 +9,7 @@ from reinicorn.kb import (
     commit_kb,
     ensure_kb_on_main,
     push_main_with_retry,
+    report_push_failure,
     require_kb_dir,
     stage_kb_pointer,
 )
@@ -37,11 +38,7 @@ def cmd_publish() -> int:
     # Push with pull-and-retry on rejection (shared with the review lane).
     push = push_main_with_retry(kb_dir)
     if push.returncode != 0:
-        console.error(
-            "Publish failed — kb has conflicting changes. "
-            "Resolve any conflicts in kb/, then retry."
-        )
-        console.next_step("rcorn kb publish")
+        report_push_failure(push, kb_dir)
         return 1
 
     console.success("Kb pushed to remote main.")
