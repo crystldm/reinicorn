@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING
 from reinicorn.config import kb_scope
 from reinicorn.kb import branch_doc_path, get_kb_dir
 from reinicorn.linter.spec_refs import (
+    SPEC_DIR_NAME,
     declared_spec,
     is_not_applicable,
+    is_spec_path,
     resolve_ref,
     tracked_paths,
     unapproved_reason,
@@ -104,6 +106,13 @@ def _check_plan(
             plan_path,
             f"'**Spec:** {value}' matches no git-tracked kb path",
             "Fix the path, or commit and publish the doc it names.",
+        )
+
+    if not is_spec_path(res.path):
+        return _block(
+            plan_path,
+            f"'**Spec:** {value}' resolves to '{res.path}', which is not a spec",
+            f"Name a doc under '{SPEC_DIR_NAME}/', or 'N/A' if there is none.",
         )
 
     reason = unapproved_reason(res.path, kb_dir)

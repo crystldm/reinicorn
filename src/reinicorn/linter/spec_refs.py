@@ -43,6 +43,8 @@ SPEC_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
 SPEC_NOT_APPLICABLE = "n/a"
 _NOT_APPLICABLE_RE = re.compile(rf"{re.escape(SPEC_NOT_APPLICABLE)}\b", re.IGNORECASE)
 
+SPEC_DIR_NAME = REGISTRY["spec"].dir_path
+
 # Anchor the prose matcher on a known doc-type directory rather than on the "kb/"
 # prefix. That accepts all three path styles while bounding false positives to
 # strings that actually look like doc references.
@@ -146,6 +148,21 @@ def resolve_ref(ref: str, scope: str, tracked: frozenset[str]) -> Resolution:
             return Resolution(ambiguous=tuple(sorted(hits)))
 
     return Resolution()
+
+
+def is_spec_path(path: str) -> bool:
+    """True when a resolved kb path lives under the spec doc-type directory.
+
+    The field names a *spec*, but any tracked doc resolves just as well, and a
+    plan.md or README.md carries no review status — so `unapproved_reason` finds
+    nothing to object to and the reference sails through. Checking the doc type
+    is what stops the gate from accepting a doc that was never in the lane.
+
+    Drafts count as specs. `specs/drafts/x.md` is a real spec at an earlier
+    stage, and reporting it as *unapproved* is far more useful than rejecting it
+    as the wrong kind of document.
+    """
+    return SPEC_DIR_NAME in path.split("/")[:-1]
 
 
 def unapproved_reason(path: str, kb_dir: Path) -> str | None:

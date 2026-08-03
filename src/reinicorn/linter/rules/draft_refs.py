@@ -9,8 +9,10 @@ from reinicorn.doc_types import REGISTRY
 from reinicorn.linter.rules.base import LintRule
 from reinicorn.linter.spec_refs import (
     REF_RE,
+    SPEC_DIR_NAME,
     declared_spec,
     is_not_applicable,
+    is_spec_path,
     resolve_ref,
     tracked_paths,
     unapproved_reason,
@@ -84,6 +86,12 @@ class DraftRefsRule(LintRule):
             return [
                 f"{rel}:1 — '**Spec:** {value}' matches no git-tracked kb path "
                 "(typo, uncommitted doc, or a path outside the kb)"
+            ]
+
+        if not is_spec_path(res.path):
+            return [
+                f"{rel}:1 — '**Spec:** {value}' resolves to '{res.path}', which "
+                f"is not a spec; name a doc under '{SPEC_DIR_NAME}/' or 'N/A'"
             ]
 
         seen.add(res.path)

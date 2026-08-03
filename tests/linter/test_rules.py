@@ -184,6 +184,42 @@ class TestDraftRefs:
         )
         assert DraftRefsRule().run(kb_repo) == []
 
+    def test_declared_non_spec_doc_is_rejected(self, kb_repo: Path):
+        """A tracked non-spec doc must not satisfy the field.
+
+        Only specs carry a review status, so a plan.md resolves and then finds
+        nothing to object to — the reference would sail through a gate whose
+        whole purpose is to prove the doc went through the lane.
+        """
+        other = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "other"
+        other.mkdir(parents=True)
+        # The decoy is an active plan too, so it needs its own valid field or it
+        # contributes a second, unrelated diagnostic.
+        (other / "plan.md").write_text(
+            "# Other\n\n**Spec:** N/A\n**Status:** in-progress\n"
+        )
+        self._make_plan(
+            kb_repo, "feature-d4",
+            self._plan("exec-plans/active/other/plan.md"),
+        )
+        _track(kb_repo)
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "is not a spec" in diags[0]
+
+    def test_declared_draft_spec_is_reported_as_unapproved_not_wrong_type(
+        self, kb_repo: Path
+    ):
+        """Drafts live under specs/, so they stay a review-status finding."""
+        drafts = kb_repo / "kb" / "testproject" / "specs" / "drafts"
+        drafts.mkdir(parents=True)
+        (drafts / "wip.md").write_text("# WIP\n\n**Status:** draft\n")
+        self._make_plan(kb_repo, "feature-d5", self._plan("specs/drafts/wip.md"))
+        _track(kb_repo)
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "is not a spec" not in diags[0]
+
     def test_path_merely_starting_with_na_is_not_exempt(self, kb_repo: Path):
         """The 'n/a' prefix must not swallow a real path that happens to begin so."""
         self._make_plan(kb_repo, "feature-d3", self._plan("n/august/specs/wip.md"))

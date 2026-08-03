@@ -221,6 +221,20 @@ class TestEnsurePlanSpecApproved:
         )
         assert self._run(submodule_repo) == 0
 
+    def test_non_spec_doc_blocks(self, submodule_repo: Path, capsys):
+        """A tracked doc outside specs/ must not satisfy the field.
+
+        It resolves, and carries no review status for `unapproved_reason` to
+        object to, so without a doc-type check it would pass the gate.
+        """
+        self._setup(
+            submodule_repo,
+            plan=self._plan("references/git-notes.md"),
+            spec=("references/git-notes.md", "n/a"),
+        )
+        assert self._run(submodule_repo) == 1
+        assert "is not a spec" in capsys.readouterr().out
+
     def test_in_review_spec_blocks(self, submodule_repo: Path, capsys):
         self._setup(
             submodule_repo,
@@ -426,8 +440,12 @@ class TestPushedBranches:
     def test_empty_stdin_returns_empty(self, monkeypatch):
         assert self._parse(monkeypatch, "") == []
 
-    def test_tty_stdin_returns_empty(self, monkeypatch):
-        """Invoked by hand, not by the hook — caller falls back to HEAD."""
+    def test_tty_stdin_returns_none(self, monkeypatch):
+        """Invoked by hand, not by the hook — caller falls back to HEAD.
+
+        None and [] are different answers: None is 'no hook context, use HEAD',
+        [] is 'the hook named no branches, check nothing'.
+        """
         import io
 
         from reinicorn.commands.internal import pre_push
@@ -435,4 +453,45 @@ class TestPushedBranches:
         stream = io.StringIO("")
         stream.isatty = lambda: True  # type: ignore[method-assign]
         monkeypatch.setattr(pre_push.sys, "stdin", stream)
-        assert pre_push._pushed_branches() == []
+        assert pre_push._pushed_branches() is None
+
+    def test_absent_stdin_returns_none(self, monkeypatch):
+        from reinicorn.commands.internal import pre_push
+
+        monkeypatch.setattr(pre_push.sys, "stdin", None)
+        assert pre_push._pushed_branches() is None
+
+
+class TestPushedBranchSelection:
+    """Which branches cmd_pre_push hands the gate, given what the hook saw."""
+
+    def _run(self, monkeypatch, pushed: list[str] | None) -> list[str]:
+        """Return the branch list the gate was called with."""
+        from reinicorn.commands.internal import pre_push
+
+        seen: list[list[str]] = []
+        monkeypatch.setattr(pre_push, "_pushed_branches", lambda: pushed)
+        monkeypatch.setattr(pre_push, "current_branch", lambda: "checked-out")
+        # Called as repo_root(quiet=True), so accept the keyword.
+        monkeypatch.setattr(pre_push, "repo_root", lambda **_: Path("/repo"))
+        monkeypatch.setattr(pre_push, "_ensure_kb_pushed", lambda _root: 0)
+        monkeypatch.setattr(
+            pre_push, "ensure_plan_spec_approved",
+            lambda _root, branches: (seen.append(branches), 0)[1],
+        )
+        assert pre_push.cmd_pre_push() == 0
+        return seen[0]
+
+    def test_tag_only_push_checks_nothing(self, monkeypatch):
+        """The reported bug: `git push origin v1.2.0` names no branch.
+
+        Falling back to HEAD here would judge an unrelated tag push against
+        whatever plan happened to be checked out, and could block it.
+        """
+        assert self._run(monkeypatch, []) == []
+
+    def test_no_hook_context_falls_back_to_head(self, monkeypatch):
+        assert self._run(monkeypatch, None) == ["checked-out"]
+
+    def test_pushed_branches_are_used_verbatim(self, monkeypatch):
+        assert self._run(monkeypatch, ["a", "b"]) == ["a", "b"]

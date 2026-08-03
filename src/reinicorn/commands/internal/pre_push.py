@@ -20,7 +20,13 @@ _NULL_OID = "0" * 40
 def cmd_pre_push() -> int:
     # Read the hook's stdin before anything else: git feeds the refs being
     # pushed and the stream is consumed once.
-    branches = _pushed_branches() or [current_branch()]
+    pushed = _pushed_branches()
+    # None means no hook context at all (invoked by hand), where the checked-out
+    # branch is the only sensible subject. An empty list means the hook did run
+    # and carried no branch refs — a tag-only push, or deletions — and there is
+    # no plan to check. Conflating the two would judge `git push origin v1.2.0`
+    # against whatever plan happened to be checked out.
+    branches = [current_branch()] if pushed is None else pushed
     try:
         root = repo_root(quiet=True)
         if root is None:
@@ -96,7 +102,7 @@ def _ensure_kb_pushed(root: Path) -> int:
     return 0
 
 
-def _pushed_branches() -> list[str]:
+def _pushed_branches() -> list[str] | None:
     """Local branches being pushed, per the pre-push hook protocol.
 
     Git feeds one `<local ref> <local oid> <remote ref> <remote oid>` line per
@@ -104,15 +110,17 @@ def _pushed_branches() -> list[str]:
     branch that is not checked out, so resolving the plan from HEAD would check
     the wrong branch and let the gate be bypassed in an ordinary workflow.
 
-    Returns empty when invoked outside the hook (no stdin), where the caller
-    falls back to the checked-out branch.
+    Returns None when there is no hook context to read (no stdin, or a terminal),
+    which is the caller's signal to fall back to the checked-out branch. An empty
+    list is a different answer: the hook ran and named no branches, so nothing
+    should be checked.
     """
     if sys.stdin is None or sys.stdin.isatty():
-        return []
+        return None
     try:
         data = sys.stdin.read()
     except (OSError, ValueError):
-        return []
+        return None
 
     branches: list[str] = []
     for line in data.splitlines():
