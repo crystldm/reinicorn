@@ -94,12 +94,36 @@ def test_plan_show_defaults_to_current_branch(kb_repo, monkeypatch, capsys):
     assert "# Execution Plan: main" in out
 
 
-def test_plan_show_missing_suggests_create(kb_repo, monkeypatch, capsys):
+def test_plan_show_missing_current_branch_suggests_create(kb_repo, monkeypatch, capsys):
     monkeypatch.chdir(kb_repo)
+    assert cmd_plan_show() == 1
+    out = capsys.readouterr().out
+    assert "error: no plan for branch 'main'" in out
+    assert "next: rcorn plan create" in out
+
+
+def test_plan_show_missing_other_branch_lists_branches(kb_repo, monkeypatch, capsys):
+    """plan create only works on the current branch — for any other branch,
+    point at branches that do have a plan instead of a dead-end hint."""
+    monkeypatch.chdir(kb_repo)
+    plan_dir = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-y"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (plan_dir / "plan.md").write_text("# Execution Plan: feature-y\n")
     assert cmd_plan_show("no-such-branch") == 1
     out = capsys.readouterr().out
     assert "error: no plan for branch 'no-such-branch'" in out
-    assert "next: rcorn plan create" in out
+    assert "rcorn plan create" not in out
+    assert "feature-y" in out
+
+
+def test_plan_show_missing_other_branch_no_plans_is_definitive(
+    kb_repo, monkeypatch, capsys,
+):
+    monkeypatch.chdir(kb_repo)
+    assert cmd_plan_show("no-such-branch") == 1
+    out = capsys.readouterr().out
+    assert "rcorn plan create" not in out
+    assert "plans: 0 found" in out
 
 
 def test_list_debt_skips_index(kb_repo, monkeypatch, capsys):
@@ -154,12 +178,41 @@ def test_retro_show_prefers_active_dir(kb_repo, monkeypatch, capsys):
     assert "completed main" not in out
 
 
-def test_retro_show_missing_suggests_create(kb_repo, monkeypatch, capsys):
+def test_retro_show_missing_current_branch_suggests_create(kb_repo, monkeypatch, capsys):
     monkeypatch.chdir(kb_repo)
+    assert cmd_retro_show() == 1
+    out = capsys.readouterr().out
+    assert "error: no retro for branch 'main'" in out
+    assert "next: rcorn retro create" in out
+
+
+def test_retro_show_missing_other_branch_lists_branches(kb_repo, monkeypatch, capsys):
+    """retro create only works on the current branch — for any other branch,
+    list branches with a retro (completed and active) instead."""
+    monkeypatch.chdir(kb_repo)
+    exec_plans = kb_repo / "kb" / "testproject" / "exec-plans"
+    completed = exec_plans / "completed" / "feature-x"
+    completed.mkdir(parents=True, exist_ok=True)
+    (completed / "retro.md").write_text("# Retro: feature-x\n")
+    active = exec_plans / "active" / "feature-z"
+    active.mkdir(parents=True, exist_ok=True)
+    (active / "retro.md").write_text("# Retro: feature-z\n")
     assert cmd_retro_show("ghost") == 1
     out = capsys.readouterr().out
     assert "error: no retro for branch 'ghost'" in out
-    assert "next: rcorn retro create" in out
+    assert "rcorn retro create" not in out
+    assert "feature-x" in out
+    assert "feature-z" in out
+
+
+def test_retro_show_missing_other_branch_no_retros_is_definitive(
+    kb_repo, monkeypatch, capsys,
+):
+    monkeypatch.chdir(kb_repo)
+    assert cmd_retro_show("ghost") == 1
+    out = capsys.readouterr().out
+    assert "rcorn retro create" not in out
+    assert "retros: 0 found" in out
 
 
 def test_list_excludes_drafts_by_default(kb_repo, monkeypatch, capsys):
