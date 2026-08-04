@@ -66,11 +66,20 @@ def test_publish_updates_parent_pointer(submodule_repo: Path) -> None:
 def test_publish_shows_resolution_steps_on_retry_failure(
     submodule_repo: Path, capsys
 ) -> None:
-    """When retry also fails, publish shows step-by-step resolution instructions."""
+    """When retry also fails on a real conflict, publish shows resolution steps.
+
+    The stderr has to be a genuine non-fast-forward rejection: publish now
+    classifies the failure, and an unrecognized one is reported as such rather
+    than as a conflict.
+    """
+    rejected = (
+        " ! [rejected]        main -> main (fetch first)\n"
+        "error: failed to push some refs to 'origin'\n"
+    )
     with patch("reinicorn.commands.publish.repo_root", return_value=submodule_repo), \
          patch("reinicorn.commands.publish.can_publish", return_value=True), \
          patch("reinicorn.commands.publish.push_main_with_retry") as mock_push:
-        mock_push.return_value = subprocess.CompletedProcess([], 1, "", "rejected")
+        mock_push.return_value = subprocess.CompletedProcess([], 1, "", rejected)
         result = cmd_publish()
 
     assert result == 1

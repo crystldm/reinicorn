@@ -8,7 +8,18 @@ from typing import TYPE_CHECKING
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.doc_types import REGISTRY
-from reinicorn.git import file_transport_args, repo_root, run_git, sanitize_branch
+from reinicorn.git import (
+    GitFailure,
+    classify_result,
+    explain_failure,
+    file_transport_args,
+    remote_url,
+    repo_root,
+    report_failure,
+    run_git,
+    sanitize_branch,
+    url_protocol,
+)
 
 if TYPE_CHECKING:
     import subprocess
@@ -143,6 +154,10 @@ def commit_kb(
     if r.returncode == 0:
         stage_kb_pointer(root, resolved)
         return True
+    # Distinct from the "nothing staged" return above: there WAS work and it
+    # did not get saved. Returning False silently made that look identical to
+    # a no-op, so a doc could appear written and never be committed.
+    report_failure("commit the kb", r, warn=True)
     return False
 
 
@@ -158,6 +173,73 @@ def push_main_with_retry(kb_dir: Path) -> subprocess.CompletedProcess[str]:
         run_git(*fta, "pull", "--no-rebase", "origin", "main", check=False, cwd=kb_dir)
         push = run_git(*fta, "push", "origin", "main", check=False, cwd=kb_dir)
     return push
+
+
+def _push_detail(kind: str, url: str) -> list[str]:
+    """Kb-vocabulary context lines for a push failure, on top of git's own."""
+    lines = [f"remote: {url or '(none)'} ({url_protocol(url)})"]
+    if kind == "non-fast-forward":
+        lines.append("kb has conflicting changes. Resolve any conflicts in kb/, "
+                     "then retry.")
+    elif kind == "protected":
+        lines.append("kb main is protected — the review lane owns this path.")
+    return lines
+
+
+def explain_push_failure(
+    push: GitFailure, kb_dir: Path, *, action: str = "push kb main",
+) -> list[str]:
+    """Message lines for a failed kb push, without printing them.
+
+    Splits from `report_push_failure` because the review lane raises its
+    diagnosis rather than printing it.
+    """
+    kind = classify_result(push)
+    return explain_failure(
+        action, push, detail=_push_detail(kind, remote_url(kb_dir)),
+    )
+
+
+def push_next_steps(kind: str, kb_dir: Path) -> list[str]:
+    """The commands that actually move a stuck kb push forward.
+
+    Never suggests the command that just failed unless retrying is genuinely
+    the fix: an auth failure retried is an infinite loop, which is exactly how
+    the original misdiagnosis wasted a session.
+    """
+    if kind == "non-fast-forward":
+        return ["rcorn kb publish"]
+    if kind == "protected":
+        return ["rcorn review start <draft>"]
+    if kind == "auth":
+        from reinicorn.kb_remote import adapt_url_to_git_protocol
+
+        url = remote_url(kb_dir)
+        suggested = adapt_url_to_git_protocol(url) if url else ""
+        if suggested and suggested != url:
+            return [f"rcorn kb git remote set-url origin {suggested}"]
+        return ["gh auth status"]
+    return ["rcorn kb git status"]
+
+
+def report_push_failure(
+    push: GitFailure, kb_dir: Path, *,
+    action: str = "push kb main", warn: bool = False,
+) -> str:
+    """Print why the kb push failed and what to run next. Returns the kind.
+
+    Every lane that pushes the kb goes through here, so the diagnosis and the
+    next step cannot drift between them. *warn* is for flows where the push is
+    the last, non-fatal step and the command still succeeds — the text is
+    identical, only the channel changes; *action* names the specific push when
+    it is not kb main.
+    """
+    kind = classify_result(push)
+    report_failure(
+        action, push, detail=_push_detail(kind, remote_url(kb_dir)), warn=warn,
+    )
+    console.next_step(*push_next_steps(kind, kb_dir))
+    return kind
 
 
 def branch_changed_files(branch: str, root: Path | None = None) -> set[str]:
@@ -193,6 +275,21 @@ def branch_changed_files(branch: str, root: Path | None = None) -> set[str]:
     if r.returncode != 0:
         return set()
     return {line for line in r.stdout.splitlines() if line}
+
+
+def kb_gitlink(root: Path, rev: str) -> str | None:
+    """The kb commit pinned by ``rev``'s tree, or None when it pins none.
+
+    ``<rev>:kb`` resolves the gitlink recorded in that revision — the kb
+    content a checkout of ``rev`` actually sees, regardless of what happens
+    to be staged or checked out right now. Pre-push checks anchor on this:
+    what ships with a pushed branch is its pinned kb commit, not the desk
+    state of the kb worktree.
+    """
+    r = run_git("rev-parse", f"{rev}:{KB_DIR_NAME}", check=False, cwd=root)
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
 
 
 def branch_dir_name(branch: str) -> str:

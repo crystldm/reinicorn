@@ -22,10 +22,33 @@ def test_commit_kb_commits_new_file(submodule_repo: Path) -> None:
 
 
 def test_commit_kb_returns_false_when_nothing_to_commit(
-    submodule_repo: Path,
+    submodule_repo: Path, capsys,
 ) -> None:
     result = commit_kb(submodule_repo, "nothing here")
     assert result is False
+    # A genuine no-op must stay silent — only a *failed* commit reports.
+    assert capsys.readouterr().out == ""
+
+
+def test_commit_kb_reports_a_failed_commit(submodule_repo: Path, capsys) -> None:
+    """Staged work that does not get committed must not look like a no-op.
+
+    Both cases return False; without a message a doc could appear written and
+    silently never be saved.
+    """
+    kb = submodule_repo / "kb"
+    (kb / "note.md").write_text("# Note\n")
+    hook = kb / ".git" / "hooks" / "pre-commit"
+    if not hook.parent.is_dir():  # submodule gitdir lives under .git/modules
+        hook = submodule_repo / ".git" / "modules" / "kb" / "hooks" / "pre-commit"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\necho 'refused by test hook' >&2\nexit 1\n")
+    hook.chmod(0o755)
+
+    assert commit_kb(submodule_repo, "test: should fail") is False
+    out = capsys.readouterr().out
+    assert "Could not commit the kb" in out
+    assert "refused by test hook" in out
 
 
 def test_commit_kb_fixes_detached_head(submodule_repo: Path) -> None:

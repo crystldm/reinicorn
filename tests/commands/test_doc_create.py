@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+from reinicorn import frontmatter as fm
 from reinicorn.commands.doc_create import cmd_doc_check_path
 
 # --- cmd_doc_check_path tests ---
@@ -90,7 +91,7 @@ def test_spec_create_writes_to_drafts(kb_repo: Path, capsys):
     assert result == 0
     doc = kb_repo / "kb" / "testproject" / "specs" / "drafts" / "my-gated-spec.md"
     assert doc.is_file()
-    assert "**Status:** draft" in doc.read_text()
+    assert fm.get(doc.read_text(), "status") == "draft"
     out = capsys.readouterr().out
     assert "next: rcorn review start my-gated-spec" in out
 

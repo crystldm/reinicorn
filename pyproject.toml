@@ -3,7 +3,7 @@ name = "reinicorn"
 dynamic = ["version"]
 description = "Agentic engineering kb CLI"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["pyyaml>=6.0.3"]
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "Michael Biehl"}]

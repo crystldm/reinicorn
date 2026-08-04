@@ -6,9 +6,10 @@ import re
 import shutil
 from datetime import date
 
-from reinicorn import console
+from reinicorn import console, frontmatter
 from reinicorn.config import config_get, kb_scope
 from reinicorn.doc_types import REGISTRY
+from reinicorn.frontmatter import set_meta
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.identity import TICKET_PATTERN_KEY
 from reinicorn.kb import branch_doc_path, check_overlap, commit_kb, plan_dir, require_kb_dir
@@ -17,8 +18,12 @@ _EMPTY_RETRO_LINE = re.compile(r"^\s*-\s*(\[ \]\s*)?(_[^_]*_)?\s*$")
 
 
 def _retro_is_empty(text: str) -> bool:
-    """True when a retro has no filled-in bullet content."""
-    for line in text.splitlines():
+    """True when a retro has no filled-in bullet content.
+
+    Reads the body only: frontmatter keys are metadata, and counting them as
+    content would make every retro look filled in.
+    """
+    for line in frontmatter.parse(text)[1].splitlines():
         s = line.strip()
         if not s or s.startswith("#") or s.startswith("**"):
             continue
@@ -71,24 +76,48 @@ def cmd_plan_create() -> int:
     template_dir = kb_dir / kb_scope(root) / REGISTRY["plan"].dir_path / "_template"
     if template_dir.is_dir():
         for tmpl in sorted(template_dir.glob("*.md")):
-            content = tmpl.read_text()
-            content = content.replace("[Branch Name]", branch)
-            content = content.replace("[TICKET-ID or N/A]", ticket_id or "N/A")
-            content = content.replace("[developer or agent]", author)
-            content = content.replace("[date]", date_today)
-            content = content.replace(
+            meta, body = frontmatter.parse(tmpl.read_text())
+            # Frontmatter values are set on the parsed mapping, never by string
+            # substitution: a branch containing a colon or a quote would
+            # otherwise produce a corrupt YAML block.
+            body = body.replace("[Branch Name]", branch)
+            body = body.replace("[TICKET-ID or N/A]", ticket_id or "N/A")
+            body = body.replace("[developer or agent]", author)
+            body = body.replace("[date]", date_today)
+            body = body.replace(
                 "[planning | in-progress | complete | abandoned]", "planning"
             )
-            (pdir / tmpl.name).write_text(content)
+            if meta:
+                meta.update({
+                    "title": f"Execution Plan: {branch}",
+                    "slug": pdir.name,
+                    "status": "planning",
+                    "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
+                    "created": date.today(),
+                    "author": author,
+                    "branch": branch,
+                    "ticket": ticket_id or "N/A",
+                })
+                (pdir / tmpl.name).write_text(frontmatter.render(meta, body))
+            else:
+                (pdir / tmpl.name).write_text(body)
         console.success("Created plan files from templates.")
     else:
-        (pdir / "plan.md").write_text(
-            f"# Execution Plan: {branch}\n\n"
-            f"**Author:** {author}\n"
-            f"**Date:** {date_today}\n"
-            f"**Ticket:** {ticket_id or 'N/A'}\n"
-            f"**Status:** planning\n"
-        )
+        (pdir / "plan.md").write_text(frontmatter.render(
+            {
+                "type": "plan",
+                "title": f"Execution Plan: {branch}",
+                "slug": pdir.name,
+                "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
+                "status": "planning",
+                "created": date.today(),
+                "author": author,
+                "branch": branch,
+                "ticket": ticket_id or "N/A",
+                "spec": "[kb path to the spec this implements, or N/A]",
+            },
+            f"\n# Execution Plan: {branch}\n",
+        ))
         console.success("Created minimal plan.md (no templates found).")
 
     print()
@@ -173,16 +202,14 @@ def cmd_plan_complete(branch: str | None = None, *, repo_scope: str | None = Non
         console.error(f"No active plan found for branch '{branch}'.")
         return 1
 
-    # Update plan.md status to complete
+    # Mark the plan complete: `status` keeps the type's word, `lifecycle` is
+    # the coarse axis everything queryable keys off.
     plan_file = pdir / "plan.md"
     if plan_file.is_file():
-        content = plan_file.read_text()
-        content = re.sub(
-            r"\*\*Status:\*\*\s*(planning|in-progress)",
-            "**Status:** complete",
-            content,
-        )
-        plan_file.write_text(content)
+        plan_file.write_text(set_meta(plan_file.read_text(), {
+            frontmatter.FIELD_STATUS: "complete",
+            frontmatter.FIELD_LIFECYCLE: frontmatter.LIFECYCLE_DONE,
+        }))
 
     # Move from active/ to completed/
     completed_dir = branch_doc_path("retro", scope_dir, branch).parent

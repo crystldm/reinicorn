@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
 from reinicorn.doc_types import REGISTRY
+from reinicorn.frontmatter import FIELD_SPEC
 from reinicorn.linter.rules.base import LintRule
+from reinicorn.linter.spec_refs import declared_spec
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,5 +64,15 @@ class PlanStructureRule(LintRule):
                             diagnostics.append(
                                 f"{rel_plan}:{last_heading} — Missing '## {section}' section."
                             )
+
+                    # Structural presence only. Whether the value resolves to an
+                    # approved doc is kb/draft-refs' job, and that rule diagnoses
+                    # a missing field independently so the gate never depends on
+                    # this rule's severity.
+                    if declared_spec(content) is None:
+                        diagnostics.append(
+                            f"{rel_plan}:1 — Missing '{FIELD_SPEC}:' frontmatter field "
+                            "(path to the spec this plan implements, or 'N/A')."
+                        )
 
         return diagnostics

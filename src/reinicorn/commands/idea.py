@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from reinicorn import console
+from reinicorn import console, frontmatter
 from reinicorn.config import kb_scope
 from reinicorn.doc_types import REGISTRY
 from reinicorn.git import repo_root, run_git
@@ -27,7 +27,7 @@ def cmd_idea(idea_text: str) -> int:
     except Exception:
         author = "unknown"
     username = re.sub(r"[^a-z0-9-]", "", author.lower().replace(" ", "-"))
-    date_today = date.today().isoformat()
+    date_today = date.today()
 
     slug = re.sub(r"[^a-z0-9]+", "-", idea_text.lower())[:60].rstrip("-")
 
@@ -43,21 +43,22 @@ def cmd_idea(idea_text: str) -> int:
 
     title = idea_text.split("\n")[0][:80]
 
-    filepath.write_text(
-        f"# {title}\n"
-        f"\n"
-        f"**Date:** {date_today}\n"
-        f"**Author:** {author}\n"
-        f"**Status:** new\n"
-        f"\n"
-        f"## Description\n"
-        f"\n"
-        f"{idea_text}\n"
-        f"\n"
-        f"## Notes\n"
-        f"\n"
-        f"_No additional notes yet._\n"
-    )
+    filepath.write_text(frontmatter.render(
+        {
+            "type": "idea",
+            "title": title,
+            "slug": filepath.stem,
+            "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
+            "status": "new",
+            "created": date_today,
+            "author": author,
+            "origin": frontmatter.ORIGIN_AI,
+            "human_validated": False,
+        },
+        f"\n# {title}\n"
+        f"\n## Description\n\n{idea_text}\n"
+        f"\n## Notes\n\n_No additional notes yet._\n",
+    ))
 
     console.success(f"Idea captured: {filepath}")
 

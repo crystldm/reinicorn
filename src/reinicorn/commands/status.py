@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_get, kb_scope
 from reinicorn.doc_types import REGISTRY
 from reinicorn.git import current_branch, repo_root, run_git
+from reinicorn.hooks_health import hook_issues
 from reinicorn.identity import STALE_THRESHOLD_KEY
 from reinicorn.kb import (
     active_plan_names,
@@ -18,9 +19,6 @@ from reinicorn.kb import (
     require_kb_dir,
 )
 from reinicorn.review import collect_gated_drafts
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def cmd_status(compact: bool = False) -> int:
@@ -115,6 +113,9 @@ def cmd_status(compact: bool = False) -> int:
     else:
         console.success("All kb docs are fresh.")
 
+    _report_hook_health(root)
+    _report_pointer_drift(root, kb_dir)
+
     # Check tech debt across repos
     for repo_dir in sorted(kb_dir.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
@@ -127,6 +128,51 @@ def cmd_status(compact: bool = False) -> int:
     print()
 
     return 0
+
+
+def _report_hook_health(root: Path) -> None:
+    """Warn about installed git hooks whose kb guard is silently dead —
+    stale reins-era hooks or an unreachable reinicorn marker (issue #24)."""
+    r = run_git("rev-parse", "--git-common-dir", check=False, cwd=root)
+    if r.returncode != 0:
+        return
+    git_dir = Path(r.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = root / git_dir
+    issues = hook_issues(git_dir / "hooks")
+    for issue in issues:
+        console.warn(f"Hook {issue.name}: {issue.problem}")
+    if issues:
+        console.next_step("rcorn hooks install")
+
+
+def _report_pointer_drift(root: Path, kb_dir: Path) -> None:
+    """Warn when the parent's recorded kb pointer is behind kb origin/main.
+
+    Local refs only (principle 6: no network in status) — drift shows as of
+    the last fetch/push, which is exactly when it silently accumulates.
+    """
+    r = run_git("rev-parse", f"HEAD:{KB_DIR_NAME}", check=False, cwd=root)
+    if r.returncode != 0:
+        return
+    recorded = r.stdout.strip()
+    if not recorded:
+        return
+    r = run_git(
+        "rev-list", "--count", f"{recorded}..origin/main",
+        check=False, cwd=kb_dir,
+    )
+    if r.returncode != 0:
+        return
+    try:
+        behind = int(r.stdout.strip())
+    except ValueError:
+        return
+    if behind > 0:
+        console.warn(
+            f"Parent kb pointer is {behind} commit(s) behind kb origin/main."
+        )
+        console.next_step("rcorn kb sync")
 
 
 def _compact_status(root: Path, kb_dir: Path, branch: str) -> int:

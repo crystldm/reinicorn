@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from reinicorn import console
-from reinicorn.git import current_branch, file_transport_args, repo_root, run_git
+from reinicorn.git import (
+    current_branch,
+    file_transport_args,
+    repo_root,
+    report_failure,
+    run_git,
+)
 from reinicorn.kb import (
     check_overlap,
     ensure_kb_on_main,
@@ -47,9 +53,7 @@ def cmd_sync() -> int:
             else:
                 # Merge failed without conflicts: offline fetch, missing
                 # origin/main, unrelated histories, ...
-                console.error(
-                    f"Could not merge origin/main: {r.stderr.strip()}"
-                )
+                report_failure("merge origin/main into kb", r)
                 console.next_step("rcorn kb git status")
             return 1
 

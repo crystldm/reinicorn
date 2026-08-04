@@ -88,11 +88,22 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
     template = scope / plan_dir / "_template"
     plan_dt = REGISTRY["plan"]
     sections = "\n\n".join(f"## {s}" for s in plan_dt.required_sections)
+    # Placeholders are substituted by plan.py at create time. `branch` is a
+    # real field now, so the orphan sweep reads the exact ref instead of
+    # comparing sanitized directory names.
     (template / "plan.md").write_text(
+        "---\n"
+        "type: plan\n"
+        "title: 'Execution Plan: [Branch Name]'\n"
+        "slug: '[Branch Name]'\n"
+        "lifecycle: active\n"
+        "status: planning\n"
+        "created: [date]\n"
+        "author: '[developer or agent]'\n"
+        "branch: '[Branch Name]'\n"
+        "ticket: '[TICKET-ID or N/A]'\n"
+        "---\n\n"
         "# Execution Plan: [Branch Name]\n\n"
-        "**Author:** [developer or agent]\n"
-        "**Date:** [date]\n"
-        "**Status:** planning\n\n"
         f"{sections}\n"
     )
     # Root .gitignore

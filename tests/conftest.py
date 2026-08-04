@@ -3,11 +3,31 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
 
+from reinicorn import frontmatter
 from reinicorn.git import run_git
+
+
+def doc_text(body: str = "\n## Problem\n\nbody\n", **meta) -> str:
+    """A valid frontmatter doc for fixtures.
+
+    One definition of the on-disk shape, so a schema change touches this
+    helper rather than every test that happens to write a doc.
+    """
+    base: dict = {
+        "type": "spec", "title": "X", "slug": "x",
+        "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
+        "status": frontmatter.STATUS_DRAFT,
+        "created": date(2026, 7, 27), "author": "Test User",
+        "origin": frontmatter.ORIGIN_AI, "human_validated": False,
+    }
+    base.update(meta)
+    assert not frontmatter.validate(base), frontmatter.validate(base)
+    return frontmatter.dumps(base, body)
 
 # Git 2.38+ blocks local file transport by default (CVE-2022-39253).
 # All test repos use local paths. Set at module level so it's inherited
@@ -52,11 +72,18 @@ def kb_repo(tmp_path: Path) -> Path:
 
     # Template files
     (repo_sub / "exec-plans" / "_template" / "plan.md").write_text(
+        "---\n"
+        "type: plan\n"
+        "title: 'Execution Plan: [Branch Name]'\n"
+        "slug: '[Branch Name]'\n"
+        "lifecycle: active\n"
+        "status: planning\n"
+        "created: [date]\n"
+        "author: '[developer or agent]'\n"
+        "branch: '[Branch Name]'\n"
+        "ticket: '[TICKET-ID or N/A]'\n"
+        "---\n\n"
         "# Execution Plan: [Branch Name]\n\n"
-        "**Author:** [developer or agent]\n"
-        "**Date:** [date]\n"
-        "**Ticket:** [TICKET-ID or N/A]\n"
-        "**Status:** [planning | in-progress | complete | abandoned]\n\n"
         "## Goal\n\n## Acceptance Criteria\n\n## Tasks\n"
     )
     (repo_sub / "exec-plans" / "_template" / "progress.md").write_text(
@@ -109,7 +136,7 @@ def kb_pair(tmp_path: Path) -> tuple[Path, Path]:
     run_git("config", "protocol.file.allow", "always", cwd=local)
     d = local / "myrepo" / "specs" / "drafts"
     d.mkdir(parents=True)
-    (d / "x.md").write_text("# X\n\n**Status:** draft\n\n## Problem\n\nbody\n")
+    (d / "x.md").write_text(doc_text())
     _git_commit(local, "init")
     run_git("push", "-q", "origin", "main", cwd=local)
     return bare, local

@@ -1,35 +1,38 @@
-# reinicorn
+# Reinicorn
 
-`reinicorn` is a document and spec-driven-development workflow management tool
-that helps AI agents and humans collaborate effectively. Inspired by OpenAI's
-[Harness Engineering](https://openai.com/index/harness-engineering/) article, it
-is an attempt to put the principles outlined there into practice. reinicorn
-supports coordinating work across teams and repositories by keeping all project
-context documents in a centralized location: the knowledgebase repository.
+Reinicorn is a tool and skill set for managing agentic coding workflows in
+close collaboration with human developers. Inspired by OpenAI's
+[Harness Engineering](https://openai.com/index/harness-engineering/) article,
+Reinicorn puts the principles outlined there into practice in a simple,
+straightforward way: a set of skills, hooks (both `git` and harness), and the
+`rcorn` CLI, built on [AXI](https://github.com/kunchenguid/axi) principles. No
+MCP, no vector database, no extra cloud storage (excuse the LLM-ism). It keeps
+your docs organized and helps minimize the slop.
 
-In this new agentic paradigm, a new critical artifact has emerged: the markdown
-file. Reinicorn is made up of two main components, the `rcorn` CLI and the skill
-set. The skill set is forked from
-[obra/superpowers](https://github.com/obra/superpowers) and modified to suit
-this workflow, with several original additions. The skill set is for creating
-the specs and plans; the CLI is for managing, collaborating on, and reviewing
-them across a team. All documents are generated from templates to enforce
-consistency, and provenance and review status are first-class concepts.
+At the core of Reinicorn is a spec-driven-development workflow and a
+knowledgebase repository for keeping track of the `.md` files you generate.
+The workflow is a skill set forked from
+[obra/superpowers](https://github.com/obra/superpowers), modified to fit this
+one. Every document comes from a template, so provenance and review status are
+first-class rather than something you remember to add.
 
-The knowledgebase (`kb/`) lives as a separate repository included as a
-[git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules). This
-allows many related repositories to share the same knowledgebase. Neither the
-human user nor the agent needs to manage the submodule, however: the `rcorn`
-CLI handles all git operations, making sure it is always synced. Hooks
-installed into your AI harness and git config automatically enforce the
-workflow, and the skills guide your sessions.
+Specs get placed in `kb/<project-slug>/specs/drafts` and can then be put up for
+review. Organized metadata keeps track of all the details. When the review PR
+passes, the spec can be distilled into implementation plans. The code is
+reviewed as normal, of course, but having the team collaborate on and validate
+the intent first saves a lot of time and effort.
 
-The project is in its early stages. It has been dog-fooded from day one, but
-only on the author's personal projects; cross-team and cross-repo scenarios are
-yet to be tested, and that is beginning soon. The codebase is intended to be
-modular and flexible, allowing changes as rough edges are exposed through use.
-Feedback is welcome and encouraged: run `rcorn feedback` to open an issue on
-this repo and share your experience.
+The knowledgebase lives as a separate repository, always on its `main` branch
+except for single-doc review PRs. One `kb` can be shared across multiple
+repositories, so all domain knowledge sits in one place, accessible to every
+agent across a multi-repo, multi-team project.
+
+The core loop works: spec → review → implementation → test → retro is (mostly)
+there. Plenty is still missing, and many ideas are open for implementation in
+the [knowledgebase](https://github.com/crystldm/reinicorn-kb). Contribution,
+testing, and feedback are most welcome: `rcorn feedback` opens an issue on
+this repo. I've dog-fooded the project from day one (I built Reinicorn using
+Reinicorn), but the next test is real team workflows.
 
 The CLI's output follows the
 [axi principles](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/agent-native-output-surface-axi-principles.md)
@@ -199,13 +202,13 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn plan complete [branch]` | Archive plan to completed/ |
 | `rcorn retro create` | Create retro for current branch |
 | `rcorn retro show [branch] [--full]` | Show retro doc |
-| `rcorn review start\|push\|merge\|cancel\|status` | The doc-review lane (see above) |
+| `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
 | `rcorn review setup` | Install kb-repo CI cleanup workflow + ruleset |
 | `rcorn principle add "title"` | Append a golden principle |
 | `rcorn mode enable\|disable\|incognito\|status` | Mode toggles |
 | `rcorn init [...]` | Set up reinicorn in this repo |
 | `rcorn hooks install` | Install git and editor hooks |
-| `rcorn update [--diff X]` | Re-sync bundled files (skills, hooks, AGENTS.md) to the installed version |
+| `rcorn update [--diff X]` | Re-sync bundled files (skills, hooks, linters) to the installed version |
 | `rcorn feedback [text]` | Open a GitHub issue on the reinicorn repo itself |
 
 ## The skill set

@@ -275,6 +275,9 @@ wheels = [
 [[package]]
 name = "reinicorn"
 source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -288,6 +291,7 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "pyyaml", specifier = ">=6.0.3" }]
 
 [package.metadata.requires-dev]
 dev = [

@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
-from reinicorn.docmeta import FIELD_STATUS, STATUS_IN_REVIEW, get_field
+from reinicorn.doc_types import REGISTRY
 from reinicorn.linter.rules.base import LintRule
+from reinicorn.linter.spec_refs import (
+    REF_RE,
+    SPEC_DIR_NAME,
+    declared_spec,
+    is_not_applicable,
+    is_spec_path,
+    resolve_ref,
+    tracked_paths,
+    unapproved_reason,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-# Lookbehind keeps lookalike dirs ("notkb/...") from matching on their tail.
-_KB_PATH_RE = re.compile(rf"(?<![\w/]){KB_DIR_NAME}/[\w./-]+\.md")
 
 
 class DraftRefsRule(LintRule):
@@ -27,34 +32,103 @@ class DraftRefsRule(LintRule):
         if not kb.is_dir():
             return diagnostics
 
+        # The runner does not guard built-in rules, so an unreadable kb must
+        # become a diagnostic rather than crash the whole lint run.
+        try:
+            tracked = tracked_paths(kb)
+        except RuntimeError as e:
+            return [f"{KB_DIR_NAME}:1 — cannot enumerate tracked kb paths: {e}"]
+
         active_glob = f"*/{REGISTRY['plan'].dir_path}/active/*/plan.md"
         for plan in sorted(kb.glob(active_glob)):
             rel = plan.relative_to(project_root)
+            scope = plan.relative_to(kb).parts[0]
+            text = plan.read_text()
 
-            in_fence = False
-            for n, line in enumerate(plan.read_text().splitlines(), 1):
-                # Fenced code blocks hold illustrative example paths, not real
-                # references — mirror cross_links' fence-skipping to avoid
-                # false positives on plans that quote example doc paths.
-                if line.lstrip().startswith("```"):
-                    in_fence = not in_fence
-                    continue
-                if in_fence:
-                    continue
+            # Report each offending doc once per plan. A spec named in the
+            # spec: field and again in prose is one violation, not two.
+            seen: set[str] = set()
 
-                for ref in _KB_PATH_RE.findall(line):
-                    if f"/{DRAFTS_DIR_NAME}/" in ref:
-                        diagnostics.append(
-                            f"{rel}:{n} — references drafts-annex doc '{ref}' "
-                            "(unapproved; building on a draft needs explicit sign-off)"
-                        )
-                        continue
-                    target = project_root / ref
-                    if target.is_file() and \
-                            get_field(target.read_text(), FIELD_STATUS) == STATUS_IN_REVIEW:
-                        diagnostics.append(
-                            f"{rel}:{n} — references in-review doc '{ref}' "
-                            "(approval pending)"
-                        )
+            diagnostics.extend(
+                self._check_declared(text, rel, scope, kb, tracked, seen)
+            )
+            diagnostics.extend(
+                self._check_prose(text, rel, scope, kb, tracked, seen)
+            )
+
+        return diagnostics
+
+    def _check_declared(
+        self, text: str, rel: Path, scope: str, kb: Path,
+        tracked: frozenset[str], seen: set[str],
+    ) -> list[str]:
+        """Validate the declared spec: frontmatter field.
+
+        A missing field is itself a finding — omitting the reference must not be
+        a way to dodge the gate. ``N/A`` is the explicit, reviewable opt-out.
+        """
+        value = declared_spec(text)
+        if value is None:
+            return [
+                f"{rel}:1 — no 'spec:' frontmatter field (declare the spec this plan "
+                "implements, or 'N/A' if it intentionally has none)"
+            ]
+        if is_not_applicable(value):
+            return []
+
+        res = resolve_ref(value, scope, tracked)
+        if res.ambiguous:
+            return [
+                f"{rel}:1 — 'spec: {value}' is ambiguous; it matches "
+                f"{', '.join(res.ambiguous)}"
+            ]
+        if res.path is None:
+            return [
+                f"{rel}:1 — 'spec: {value}' matches no git-tracked kb path "
+                "(typo, uncommitted doc, or a path outside the kb)"
+            ]
+
+        if not is_spec_path(res.path):
+            return [
+                f"{rel}:1 — 'spec: {value}' resolves to '{res.path}', which "
+                f"is not a spec; name a doc under '{SPEC_DIR_NAME}/' or 'N/A'"
+            ]
+
+        seen.add(res.path)
+        reason = unapproved_reason(res.path, kb)
+        if reason:
+            return [f"{rel}:1 — declared spec '{res.path}' is {reason}"]
+        return []
+
+    def _check_prose(
+        self, text: str, rel: Path, scope: str, kb: Path,
+        tracked: frozenset[str], seen: set[str],
+    ) -> list[str]:
+        """Backstop: scan the body for references to unapproved docs.
+
+        Catches a plan that declares ``N/A`` but builds on a draft anyway.
+        Unresolvable prose strings are ignored here — prose is not a contract,
+        and only the declared field is held to that standard.
+        """
+        diagnostics: list[str] = []
+        in_fence = False
+
+        for n, line in enumerate(text.splitlines(), 1):
+            # Fenced blocks hold illustrative example paths, not real
+            # references — mirror cross_links' fence-skipping.
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+
+            for ref in REF_RE.findall(line):
+                res = resolve_ref(ref, scope, tracked)
+                if res.path is None or res.path in seen:
+                    continue
+                reason = unapproved_reason(res.path, kb)
+                if reason:
+                    seen.add(res.path)
+                    diagnostics.append(f"{rel}:{n} — references '{res.path}': {reason}")
 
         return diagnostics
