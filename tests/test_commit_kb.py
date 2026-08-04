@@ -104,6 +104,32 @@ def test_commit_kb_paths_leaves_unrelated_changes_uncommitted(
     assert " M README.md" in status
 
 
+def test_commit_kb_paths_excludes_already_staged_unrelated_changes(
+    submodule_repo: Path,
+) -> None:
+    """An unrelated edit already sitting in the index must not land in the
+    scoped commit; it stays staged afterwards (issue #35)."""
+    kb = submodule_repo / "kb"
+    run_git("commit", "-q", "--allow-empty", "-m", "base", cwd=kb)
+    (kb / "README.md").write_text("# Kb\n\nunrelated staged edit\n")
+    run_git("add", "README.md", cwd=kb)
+
+    (kb / "ideas").mkdir()
+    idea = kb / "ideas" / "scoped.md"
+    idea.write_text("# Scoped idea\n")
+
+    result = commit_kb(submodule_repo, "idea: scoped", paths=[idea])
+
+    assert result is True
+    shown = run_git(
+        "show", "--name-only", "--format=", "HEAD", cwd=kb
+    ).stdout.split()
+    assert shown == ["ideas/scoped.md"]
+    # The unrelated edit is excluded from the commit and remains staged.
+    status = run_git("status", "--porcelain", cwd=kb).stdout
+    assert "M  README.md" in status
+
+
 def test_commit_kb_paths_returns_false_when_paths_unchanged(
     submodule_repo: Path,
 ) -> None:
