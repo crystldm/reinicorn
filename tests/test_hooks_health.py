@@ -74,6 +74,16 @@ def test_trailing_exit_status_cannot_fall_through():
     assert can_fall_through("#!/bin/sh\nsome-linter\nexit $?\n") is False
 
 
+def test_trailing_compound_exit_cannot_fall_through():
+    """`some-linter; exit $?` on one line is still an unconditional exit."""
+    assert can_fall_through("#!/bin/sh\nsome-linter; exit $?\n") is False
+
+
+def test_indented_compound_exit_falls_through():
+    text = "#!/bin/sh\nif fail; then\n    log; exit 1\nfi\n"
+    assert can_fall_through(text) is True
+
+
 def test_plain_script_falls_through():
     assert can_fall_through(FOREIGN_FALLTHROUGH) is True
 
@@ -103,6 +113,17 @@ def test_marker_after_fall_through_is_reachable():
 def test_marker_after_unconditional_exit_is_unreachable():
     text = f"{FOREIGN_EXITING}\n{MARKER}\n\nrcorn _pre-push\n"
     assert marker_reachable(text) is False
+
+
+def test_marker_after_compound_exit_is_unreachable():
+    text = f"#!/bin/sh\nsome-linter; exit $?\n\n{MARKER}\n\nrcorn _pre-push\n"
+    assert marker_reachable(text) is False
+
+
+def test_marker_after_compound_exit_in_comment_is_reachable():
+    """A comment mentioning `; exit 0` must not count as an exit."""
+    text = f"#!/bin/sh\n# cleanup; exit 0\necho x\n\n{MARKER}\n\nrcorn _pre-push\n"
+    assert marker_reachable(text) is True
 
 
 def test_marker_after_indented_exit_is_reachable():

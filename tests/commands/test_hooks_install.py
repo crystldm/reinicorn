@@ -181,6 +181,40 @@ def test_hooks_install_replaces_stale_hook_with_dead_append(kb_repo: Path, capsy
     assert "rcorn _pre-push" in text
 
 
+def test_hooks_install_backs_up_stale_hook_before_replacing(kb_repo: Path, capsys):
+    """Wholesale replace may discard user customizations in a reins-era hook —
+    keep the previous content recoverable in a .bak next to the hook."""
+    _seed_sources(kb_repo)
+    hooks_dest = kb_repo / ".git" / "hooks"
+    hooks_dest.mkdir(parents=True, exist_ok=True)
+    customized = _REINS_HOOK.replace("exit 0\n", "my-custom-lint\nexit 0\n")
+    (hooks_dest / "pre-push").write_text(customized)
+
+    result = _run_install(kb_repo)
+
+    assert result == 0
+    assert "backup" in capsys.readouterr().out
+    assert (hooks_dest / "pre-push.bak").read_text() == customized
+
+
+def test_hooks_install_refuses_append_after_compound_exit(kb_repo: Path, capsys):
+    """`some-linter; exit $?` as the last line is an unconditional exit too —
+    the append must be refused, not silently left dead (issue #24)."""
+    _seed_sources(kb_repo)
+    hooks_dest = kb_repo / ".git" / "hooks"
+    hooks_dest.mkdir(parents=True, exist_ok=True)
+    foreign = "#!/bin/sh\nsome-linter; exit $?\n"
+    (hooks_dest / "pre-push").write_text(foreign)
+
+    result = _run_install(kb_repo)
+
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "APPENDED: pre-push" not in out
+    assert "FAILED: pre-push" in out
+    assert (hooks_dest / "pre-push").read_text() == foreign
+
+
 def test_hooks_install_refuses_append_after_unconditional_exit(kb_repo: Path, capsys):
     """Appending after a foreign hook's unconditional exit would be
     unreachable — refuse loudly, never report success."""

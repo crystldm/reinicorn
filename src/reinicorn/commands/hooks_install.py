@@ -97,9 +97,16 @@ def cmd_hooks_install() -> int:
         # Stale check next: a reins-era hook damaged by the old append bug
         # carries the marker too, but its guard is dead and must be repaired.
         elif is_stale_reins_hook(existing):
+            # The stale hook may carry user customizations the substring
+            # match can't see — keep the old content recoverable.
+            backup = dest_file.with_name(dest_file.name + ".bak")
+            backup.write_text(existing)
             shutil.copy2(src_file, dest_file)
             dest_file.chmod(dest_file.stat().st_mode | stat.S_IEXEC)
-            console.success(f"REPLACED: {hook_name} (stale reins-era hook)")
+            console.success(
+                f"REPLACED: {hook_name} (stale reins-era hook; "
+                f"backup: {backup.name})"
+            )
             replaced += 1
         elif MARKER in existing:
             if marker_reachable(existing):

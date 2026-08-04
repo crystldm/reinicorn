@@ -21,10 +21,23 @@ HOOK_NAMES = ("post-checkout", "post-merge", "pre-push")
 # `reins _pre-push`-style call. Tight enough not to match prose or "reinicorn".
 _REINS_DELEGATION = re.compile(r"\bcommand -v reins\b|\breins\s+_[a-z-]+")
 
-# A top-level (unindented) `exit`, `exit 0`, `exit $?`, ... — execution never
-# continues past it. Indented exits are conditional by construction, which is
-# the cheap approximation the repair logic needs (no shell parsing).
+# An `exit`, `exit 0`, `exit $?`, ... statement — execution never continues
+# past it. Matched against the last `;`-separated statement of top-level
+# (unindented) lines only: indented exits are conditional by construction,
+# which is the cheap approximation the repair logic needs (no shell parsing).
 _UNCONDITIONAL_EXIT = re.compile(r"^exit(\s+(\d+|\$\?))?\s*$")
+
+
+def _line_forces_exit(line: str) -> bool:
+    """True when this line always terminates the script: a top-level
+    unconditional exit, plain (`exit 0`) or compound (`lint; exit $?`).
+
+    The `;` split is naive — a quoted `;` can misparse — but a quoted string
+    ending in `exit 0"` doesn't match the exit pattern, so it errs safe.
+    """
+    if line != line.lstrip() or line.startswith("#"):
+        return False
+    return bool(_UNCONDITIONAL_EXIT.match(line.split(";")[-1].strip()))
 
 
 def is_stale_reins_hook(text: str) -> bool:
@@ -50,7 +63,7 @@ def can_fall_through(text: str) -> bool:
         last = line
     if last is None:
         return True
-    return not _UNCONDITIONAL_EXIT.match(last)
+    return not _line_forces_exit(last)
 
 
 def marker_reachable(text: str) -> bool:
@@ -59,9 +72,7 @@ def marker_reachable(text: str) -> bool:
     if MARKER not in text:
         return False
     before = text.split(MARKER, 1)[0]
-    return all(
-        not _UNCONDITIONAL_EXIT.match(line) for line in before.splitlines()
-    )
+    return all(not _line_forces_exit(line) for line in before.splitlines())
 
 
 @dataclass(frozen=True)
