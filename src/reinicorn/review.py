@@ -4,9 +4,10 @@ Pure logic — no console printing (commands/review.py owns UX). The local kb
 checkout never leaves main; all ref work happens in a temp clone.
 
 Error contract: remote-facing failures (push, missing origin) raise
-RuntimeError with git's stderr in the message so agents can act on them;
-local git operations (clone/checkout/commit in temp clones) are exceptional
-and may raise subprocess.CalledProcessError.
+RuntimeError whose message comes from `git.explain_failure` — so it always
+carries git's own words — and agents can act on them; local git operations
+(clone/checkout/commit in temp clones) are exceptional and may raise
+subprocess.CalledProcessError (in practice its GitError subclass).
 """
 
 from __future__ import annotations
@@ -17,17 +18,24 @@ from pathlib import Path
 from typing import NamedTuple
 
 from reinicorn.doc_types import DRAFTS_DIR_NAME, DocType, drafts_dir, gated_types
-from reinicorn.docmeta import (
+from reinicorn.frontmatter import (
     FIELD_APPROVED_BY,
     FIELD_REVIEW_PR,
     FIELD_STATUS,
     STATUS_APPROVED,
     STATUS_DRAFT,
     STATUS_IN_REVIEW,
-    get_field,
-    set_field,
+    get,
+    set_meta,
 )
-from reinicorn.git import file_transport_args, remote_url, run_git, scratch_clone
+from reinicorn.git import (
+    GitFailure,
+    explain_failure,
+    file_transport_args,
+    remote_url,
+    run_git,
+    scratch_clone,
+)
 
 REVIEW_REF_PREFIX = "review/"
 
@@ -52,8 +60,8 @@ def collect_gated_drafts(scope_dir: Path) -> list[GatedDraft]:
             text = f.read_text()
             rows.append(GatedDraft(
                 dt.key, f.stem,
-                get_field(text, FIELD_STATUS) or STATUS_DRAFT,
-                get_field(text, FIELD_REVIEW_PR) or "",
+                get(text, FIELD_STATUS) or STATUS_DRAFT,
+                get(text, FIELD_REVIEW_PR) or "",
             ))
     return rows
 
@@ -126,7 +134,7 @@ def pr_new_url(gh_repo: str, branch: str) -> str:
 
 def candidate_text(draft_text: str) -> str:
     """The reviewable candidate: draft content with Status set to in-review."""
-    return set_field(draft_text, FIELD_STATUS, STATUS_IN_REVIEW)
+    return set_meta(draft_text, {FIELD_STATUS: STATUS_IN_REVIEW})
 
 
 def _clone_into(url: str, tmp: str, allow: tuple[str, ...]) -> Path:
@@ -174,7 +182,9 @@ def push_candidate(kb_dir: Path, target: ReviewTarget) -> None:
         r = run_git(*allow, "push", "-q", "-f", "origin", target.branch,
                     check=False, cwd=clone)
         if r.returncode != 0:
-            raise RuntimeError(f"review ref push failed: {r.stderr.strip()}")
+            raise RuntimeError("\n".join(explain_failure(
+                f"push the review ref '{target.branch}'", r,
+            )))
 
 
 def delete_review_ref(kb_dir: Path, target: ReviewTarget) -> bool:
@@ -242,13 +252,13 @@ def _finalize_tree(
     if not final.is_file():
         return False  # nothing landed — leave the draft alone
     changed = False
-    if get_field(final.read_text(), FIELD_STATUS) != STATUS_APPROVED:
-        text = set_field(final.read_text(), FIELD_STATUS, STATUS_APPROVED)
+    if get(final.read_text(), FIELD_STATUS) != STATUS_APPROVED:
+        stamps: dict[str, object] = {FIELD_STATUS: STATUS_APPROVED}
         if pr_url:
-            text = set_field(text, FIELD_REVIEW_PR, pr_url)
+            stamps[FIELD_REVIEW_PR] = pr_url
         if approved_by:
-            text = set_field(text, FIELD_APPROVED_BY, approved_by)
-        final.write_text(text)
+            stamps[FIELD_APPROVED_BY] = approved_by
+        final.write_text(set_meta(final.read_text(), stamps))
         changed = True
     if (clone / target.draft_rel).is_file():
         run_git("rm", "-q", "--", target.draft_rel, cwd=clone)
@@ -272,7 +282,7 @@ def cleanup_after_merge(
     if not url:
         raise RuntimeError("kb has no origin remote")
     allow = file_transport_args(cwd=kb_dir)
-    last_stderr = ""
+    last_push: GitFailure | None = None
     for _ in range(retries + 1):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             clone = _clone_into(url, tmp, allow)
@@ -290,7 +300,9 @@ def cleanup_after_merge(
                 # GitHub's auto-delete may already have removed it.
                 delete_review_ref(kb_dir, target)
                 return True
-            last_stderr = push.stderr.strip()
-    raise RuntimeError(
-        f"cleanup push kept failing after retries:\n{last_stderr}"
-    )
+            last_push = push
+    if last_push is None:  # pragma: no cover - range(retries + 1) always runs
+        raise RuntimeError("cleanup push never ran")
+    raise RuntimeError("\n".join(explain_failure(
+        "publish the post-merge cleanup (retried and still failing)", last_push,
+    )))

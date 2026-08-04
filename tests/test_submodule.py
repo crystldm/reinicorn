@@ -103,10 +103,18 @@ def test_cleanup_failed_submodule(parent_repo: Path):
 
 
 def test_setup_submodule_error_includes_stderr(parent_repo: Path):
-    """setup_submodule should include git stderr in error messages."""
+    """setup_submodule surfaces git's own output in the error message.
+
+    Asserted on the message rather than an attribute: the message is what the
+    user actually reads, and git.explain_failure is now the only thing that
+    builds it.
+    """
     with pytest.raises(SubmoduleError) as exc_info:
         setup_submodule(parent_repo, "/nonexistent/path/that/does/not/exist.git")
-    assert exc_info.value.stderr
+    message = str(exc_info.value)
+    assert "Could not add the kb submodule" in message
+    assert "git: " in message
+    assert "/nonexistent/path/that/does/not/exist.git" in message
 
 
 def test_setup_submodule_rejects_dangerous_url(parent_repo: Path):

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from reinicorn.commands.status import cmd_status
+from tests.conftest import doc_text
 
 
 def test_status_shows_layout_and_branch(kb_repo: Path, capsys):
@@ -27,16 +28,11 @@ def test_status_shows_layout_and_branch(kb_repo: Path, capsys):
 def test_status_shows_in_review_section(kb_repo: Path, capsys):
     d = kb_repo / "kb" / "testproject" / "specs" / "drafts"
     d.mkdir(parents=True)
-    (d / "hot.md").write_text(
-        "# hot\n"
-        "\n"
-        "**Date:** 2026-01-01\n"
-        "**Author:** tester\n"
-        "**Status:** in-review\n"
-        "**Review-PR:** https://github.com/owner/kb/pull/3\n"
-        "\n"
-        "body\n"
-    )
+    (d / "hot.md").write_text(doc_text(
+        title="hot", slug="hot", author="tester", status="in-review",
+        review_pr="https://github.com/owner/kb/pull/3",
+        body="\n# hot\n\nbody\n",
+    ))
     with patch("reinicorn.commands.status.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.status.current_branch", return_value="main"), \
          patch("reinicorn.commands.status.run_git") as mock_git:
