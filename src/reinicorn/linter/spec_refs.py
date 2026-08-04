@@ -50,7 +50,9 @@ SPEC_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
 
 # Explicit opt-out. Case-insensitive so "n/a" and "N/A" both count.
 SPEC_NOT_APPLICABLE = "n/a"
-_NOT_APPLICABLE_RE = re.compile(rf"{re.escape(SPEC_NOT_APPLICABLE)}\b", re.IGNORECASE)
+_NOT_APPLICABLE_RE = re.compile(
+    rf"{re.escape(SPEC_NOT_APPLICABLE)}(?:$|\s)", re.IGNORECASE
+)
 
 SPEC_DIR_NAME = REGISTRY["spec"].dir_path
 
@@ -227,6 +229,13 @@ def unapproved_reason(
         except OSError as e:
             return f"tracked but unreadable in the worktree ({e})"
     status = get(text, FIELD_STATUS)
+    if status is None:
+        # Legacy doc with no status field — exempt, not malformed.
+        return None
+    if not isinstance(status, str):
+        # `status: []` would raise on set membership; a doc with a mangled
+        # status must be a finding, not a crashed lint run or a laundered ref.
+        return f"malformed: 'status' is {status!r}, expected a string"
     if status in _UNAPPROVED_STATUSES:
         return f"status '{status}' (approval pending)"
     return None
@@ -253,7 +262,8 @@ def is_not_applicable(value: str) -> bool:
 
     A trailing rationale counts: "N/A (fixes two ideas)" is a better
     declaration than a bare "N/A", and a gate that rejects it only teaches
-    people to delete the reason. The word boundary keeps the prefix from
-    swallowing a real path — no kb doc directory begins "n/a".
+    people to delete the reason. Only a bare "n/a" or one followed by
+    whitespace qualifies, so a real path such as "n/a/specs/x.md" stays a
+    reference to be resolved rather than an exemption.
     """
     return bool(_NOT_APPLICABLE_RE.match(value.strip().strip("`")))

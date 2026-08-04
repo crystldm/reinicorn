@@ -235,6 +235,28 @@ class TestDraftRefs:
         assert len(diags) == 1
         assert "is not a spec" not in diags[0]
 
+    def test_na_directory_path_is_not_exempt(self, kb_repo: Path):
+        """A tracked path under an 'n/a/' directory is a reference, not an opt-out."""
+        self._make_spec(kb_repo, "n/a/specs/wip.md", "draft")
+        self._make_plan(kb_repo, "feature-d6", self._plan("n/a/specs/wip.md"))
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "approval pending" in diags[0]
+
+    def test_malformed_status_is_a_finding_not_a_crash(self, kb_repo: Path):
+        """`status: []` must not abort the run on frozenset membership."""
+        spec = kb_repo / "kb" / "testproject" / "specs" / "odd.md"
+        spec.parent.mkdir(parents=True, exist_ok=True)
+        spec.write_text(
+            "---\ntype: spec\ntitle: Odd\nslug: odd\nlifecycle: active\n"
+            "status: []\ncreated: 2026-07-27\nauthor: Test User\n---\n\n# Odd\n"
+        )
+        _track(kb_repo)
+        self._make_plan(kb_repo, "feature-d7", self._plan("specs/odd.md"))
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "malformed" in diags[0]
+
     def test_path_merely_starting_with_na_is_not_exempt(self, kb_repo: Path):
         """The 'n/a' prefix must not swallow a real path that happens to begin so."""
         self._make_plan(kb_repo, "feature-d3", self._plan("n/august/specs/wip.md"))

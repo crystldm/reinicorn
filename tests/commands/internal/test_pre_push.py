@@ -200,7 +200,7 @@ def test_cmd_pre_push_does_not_dirty_kb(submodule_repo: Path, monkeypatch):
     # staying clean, not about the gate.
     (active / "plan.md").write_text(doc_text(
         type="plan", title="Plan", slug="plan", status="planning",
-        branch="feature/x", spec="N/A", body="\n# plan\n",
+        branch="feature/test", spec="N/A", body="\n# plan\n",
     ))
 
     # Commit the new plan inside the kb so the kb starts clean.
@@ -272,10 +272,10 @@ class TestEnsurePlanSpecApproved:
         run_git("commit", "-q", "-m", "pin kb", cwd=repo, check=False)
 
     @staticmethod
-    def _plan(spec_value: str) -> str:
+    def _plan(spec_value: str, branch: str = "feat/thing") -> str:
         return doc_text(
             type="plan", title="Plan", slug="plan", status="planning",
-            branch="feat/thing", spec=spec_value,
+            branch=branch, spec=spec_value,
             body="\n# Plan\n\n## Goal\n\nx\n",
         )
 
@@ -470,7 +470,7 @@ class TestEnsurePlanSpecApproved:
         """
         self._setup(
             submodule_repo, "feat/other",
-            plan=self._plan("specs/hot.md"),
+            plan=self._plan("specs/hot.md", branch="feat/other"),
             spec=("specs/hot.md", "in-review"),
         )
         run_git("checkout", "-q", "main", cwd=submodule_repo)
@@ -480,10 +480,13 @@ class TestEnsurePlanSpecApproved:
     def test_multi_ref_push_blocks_on_any_offending_branch(
         self, submodule_repo: Path, capsys
     ):
-        self._setup(submodule_repo, "feat/clean", plan=self._plan("N/A"))
+        self._setup(
+            submodule_repo, "feat/clean",
+            plan=self._plan("N/A", branch="feat/clean"),
+        )
         self._setup(
             submodule_repo, "feat/dirty",
-            plan=self._plan("specs/wip.md"),
+            plan=self._plan("specs/wip.md", branch="feat/dirty"),
             spec=("specs/drafts/wip.md", "draft"),
         )
         assert self._run(submodule_repo, ["feat/clean", "feat/dirty"]) == 1
