@@ -30,7 +30,7 @@ agent across a multi-repo, multi-team project.
 The core loop works: spec → review → implementation → test → retro is (mostly)
 there. Plenty is still missing, and many ideas are open for implementation in
 the [knowledgebase](https://github.com/crystldm/reinicorn-kb). Contribution,
-testing, and feedback are most welcome — `rcorn feedback` opens an issue on
+testing, and feedback are most welcome: `rcorn feedback` opens an issue on
 this repo. I've dog-fooded the project from day one (I built Reinicorn using
 Reinicorn), but the next test is real team workflows.
 
@@ -202,13 +202,13 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn plan complete [branch]` | Archive plan to completed/ |
 | `rcorn retro create` | Create retro for current branch |
 | `rcorn retro show [branch] [--full]` | Show retro doc |
-| `rcorn review start\|push\|merge\|cancel\|status` | The doc-review lane (see above) |
+| `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
 | `rcorn review setup` | Install kb-repo CI cleanup workflow + ruleset |
 | `rcorn principle add "title"` | Append a golden principle |
 | `rcorn mode enable\|disable\|incognito\|status` | Mode toggles |
 | `rcorn init [...]` | Set up reinicorn in this repo |
 | `rcorn hooks install` | Install git and editor hooks |
-| `rcorn update [--diff X]` | Re-sync bundled files (skills, hooks, AGENTS.md) to the installed version |
+| `rcorn update [--diff X]` | Re-sync bundled files (skills, hooks, linters) to the installed version |
 | `rcorn feedback [text]` | Open a GitHub issue on the reinicorn repo itself |
 
 ## The skill set
