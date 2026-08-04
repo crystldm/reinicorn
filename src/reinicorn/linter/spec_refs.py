@@ -31,25 +31,28 @@ from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
 from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
-from reinicorn.docmeta import (
+from reinicorn.frontmatter import (
     FIELD_SPEC,
     FIELD_STATUS,
     STATUS_DRAFT,
     STATUS_IN_REVIEW,
-    get_field,
+    get,
 )
 from reinicorn.git import explain_failure, run_git
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Placeholder text the plan template ships with; a plan still carrying it has not
-# declared anything.
+# Placeholder text the plan template ships with; a plan still carrying it has
+# not declared anything. YAML may also parse an unquoted `[...]` placeholder
+# into a list, which `declared_spec` treats the same way.
 SPEC_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
 
 # Explicit opt-out. Case-insensitive so "n/a" and "N/A" both count.
 SPEC_NOT_APPLICABLE = "n/a"
-_NOT_APPLICABLE_RE = re.compile(rf"{re.escape(SPEC_NOT_APPLICABLE)}\b", re.IGNORECASE)
+_NOT_APPLICABLE_RE = re.compile(
+    rf"{re.escape(SPEC_NOT_APPLICABLE)}(?:$|\s)", re.IGNORECASE
+)
 
 SPEC_DIR_NAME = REGISTRY["spec"].dir_path
 
@@ -225,16 +228,28 @@ def unapproved_reason(
             text = (kb_dir / path).read_text()
         except OSError as e:
             return f"tracked but unreadable in the worktree ({e})"
-    status = get_field(text, FIELD_STATUS)
+    status = get(text, FIELD_STATUS)
+    if status is None:
+        # Legacy doc with no status field — exempt, not malformed.
+        return None
+    if not isinstance(status, str):
+        # `status: []` would raise on set membership; a doc with a mangled
+        # status must be a finding, not a crashed lint run or a laundered ref.
+        return f"malformed: 'status' is {status!r}, expected a string"
     if status in _UNAPPROVED_STATUSES:
         return f"status '{status}' (approval pending)"
     return None
 
 
 def declared_spec(text: str) -> str | None:
-    """The plan's declared ``**Spec:**`` value, or None when absent/placeholder."""
-    value = get_field(text, FIELD_SPEC)
-    if value is None:
+    """The plan's declared ``spec:`` value, or None when absent/placeholder.
+
+    A non-string value is a placeholder too: YAML parses an unquoted
+    ``[kb path …]`` template stub as a list, and no real reference is anything
+    but a string.
+    """
+    value = get(text, FIELD_SPEC)
+    if value is None or not isinstance(value, str):
         return None
     value = value.strip()
     if not value or SPEC_PLACEHOLDER_RE.match(value):
@@ -247,7 +262,8 @@ def is_not_applicable(value: str) -> bool:
 
     A trailing rationale counts: "N/A (fixes two ideas)" is a better
     declaration than a bare "N/A", and a gate that rejects it only teaches
-    people to delete the reason. The word boundary keeps the prefix from
-    swallowing a real path — no kb doc directory begins "n/a".
+    people to delete the reason. Only a bare "n/a" or one followed by
+    whitespace qualifies, so a real path such as "n/a/specs/x.md" stays a
+    reference to be resolved rather than an exemption.
     """
     return bool(_NOT_APPLICABLE_RE.match(value.strip().strip("`")))

@@ -6,7 +6,7 @@ import re
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from reinicorn import console
+from reinicorn import console, frontmatter
 from reinicorn.config import kb_scope
 from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY, drafts_dir
 from reinicorn.git import current_branch, repo_root
@@ -85,14 +85,12 @@ def cmd_doc_show(
 
 
 def _title_and_status(path: Path) -> tuple[str, str]:
-    """First `# ` heading and `**Status:**` value from the provenance block."""
-    title, status = path.stem, ""
-    for line in path.read_text().splitlines()[:12]:
-        if line.startswith("# ") and title == path.stem:
-            title = line[2:].strip()
-        elif line.startswith("**Status:**"):
-            status = line.removeprefix("**Status:**").strip()
-    return title, status
+    """`title` and `status` from frontmatter, falling back to the filename."""
+    meta, _ = frontmatter.read(path)
+    return (
+        str(meta.get("title") or path.stem),
+        str(meta.get(frontmatter.FIELD_STATUS) or ""),
+    )
 
 
 def cmd_doc_list(doc_type: str, include_drafts: bool = False) -> int:

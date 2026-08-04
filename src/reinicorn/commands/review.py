@@ -18,15 +18,14 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console, github
 from reinicorn.config import kb_scope
-from reinicorn.docmeta import (
+from reinicorn.frontmatter import (
     FIELD_REVIEW_CANCELLED,
     FIELD_REVIEW_PR,
     FIELD_STATUS,
     STATUS_DRAFT,
     STATUS_IN_REVIEW,
-    get_field,
-    remove_field,
-    set_field,
+    get,
+    set_meta,
 )
 from reinicorn.git import (
     file_transport_args,
@@ -133,7 +132,7 @@ def _push_kb_main(kb_dir: Path) -> None:
 
 def _stamp_draft(
     root: Path, kb_dir: Path, target: ReviewTarget,
-    message: str, fields: dict[str, str | None],
+    message: str, fields: dict[str, object | None],
 ) -> None:
     """Set (or remove, when value is None) header fields on the on-main draft.
 
@@ -141,10 +140,11 @@ def _stamp_draft(
     only do their job when teammates and `kb status` can see them, and an
     unpublished stamp commit would conflict with the post-merge cleanup pull.
     """
-    text = target.draft_path.read_text()
-    for field, value in fields.items():
-        text = remove_field(text, field) if value is None else set_field(text, field, value)
-    target.draft_path.write_text(text)
+    # set_meta applies the whole batch in one pass; a None value removes the
+    # key (that is how the Review-cancelled marker is cleared on restart).
+    target.draft_path.write_text(
+        set_meta(target.draft_path.read_text(), fields)
+    )
     # commit_kb sweeps any other pending kb changes into this commit by design —
     # kb main is always publishable, so bystander edits ride along rather than block.
     commit_kb(root, message, kb_dir=kb_dir)
@@ -152,10 +152,8 @@ def _stamp_draft(
 
 
 def _doc_title(target: ReviewTarget) -> str:
-    for line in target.draft_path.read_text().splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return target.slug
+    title = get(target.draft_path.read_text(), "title")
+    return str(title) if title else target.slug
 
 
 def _pull_kb_main(kb_dir: Path) -> None:
@@ -224,7 +222,7 @@ def cmd_review_push(slug: str, type_key: str | None = None) -> int:
     _root, kb_dir, target = ctx
     push_candidate(kb_dir, target)
     console.success("Candidate updated on the review ref.")
-    pr_url = get_field(target.draft_path.read_text(), FIELD_REVIEW_PR)
+    pr_url = get(target.draft_path.read_text(), FIELD_REVIEW_PR)
     if pr_url:
         console.warn(
             "If the kb repo dismisses stale approvals (rcorn review setup), "
@@ -262,12 +260,12 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
     if ctx is None:
         return 1
     _root, kb_dir, target = ctx
-    pr_url = get_field(target.draft_path.read_text(), FIELD_REVIEW_PR) or ""
+    pr_url = get(target.draft_path.read_text(), FIELD_REVIEW_PR) or ""
     approved_by = ""
     final_text, remote_draft = remote_main_state(kb_dir, target)
     merged = (
         final_text is not None
-        and get_field(final_text, FIELD_STATUS) == STATUS_IN_REVIEW
+        and get(final_text, FIELD_STATUS) == STATUS_IN_REVIEW
     )
     if final_text is not None and not merged:
         if remote_draft is None:
@@ -278,7 +276,7 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
             return 0
         console.error(
             f"'{target.final_rel}' on kb main is already occupied by a doc "
-            f"with status '{get_field(final_text, FIELD_STATUS) or 'unknown'}' "
+            f"with status '{get(final_text, FIELD_STATUS) or 'unknown'}' "
             "— slug collision; this draft was never reviewed there."
         )
         console.next_step("recreate the draft under a new title")
@@ -375,7 +373,7 @@ def cmd_review_cancel(slug: str, type_key: str | None = None) -> int:
     if ctx is None:
         return 1
     root, kb_dir, target = ctx
-    pr_url = get_field(target.draft_path.read_text(), FIELD_REVIEW_PR) or ""
+    pr_url = get(target.draft_path.read_text(), FIELD_REVIEW_PR) or ""
     gh_repo = gh_repo_from_url(remote_url(kb_dir))
     if gh_repo and _gh_ready():
         pr = github.gh_pr_view(gh_repo, head=target.branch)
@@ -394,7 +392,7 @@ def cmd_review_cancel(slug: str, type_key: str | None = None) -> int:
     _stamp_draft(
         root, kb_dir, target,
         f"review({target.doc_type.key}): cancel {target.slug}",
-        {FIELD_STATUS: STATUS_DRAFT, FIELD_REVIEW_CANCELLED: date.today().isoformat()},
+        {FIELD_STATUS: STATUS_DRAFT, FIELD_REVIEW_CANCELLED: date.today()},
     )
     console.success(f"review cancelled — {target.slug} back to draft")
     return 0

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
 from reinicorn.doc_types import REGISTRY
-from reinicorn.docmeta import FIELD_SPEC
+from reinicorn.frontmatter import FIELD_SPEC
 from reinicorn.linter.rules.base import LintRule
 from reinicorn.linter.spec_refs import declared_spec
 
@@ -71,7 +71,7 @@ class PlanStructureRule(LintRule):
                     # this rule's severity.
                     if declared_spec(content) is None:
                         diagnostics.append(
-                            f"{rel_plan}:1 — Missing '**{FIELD_SPEC}:**' field "
+                            f"{rel_plan}:1 — Missing '{FIELD_SPEC}:' frontmatter field "
                             "(path to the spec this plan implements, or 'N/A')."
                         )
 

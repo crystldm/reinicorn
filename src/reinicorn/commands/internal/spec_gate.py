@@ -103,7 +103,7 @@ def _check_plan(
     if value is None:
         return _block(
             plan_path,
-            "its '**Spec:**' field is missing or still the template placeholder",
+            "its 'spec:' frontmatter field is missing or still the template placeholder",
             "Declare the spec this plan implements, or 'N/A' if it has none.",
         )
     if is_not_applicable(value):
@@ -113,14 +113,14 @@ def _check_plan(
     if res.ambiguous:
         return _block(
             plan_path,
-            f"'**Spec:** {value}' is ambiguous — it matches "
+            f"'spec: {value}' is ambiguous — it matches "
             f"{', '.join(res.ambiguous)}",
             "Use a path that names exactly one doc.",
         )
     if res.path is None:
         return _block(
             plan_path,
-            f"'**Spec:** {value}' matches no path in the kb commit this "
+            f"'spec: {value}' matches no path in the kb commit this "
             "branch pins",
             "Fix the path, or commit the doc to the kb and update the "
             "branch's kb pointer.",
@@ -129,7 +129,7 @@ def _check_plan(
     if not is_spec_path(res.path):
         return _block(
             plan_path,
-            f"'**Spec:** {value}' resolves to '{res.path}', which is not a spec",
+            f"'spec: {value}' resolves to '{res.path}', which is not a spec",
             f"Name a doc under '{SPEC_DIR_NAME}/', or 'N/A' if there is none.",
         )
 

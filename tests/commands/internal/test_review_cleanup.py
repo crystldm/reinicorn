@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from reinicorn import frontmatter as fm
 from reinicorn.git import run_git
 from reinicorn.review import push_candidate, resolve_draft
 
@@ -51,8 +52,8 @@ def test_cleanup_from_ref_name(merged_checkout: Path, kb_pair, monkeypatch):
 
     final = _remote_file(bare, "main", "myrepo/specs/x.md")
     assert final is not None
-    assert "**Status:** approved" in final
-    assert "**Review-PR:** https://x/pull/1" in final
+    assert fm.get(final, "status") == "approved"
+    assert fm.get(final, "review_pr") == "https://x/pull/1"
     assert _remote_file(bare, "main", "myrepo/specs/drafts/x.md") is None
 
 

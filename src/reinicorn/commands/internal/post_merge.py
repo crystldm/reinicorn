@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from reinicorn import console
+from reinicorn import console, frontmatter
 from reinicorn.doc_types import REGISTRY
 from reinicorn.git import repo_root, run_git
-from reinicorn.kb import branch_dir_name, get_kb_dir
+from reinicorn.kb import get_kb_dir
 from reinicorn.mode import hook_check
 
 if TYPE_CHECKING:
@@ -41,8 +41,7 @@ def _archive_stale_plans(root: Path) -> None:
         if not active_dir.is_dir():
             continue
 
-        # Build set of sanitized remote branch names for comparison
-        live_branches = _live_remote_branches_sanitized(root)
+        live_branches = _live_remote_branches(root)
         if live_branches is None:
             return  # error querying remote — don't archive anything
 
@@ -51,7 +50,19 @@ def _archive_stale_plans(root: Path) -> None:
                 continue
             if not any(entry.glob("*.md")):
                 continue
-            if entry.name in live_branches:
+            # Compare the exact branch from frontmatter. Comparing sanitized
+            # directory names instead is lossy and many-to-one — `/` and `\`
+            # both become `-` — so a deleted `feature/mvp` plan looked alive
+            # whenever an unrelated `feature-mvp` branch existed.
+            meta, _ = frontmatter.read(entry / "plan.md")
+            branch = str(meta.get("branch") or "").strip()
+            # Archiving is destructive, so anything short of a usable ref means
+            # "cannot verify", never "gone". A malformed or multi-line value
+            # would otherwise match nothing in live_branches and be read as a
+            # deleted branch.
+            if not _usable_ref(branch, root):
+                continue
+            if branch in live_branches:
                 continue
             # No remote branch maps to this dir — archive the plan
             from reinicorn.commands.plan import cmd_plan_complete
@@ -64,10 +75,24 @@ def _archive_stale_plans(root: Path) -> None:
                 console.warn(f"Could not archive plan '{entry.name}': {e}")
 
 
-def _live_remote_branches_sanitized(root: Path) -> set[str] | None:
-    """Return the set of remote branch names, sanitized to match dir names.
+def _usable_ref(branch: str, root: Path) -> bool:
+    """Whether *branch* is a value git would accept as a branch name.
 
-    Returns None on error so the caller can bail out safely (don't archive).
+    `branch:` comes from a kb doc, so it is external input at a boundary that
+    gates a destructive action.
+    """
+    if not branch or "\n" in branch:
+        return False
+    r = run_git("check-ref-format", "--branch", branch, cwd=root, check=False)
+    return r.returncode == 0
+
+
+def _live_remote_branches(root: Path) -> set[str] | None:
+    """The set of remote branch names, exactly as git reports them.
+
+    Not sanitized: the comparison is against the `branch:` field in plan
+    frontmatter, which holds the unmodified ref. Returns None on error so the
+    caller can bail out safely (don't archive).
     """
     try:
         result = run_git(
@@ -79,7 +104,7 @@ def _live_remote_branches_sanitized(root: Path) -> set[str] | None:
             name = line.strip().removeprefix("origin/")
             if " -> " in name:
                 continue  # skip HEAD pointer
-            branches.add(branch_dir_name(name))
+            branches.add(name)
         return branches
     except Exception:
         return None

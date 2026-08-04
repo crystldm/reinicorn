@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+from reinicorn import frontmatter as fm
 from reinicorn.commands.plan import cmd_plan_complete, cmd_plan_create, cmd_plan_status
 
 
@@ -150,7 +151,7 @@ def test_plan_complete_updates_status(kb_repo: Path, capsys):
 
     completed = kb_repo / "kb" / "testproject" / "exec-plans" / "completed" / "feature-x"
     content = (completed / "plan.md").read_text()
-    assert "**Status:** complete" in content
+    assert fm.get(content, "status") == "complete"
 
 
 def test_plan_complete_missing_plan(kb_repo: Path, capsys):

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from reinicorn import frontmatter as fm
 from reinicorn.git import gh_repo_from_url, run_git
 from reinicorn.review import (
     ReviewTarget,
@@ -16,6 +17,7 @@ from reinicorn.review import (
     resolve_drafts,
     review_branch,
 )
+from tests.conftest import doc_text
 
 
 def test_review_branch_is_repo_scoped():
@@ -45,7 +47,7 @@ def _mk_draft(kb_dir: Path, scope: str, slug: str) -> Path:
     d = kb_dir / scope / "specs" / "drafts"
     d.mkdir(parents=True, exist_ok=True)
     f = d / f"{slug}.md"
-    f.write_text(f"# {slug}\n\n**Status:** draft\n")
+    f.write_text(doc_text(title=slug, slug=slug, body=f"\n# {slug}\n"))
     return f
 
 
@@ -80,8 +82,8 @@ def test_resolve_drafts_type_filter(tmp_path):
 
 
 def test_candidate_text_flips_status():
-    out = candidate_text("# T\n\n**Status:** draft\n\nbody\n")
-    assert "**Status:** in-review" in out
+    out = candidate_text(doc_text(title="T", slug="t", body="\n# T\n\nbody\n"))
+    assert fm.get(out, "status") == "in-review"
     assert "body" in out
 
 
@@ -96,7 +98,7 @@ def test_push_candidate_creates_ref_with_only_final_file(kb_pair):
     assert t is not None
     push_candidate(local, t)
     cand = _remote_file(bare, t.branch, "myrepo/specs/x.md")
-    assert cand and "**Status:** in-review" in cand
+    assert cand and fm.get(cand, "status") == "in-review"
     # draft untouched on the ref (add-only: rename detection must find no delete)
     assert _remote_file(bare, t.branch, "myrepo/specs/drafts/x.md") is not None
 
@@ -107,7 +109,7 @@ def test_push_candidate_updates_existing_ref(kb_pair):
     assert t is not None
     push_candidate(local, t)
     (local / "myrepo/specs/drafts/x.md").write_text(
-        "# X\n\n**Status:** draft\n\n## Problem\n\nrevised\n"
+        doc_text(body="\n# X\n\n## Problem\n\nrevised\n")
     )
     push_candidate(local, t)
     cand = _remote_file(bare, t.branch, "myrepo/specs/x.md")
@@ -134,9 +136,9 @@ def test_cleanup_after_merge_flips_stamps_deletes(kb_pair):
                                approved_by="alice") is True
     final = _remote_file(bare, "main", "myrepo/specs/x.md")
     assert final is not None
-    assert "**Status:** approved" in final
-    assert "**Review-PR:** https://x/pull/1" in final
-    assert "**Approved-by:** alice" in final
+    assert fm.get(final, "status") == "approved"
+    assert fm.get(final, "review_pr") == "https://x/pull/1"
+    assert fm.get(final, "approved_by") == "alice"
     assert _remote_file(bare, "main", "myrepo/specs/drafts/x.md") is None
     # idempotent second run is a no-op
     assert cleanup_after_merge(local, t, pr_url="https://x/pull/1") is False
@@ -164,7 +166,7 @@ def test_divergence_detection(kb_pair):
     push_candidate(local, t)
     assert candidate_matches_draft(local, t) is True
     (local / "myrepo/specs/drafts/x.md").write_text(
-        "# X\n\n**Status:** draft\n\nchanged\n"
+        doc_text(body="\n# X\n\nchanged\n")
     )
     assert candidate_matches_draft(local, t) is False
 
@@ -215,7 +217,8 @@ def test_push_candidate_refuses_slug_collision_with_landed_doc(kb_pair):
     """A doc already at the final path on main means this slug is taken —
     the lane must refuse loudly, not emit the generic add-only error."""
     _bare, local = kb_pair
-    (local / "myrepo/specs/x.md").write_text("# X\n\n**Status:** approved\n")
+    (local / "myrepo/specs/x.md").write_text(
+        doc_text(status="approved", body="\n# X\n"))
     run_git("add", "-A", cwd=local)
     run_git("commit", "-q", "-m", "landed", cwd=local)
     run_git("push", "-q", "origin", "main", cwd=local)
@@ -233,13 +236,13 @@ def test_remote_main_state(kb_pair):
     assert t is not None
     final, draft = remote_main_state(local, t)
     assert final is None
-    assert draft is not None and "**Status:** draft" in draft
+    assert draft is not None and fm.get(draft, "status") == "draft"
 
     push_candidate(local, t)
     run_git("fetch", "-q", "origin", t.branch, cwd=local)
     run_git("push", "-q", "origin", f"origin/{t.branch}:main", cwd=local)
     final, draft = remote_main_state(local, t)
-    assert final is not None and "**Status:** in-review" in final
+    assert final is not None and fm.get(final, "status") == "in-review"
     assert draft is not None
 
 

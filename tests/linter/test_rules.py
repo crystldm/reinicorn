@@ -10,7 +10,9 @@ from reinicorn.git import run_git
 from reinicorn.linter.rules.cross_links import CrossLinksRule
 from reinicorn.linter.rules.docs_freshness import DocsFreshnessRule
 from reinicorn.linter.rules.draft_refs import DraftRefsRule
+from reinicorn.linter.rules.frontmatter import FrontmatterRule
 from reinicorn.linter.rules.plan_structure import PlanStructureRule
+from tests.conftest import doc_text
 
 
 class TestCrossLinks:
@@ -80,11 +82,12 @@ class TestPlanStructure:
     def test_valid_plan_passes(self, kb_repo: Path):
         plan_dir = kb_repo / "kb" / "testrepo" / "exec-plans" / "active" / "feature-x"
         plan_dir.mkdir(parents=True)
-        (plan_dir / "plan.md").write_text(
-            "# Plan\n\n**Spec:** N/A\n**Status:** planning\n\n"
-            "## Goal\nDo stuff\n\n## Acceptance Criteria\n"
-            "- Done\n\n## Tasks\n- [ ] thing\n"
-        )
+        (plan_dir / "plan.md").write_text(doc_text(
+            type="plan", title="Plan", slug="plan", status="planning",
+            branch="feature/x", spec="N/A",
+            body="\n# Plan\n\n## Goal\nDo stuff\n\n## Acceptance Criteria\n"
+                 "- Done\n\n## Tasks\n- [ ] thing\n",
+        ))
 
         rule = PlanStructureRule()
         assert rule.run(kb_repo) == []
@@ -92,9 +95,11 @@ class TestPlanStructure:
     def test_missing_sections_detected(self, kb_repo: Path):
         plan_dir = kb_repo / "kb" / "testrepo" / "exec-plans" / "active" / "feature-y"
         plan_dir.mkdir(parents=True)
-        (plan_dir / "plan.md").write_text(
-            "# Plan\n\n**Spec:** N/A\n**Status:** planning\n\nNo required sections.\n"
-        )
+        (plan_dir / "plan.md").write_text(doc_text(
+            type="plan", title="Plan", slug="plan", status="planning",
+            branch="feature/y", spec="N/A",
+            body="\n# Plan\n\nNo required sections.\n",
+        ))
 
         rule = PlanStructureRule()
         diags = rule.run(kb_repo)
@@ -103,14 +108,16 @@ class TestPlanStructure:
     def test_missing_spec_field_detected(self, kb_repo: Path):
         plan_dir = kb_repo / "kb" / "testrepo" / "exec-plans" / "active" / "feature-z"
         plan_dir.mkdir(parents=True)
-        (plan_dir / "plan.md").write_text(
-            "# Plan\n\n**Status:** planning\n\n## Goal\nDo stuff\n\n"
-            "## Acceptance Criteria\n- Done\n\n## Tasks\n- [ ] thing\n"
-        )
+        (plan_dir / "plan.md").write_text(doc_text(
+            type="plan", title="Plan", slug="plan", status="planning",
+            branch="feature/z",
+            body="\n# Plan\n\n## Goal\nDo stuff\n\n"
+                 "## Acceptance Criteria\n- Done\n\n## Tasks\n- [ ] thing\n",
+        ))
 
         diags = PlanStructureRule().run(kb_repo)
         assert len(diags) == 1
-        assert "Missing '**Spec:**' field" in diags[0]
+        assert "Missing 'spec:' frontmatter field" in diags[0]
 
 
 def _track(repo: Path) -> None:
@@ -134,14 +141,24 @@ class TestDraftRefs:
     def _make_spec(self, kb_repo: Path, rel: str, status: str | None) -> Path:
         spec = kb_repo / "kb" / "testproject" / rel
         spec.parent.mkdir(parents=True, exist_ok=True)
-        header = f"**Status:** {status}\n" if status else ""
-        spec.write_text(f"# Doc\n\n{header}\n## Problem\n\nbody\n")
+        if status:
+            spec.write_text(doc_text(
+                title="Doc", slug="doc", status=status,
+                body="\n# Doc\n\n## Problem\n\nbody\n",
+            ))
+        else:
+            # Legacy doc: no frontmatter at all, so no status to read.
+            spec.write_text("# Doc\n\n## Problem\n\nbody\n")
         _track(kb_repo)
         return spec
 
     @staticmethod
     def _plan(spec_value: str, body: str = "") -> str:
-        return f"# Plan\n\n**Spec:** {spec_value}\n**Status:** planning\n\n{body}"
+        return doc_text(
+            type="plan", title="Plan", slug="plan", status="planning",
+            branch="feature/x", spec=spec_value,
+            body=f"\n# Plan\n\n{body}",
+        )
 
     def test_no_active_plans_pass(self, kb_repo: Path):
         assert DraftRefsRule().run(kb_repo) == []
@@ -150,10 +167,10 @@ class TestDraftRefs:
 
     def test_missing_spec_field_is_reported(self, kb_repo: Path):
         """Omitting the reference must not be a way to dodge the gate."""
-        self._make_plan(kb_repo, "feature-a", "# Plan\n\n**Status:** planning\n")
+        self._make_plan(kb_repo, "feature-a", "# Plan\n\nNo frontmatter here.\n")
         diags = DraftRefsRule().run(kb_repo)
         assert len(diags) == 1
-        assert "no '**Spec:**' field" in diags[0]
+        assert "no 'spec:' frontmatter field" in diags[0]
 
     def test_template_placeholder_is_reported(self, kb_repo: Path):
         self._make_plan(
@@ -162,7 +179,7 @@ class TestDraftRefs:
         )
         diags = DraftRefsRule().run(kb_repo)
         assert len(diags) == 1
-        assert "no '**Spec:**' field" in diags[0]
+        assert "no 'spec:' frontmatter field" in diags[0]
 
     def test_not_applicable_is_exempt(self, kb_repo: Path):
         self._make_plan(kb_repo, "feature-c", self._plan("N/A"))
@@ -195,9 +212,7 @@ class TestDraftRefs:
         other.mkdir(parents=True)
         # The decoy is an active plan too, so it needs its own valid field or it
         # contributes a second, unrelated diagnostic.
-        (other / "plan.md").write_text(
-            "# Other\n\n**Spec:** N/A\n**Status:** in-progress\n"
-        )
+        (other / "plan.md").write_text(self._plan("N/A"))
         self._make_plan(
             kb_repo, "feature-d4",
             self._plan("exec-plans/active/other/plan.md"),
@@ -219,6 +234,28 @@ class TestDraftRefs:
         diags = DraftRefsRule().run(kb_repo)
         assert len(diags) == 1
         assert "is not a spec" not in diags[0]
+
+    def test_na_directory_path_is_not_exempt(self, kb_repo: Path):
+        """A tracked path under an 'n/a/' directory is a reference, not an opt-out."""
+        self._make_spec(kb_repo, "n/a/specs/wip.md", "draft")
+        self._make_plan(kb_repo, "feature-d6", self._plan("n/a/specs/wip.md"))
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "approval pending" in diags[0]
+
+    def test_malformed_status_is_a_finding_not_a_crash(self, kb_repo: Path):
+        """`status: []` must not abort the run on frozenset membership."""
+        spec = kb_repo / "kb" / "testproject" / "specs" / "odd.md"
+        spec.parent.mkdir(parents=True, exist_ok=True)
+        spec.write_text(
+            "---\ntype: spec\ntitle: Odd\nslug: odd\nlifecycle: active\n"
+            "status: []\ncreated: 2026-07-27\nauthor: Test User\n---\n\n# Odd\n"
+        )
+        _track(kb_repo)
+        self._make_plan(kb_repo, "feature-d7", self._plan("specs/odd.md"))
+        diags = DraftRefsRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "malformed" in diags[0]
 
     def test_path_merely_starting_with_na_is_not_exempt(self, kb_repo: Path):
         """The 'n/a' prefix must not swallow a real path that happens to begin so."""
@@ -371,3 +408,54 @@ class TestDraftRefs:
             self._plan("N/A", "Maybe see specs/nowhere.md sometime.\n"),
         )
         assert DraftRefsRule().run(kb_repo) == []
+
+
+class TestFrontmatter:
+    def _spec(self, kb_repo: Path, name: str, text: str) -> Path:
+        d = kb_repo / "kb" / "testproject" / "specs"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_text(text)
+        return d / name
+
+    def test_valid_docs_pass(self, kb_repo: Path):
+        self._spec(kb_repo, "ok.md", doc_text(title="Ok", slug="ok"))
+        assert FrontmatterRule().run(kb_repo) == []
+
+    def test_missing_frontmatter_is_flagged(self, kb_repo: Path):
+        self._spec(kb_repo, "bare.md", "# Bare\n\n**Status:** draft\n")
+        diags = FrontmatterRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "bare.md" in diags[0]
+
+    def test_invalid_field_is_flagged(self, kb_repo: Path):
+        self._spec(kb_repo, "bad.md", doc_text(
+            title="Bad", slug="bad").replace("lifecycle: active",
+                                             "lifecycle: in-progress"))
+        diags = FrontmatterRule().run(kb_repo)
+        assert len(diags) == 1
+        assert "lifecycle" in diags[0]
+
+    def test_reports_every_error_on_one_doc(self, kb_repo: Path):
+        self._spec(kb_repo, "worse.md", "---\ntype: spec\n---\n\n# Worse\n")
+        diags = FrontmatterRule().run(kb_repo)
+        assert len(diags) > 1
+
+    def test_non_docs_are_skipped(self, kb_repo: Path):
+        d = kb_repo / "kb" / "testproject" / "specs"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.md").write_text("# Spec Index\n\nNo provenance here.\n")
+        (kb_repo / "kb" / "testproject" / "README.md").write_text("# Readme\n")
+        assert FrontmatterRule().run(kb_repo) == []
+
+    def test_template_dir_is_skipped(self, kb_repo: Path):
+        # kb_repo's fixture ships a _template/plan.md with placeholders that
+        # are not valid values until plan create substitutes them.
+        assert FrontmatterRule().run(kb_repo) == []
+
+    def test_no_kb_dir_is_not_an_error(self, tmp_path: Path):
+        assert FrontmatterRule().run(tmp_path) == []
+
+    def test_diagnostic_names_the_file_and_line(self, kb_repo: Path):
+        self._spec(kb_repo, "bare.md", "# Bare\n")
+        diags = FrontmatterRule().run(kb_repo)
+        assert diags[0].startswith("kb/testproject/specs/bare.md:1")

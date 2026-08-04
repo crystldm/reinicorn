@@ -6,11 +6,16 @@ import re
 from datetime import date
 from pathlib import Path
 
-from reinicorn import console
+from reinicorn import console, frontmatter
 from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.doc_types import REGISTRY, drafts_dir, get_doc_dir, get_protected_map
 from reinicorn.git import current_branch, repo_root, run_git
-from reinicorn.kb import branch_doc_path, commit_kb, require_kb_dir
+from reinicorn.kb import (
+    branch_dir_name,
+    branch_doc_path,
+    commit_kb,
+    require_kb_dir,
+)
 
 
 def _get_author() -> str:
@@ -24,16 +29,28 @@ def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower())[:60].rstrip("-")
 
 
-def _provenance(title: str, author: str, status: str = "draft") -> str:
-    return (
-        f"# {title}\n"
-        f"\n"
-        f"**Date:** {date.today().isoformat()}\n"
-        f"**Author:** {author}\n"
-        f"**Status:** {status}\n"
-        f"**Origin:** ai-assisted\n"
-        f"**Human-validated:** false\n"
-    )
+def _provenance(
+    title: str, author: str, status: str = "draft",
+    doc_type: str = "spec", *, extra: dict[str, object] | None = None,
+) -> str:
+    """Frontmatter block plus the `# title` H1 that opens every doc body.
+
+    frontmatter.render validates on the way out, so this path and the
+    `kb/frontmatter` lint rule share one definition of valid.
+    """
+    meta: dict[str, object] = {
+        "type": doc_type,
+        "title": title,
+        "slug": _slugify(title),
+        "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
+        "status": status,
+        "created": date.today(),
+        "author": author,
+        "origin": frontmatter.ORIGIN_AI,
+        "human_validated": False,
+    }
+    meta.update(extra or {})
+    return frontmatter.render(meta, f"\n# {title}\n")
 
 
 def _typed_dir(doc_type: str, repo_dir: Path) -> Path:
@@ -75,7 +92,7 @@ def _create_spec(repo_dir: Path, title: str, author: str) -> Path:
     target = _slug_target("spec", repo_dir, slug)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        _provenance(title, author)
+        _provenance(title, author, doc_type="spec")
         + "\n## Problem\n\n_Describe the problem._\n"
         "\n## Design Goals\n\n_What must be true when this is done._\n"
         "\n## Design\n\n_How it works._\n"
@@ -89,7 +106,7 @@ def _create_prd(repo_dir: Path, title: str, author: str) -> Path:
     target = _slug_target("prd", repo_dir, slug)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        _provenance(title, author)
+        _provenance(title, author, doc_type="prd")
         + "\n## Overview\n\n_One-paragraph summary._\n"
         "\n## User Stories\n\n- As a [role], I want [goal] so that [benefit].\n"
         "\n## Acceptance Criteria\n\n- [ ] _Criterion 1_\n"
@@ -104,11 +121,11 @@ def _create_debt(repo_dir: Path, title: str, author: str) -> Path:
     target = _slug_target("debt", repo_dir, slug)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        _provenance(title, author)
-        + "\n**Severity:** medium\n"
-        "**Domain:** _domain_\n"
-        "**Remediation:** _planned_\n"
-        "\n## Impact\n\n_What this debt causes._\n"
+        _provenance(title, author, doc_type="debt", extra={
+            "severity": "medium", "category": "_domain_",
+            "remediation": "planned",
+        })
+        + "\n## Impact\n\n_What this debt causes._\n"
         "\n## Remediation Plan\n\n_How to fix it._\n"
     )
     return target
@@ -128,7 +145,10 @@ def _create_retro(repo_dir: Path, title: str, author: str) -> Path:
     sections = "".join(
         f"\n## {s}\n\n- \n" for s in REGISTRY["retro"].required_sections
     )
-    target.write_text(_provenance(heading, author) + sections)
+    target.write_text(_provenance(
+        heading, author, doc_type="retro",
+        extra={"branch": branch, "slug": branch_dir_name(branch)},
+    ) + sections)
     return target
 
 
@@ -136,7 +156,11 @@ def _create_principle(repo_dir: Path, title: str, _author: str) -> Path:
     target = repo_dir / REGISTRY["principle"].filename
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("# Golden Principles\n\n")
+        target.write_text(_provenance(
+            "Golden Principles", _author or "unknown",
+            status="active", doc_type="principle",
+            extra={"slug": target.stem},
+        ) + "\n")
 
     content = target.read_text()
     existing = re.findall(r'^\d+\.', content, re.MULTILINE)

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.conftest import doc_text
+
 from reinicorn.commands.internal.pre_push import _ensure_kb_pushed
 from reinicorn.commands.internal.spec_gate import ensure_plan_spec_approved
 from reinicorn.git import run_git, sanitize_branch
@@ -196,7 +198,10 @@ def test_cmd_pre_push_does_not_dirty_kb(submodule_repo: Path, monkeypatch):
     active.mkdir(parents=True)
     # Spec: N/A so the review-lane gate passes — this test is about the kb
     # staying clean, not about the gate.
-    (active / "plan.md").write_text("# plan\n\n**Spec:** N/A\n**Status:** planning\n")
+    (active / "plan.md").write_text(doc_text(
+        type="plan", title="Plan", slug="plan", status="planning",
+        branch="feature/test", spec="N/A", body="\n# plan\n",
+    ))
 
     # Commit the new plan inside the kb so the kb starts clean.
     run_git("add", "-A", cwd=kb)
@@ -240,7 +245,10 @@ class TestEnsurePlanSpecApproved:
             rel, status = spec
             path = kb / self.SCOPE / rel
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"# Doc\n\n**Status:** {status}\n\n## Problem\n\nbody\n")
+            path.write_text(doc_text(
+                title="Doc", slug="doc", status=status,
+                body="\n# Doc\n\n## Problem\n\nbody\n",
+            ))
 
         if plan is not None:
             pdir = kb / self.SCOPE / "exec-plans" / "active" / sanitize_branch(branch)
@@ -264,8 +272,12 @@ class TestEnsurePlanSpecApproved:
         run_git("commit", "-q", "-m", "pin kb", cwd=repo, check=False)
 
     @staticmethod
-    def _plan(spec_value: str) -> str:
-        return f"# Plan\n\n**Spec:** {spec_value}\n**Status:** planning\n\n## Goal\n\nx\n"
+    def _plan(spec_value: str, branch: str = "feat/thing") -> str:
+        return doc_text(
+            type="plan", title="Plan", slug="plan", status="planning",
+            branch=branch, spec=spec_value,
+            body="\n# Plan\n\n## Goal\n\nx\n",
+        )
 
     def _run(self, repo: Path, branches: list[str] | None = None) -> int:
         with patch(
@@ -347,7 +359,7 @@ class TestEnsurePlanSpecApproved:
 
     def test_missing_spec_field_blocks(self, submodule_repo: Path, capsys):
         """Omitting the field must not be a way to dodge the gate."""
-        self._setup(submodule_repo, plan="# Plan\n\n**Status:** planning\n\n## Goal\n\nx\n")
+        self._setup(submodule_repo, plan="# Plan\n\n## Goal\n\nx\n")
         assert self._run(submodule_repo) == 1
         assert "missing or still the template placeholder" in capsys.readouterr().out
 
@@ -374,7 +386,7 @@ class TestEnsurePlanSpecApproved:
         self._setup(submodule_repo, plan=self._plan("specs/ghost.md"))
         ghost = submodule_repo / "kb" / self.SCOPE / "specs" / "ghost.md"
         ghost.parent.mkdir(parents=True, exist_ok=True)
-        ghost.write_text("# Ghost\n\n**Status:** approved\n")
+        ghost.write_text(doc_text(title="Ghost", slug="ghost", status="approved"))
         run_git("add", "-A", cwd=submodule_repo / "kb")  # staged, never committed
         assert self._run(submodule_repo) == 1
 
@@ -384,7 +396,7 @@ class TestEnsurePlanSpecApproved:
         kb = submodule_repo / "kb"
         late = kb / self.SCOPE / "specs" / "late.md"
         late.parent.mkdir(parents=True, exist_ok=True)
-        late.write_text("# Late\n\n**Status:** approved\n")
+        late.write_text(doc_text(title="Late", slug="late", status="approved"))
         run_git("add", "-A", cwd=kb)
         run_git("commit", "-q", "-m", "late spec", cwd=kb)  # pointer stays put
         assert self._run(submodule_repo) == 1
@@ -399,7 +411,7 @@ class TestEnsurePlanSpecApproved:
             spec=("specs/hot.md", "in-review"),
         )
         doctored = submodule_repo / "kb" / self.SCOPE / "specs" / "hot.md"
-        doctored.write_text("# Doc\n\n**Status:** approved\n\n## Problem\n\nbody\n")
+        doctored.write_text(doc_text(title="Doc", slug="doc", status="approved"))
         assert self._run(submodule_repo) == 1
         assert "in-review" in capsys.readouterr().out
 
@@ -411,7 +423,7 @@ class TestEnsurePlanSpecApproved:
         )
         top = submodule_repo / "kb" / "specs"
         top.mkdir(parents=True, exist_ok=True)
-        (top / "dup.md").write_text("# Other\n\n**Status:** approved\n")
+        (top / "dup.md").write_text(doc_text(title="Other", slug="other", status="approved"))
         self._pin(submodule_repo)
         assert self._run(submodule_repo) == 1
         assert "ambiguous" in capsys.readouterr().out
@@ -458,7 +470,7 @@ class TestEnsurePlanSpecApproved:
         """
         self._setup(
             submodule_repo, "feat/other",
-            plan=self._plan("specs/hot.md"),
+            plan=self._plan("specs/hot.md", branch="feat/other"),
             spec=("specs/hot.md", "in-review"),
         )
         run_git("checkout", "-q", "main", cwd=submodule_repo)
@@ -468,10 +480,13 @@ class TestEnsurePlanSpecApproved:
     def test_multi_ref_push_blocks_on_any_offending_branch(
         self, submodule_repo: Path, capsys
     ):
-        self._setup(submodule_repo, "feat/clean", plan=self._plan("N/A"))
+        self._setup(
+            submodule_repo, "feat/clean",
+            plan=self._plan("N/A", branch="feat/clean"),
+        )
         self._setup(
             submodule_repo, "feat/dirty",
-            plan=self._plan("specs/wip.md"),
+            plan=self._plan("specs/wip.md", branch="feat/dirty"),
             spec=("specs/drafts/wip.md", "draft"),
         )
         assert self._run(submodule_repo, ["feat/clean", "feat/dirty"]) == 1

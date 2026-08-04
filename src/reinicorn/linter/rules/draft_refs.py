@@ -46,7 +46,7 @@ class DraftRefsRule(LintRule):
             text = plan.read_text()
 
             # Report each offending doc once per plan. A spec named in the
-            # **Spec:** field and again in prose is one violation, not two.
+            # spec: field and again in prose is one violation, not two.
             seen: set[str] = set()
 
             diagnostics.extend(
@@ -62,7 +62,7 @@ class DraftRefsRule(LintRule):
         self, text: str, rel: Path, scope: str, kb: Path,
         tracked: frozenset[str], seen: set[str],
     ) -> list[str]:
-        """Validate the declared **Spec:** field.
+        """Validate the declared spec: frontmatter field.
 
         A missing field is itself a finding — omitting the reference must not be
         a way to dodge the gate. ``N/A`` is the explicit, reviewable opt-out.
@@ -70,7 +70,7 @@ class DraftRefsRule(LintRule):
         value = declared_spec(text)
         if value is None:
             return [
-                f"{rel}:1 — no '**Spec:**' field (declare the spec this plan "
+                f"{rel}:1 — no 'spec:' frontmatter field (declare the spec this plan "
                 "implements, or 'N/A' if it intentionally has none)"
             ]
         if is_not_applicable(value):
@@ -79,18 +79,18 @@ class DraftRefsRule(LintRule):
         res = resolve_ref(value, scope, tracked)
         if res.ambiguous:
             return [
-                f"{rel}:1 — '**Spec:** {value}' is ambiguous; it matches "
+                f"{rel}:1 — 'spec: {value}' is ambiguous; it matches "
                 f"{', '.join(res.ambiguous)}"
             ]
         if res.path is None:
             return [
-                f"{rel}:1 — '**Spec:** {value}' matches no git-tracked kb path "
+                f"{rel}:1 — 'spec: {value}' matches no git-tracked kb path "
                 "(typo, uncommitted doc, or a path outside the kb)"
             ]
 
         if not is_spec_path(res.path):
             return [
-                f"{rel}:1 — '**Spec:** {value}' resolves to '{res.path}', which "
+                f"{rel}:1 — 'spec: {value}' resolves to '{res.path}', which "
                 f"is not a spec; name a doc under '{SPEC_DIR_NAME}/' or 'N/A'"
             ]
 
