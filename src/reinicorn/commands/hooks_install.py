@@ -16,9 +16,13 @@ from reinicorn.git import (
     report_failure,
     run_git,
 )
-
-MARKER = "# --- reinicorn hooks below ---"
-HOOK_NAMES = ("post-checkout", "post-merge", "pre-push")
+from reinicorn.hooks_health import (
+    HOOK_NAMES,
+    MARKER,
+    can_fall_through,
+    is_stale_reins_hook,
+    marker_reachable,
+)
 
 _SCRIPT_DEST = ".reinicorn/hooks"
 _COPILOT_CONFIG = ".github/hooks/reinicorn.json"
@@ -80,6 +84,8 @@ def cmd_hooks_install() -> int:
     skipped = 0
     appended = 0
     already = 0
+    replaced = 0
+    failed = 0
 
     console.progress("Installing Reinicorn git hooks...")
 
@@ -97,15 +103,66 @@ def cmd_hooks_install() -> int:
             dest_file.chmod(dest_file.stat().st_mode | stat.S_IEXEC)
             console.success(f"INSTALLED: {hook_name} (new)")
             installed += 1
-        elif MARKER in dest_file.read_text():
+            continue
+
+        existing = dest_file.read_text()
+        # A verbatim copy of the current hook (fresh install, no marker) is
+        # already installed — it must not fall through to the foreign-hook
+        # checks, whose exit-guard refusal would misfire on our own template.
+        if existing == src_file.read_text():
             console.warn(f"SKIP: {hook_name} — Reinicorn hooks already installed")
-            skipped += 1
             already += 1
+            skipped += 1
+        # Stale check next: a reins-era hook damaged by the old append bug
+        # carries the marker too, but its guard is dead and must be repaired.
+        elif is_stale_reins_hook(existing):
+            # The stale hook may carry user customizations the substring
+            # match can't see — keep the old content recoverable.
+            backup = dest_file.with_name(dest_file.name + ".bak")
+            backup.write_text(existing)
+            shutil.copy2(src_file, dest_file)
+            dest_file.chmod(dest_file.stat().st_mode | stat.S_IEXEC)
+            console.success(
+                f"REPLACED: {hook_name} (stale reins-era hook; "
+                f"backup: {backup.name})"
+            )
+            replaced += 1
+        elif MARKER in existing:
+            if marker_reachable(existing):
+                console.warn(f"SKIP: {hook_name} — Reinicorn hooks already installed")
+                already += 1
+            else:
+                console.error(
+                    f"FAILED: {hook_name} — the Reinicorn section sits after an "
+                    f"unconditional exit and never runs. "
+                    f"Merge {src_file} into {dest_file} manually."
+                )
+                failed += 1
+            skipped += 1
+        elif not can_fall_through(existing):
+            # Appending after an unconditional exit would be dead code —
+            # claiming success here is how #24's repos lost their guard.
+            console.error(
+                f"FAILED: {hook_name} — existing hook ends in an unconditional "
+                f"exit, so appended hooks would never run. "
+                f"Merge {src_file} into {dest_file} manually."
+            )
+            failed += 1
         else:
             src_lines = src_file.read_text().splitlines()
             src_content = "\n".join(src_lines[1:]) if src_lines else ""
-            with dest_file.open("a") as f:
-                f.write(f"\n{MARKER}\n\n{src_content}\n")
+            candidate = f"{existing}\n{MARKER}\n\n{src_content}\n"
+            # Verify before writing: the marker must actually be reachable
+            # (a mid-script top-level exit slips past the last-line check).
+            if not marker_reachable(candidate):
+                console.error(
+                    f"FAILED: {hook_name} — an unconditional exit in the "
+                    f"existing hook would keep the appended hooks from running. "
+                    f"Merge {src_file} into {dest_file} manually."
+                )
+                failed += 1
+                continue
+            dest_file.write_text(candidate)
             dest_file.chmod(dest_file.stat().st_mode | stat.S_IEXEC)
             console.success(f"APPENDED: {hook_name} (chained with existing hook)")
             appended += 1
@@ -114,11 +171,15 @@ def cmd_hooks_install() -> int:
     console.info(f"  Source:    {hooks_src}/")
     console.info(f"  Target:   {hooks_dest}/")
     console.success(f"  Installed: {installed}")
+    if replaced:
+        console.success(f"  Replaced:  {replaced}")
     if appended:
         console.success(f"  Appended:  {appended}")
     if skipped:
         console.warn(f"  Skipped:   {skipped}")
-    if installed == 0 and appended == 0 and already > 0:
+    if failed:
+        console.error(f"  Failed:    {failed}")
+    if installed == 0 and appended == 0 and replaced == 0 and failed == 0 and already > 0:
         console.info("hooks: already installed (no-op)")
 
     # --- Editor hooks (Claude Code, Cursor, Copilot) ---
@@ -126,7 +187,7 @@ def cmd_hooks_install() -> int:
     _install_editor_hooks()
 
     print()
-    return 0
+    return 1 if failed else 0
 
 
 def _install_editor_hooks() -> None:
