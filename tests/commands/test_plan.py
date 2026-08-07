@@ -158,12 +158,25 @@ def test_plan_create_three_template_states_agree(kb_repo: Path, capsys):
         assert meta["spec"] == SPEC_PLACEHOLDER
 
 
-def test_plan_create_aux_template_files_pass_through(kb_repo: Path, capsys):
-    """Non-doc templates (progress.md, decisions.md) get no plan frontmatter."""
+def test_plan_create_aux_templates_substituted_but_never_meta_injected(
+    kb_repo: Path, capsys,
+):
+    """Non-doc templates (progress.md, decisions.md) keep body substitution —
+    behavior that predates #41 — but gain no plan frontmatter."""
+    tmpl_dir = kb_repo / "kb" / "testproject" / "exec-plans" / "_template"
+    (tmpl_dir / "progress.md").write_text("# Progress: [Branch Name]\n")
     _create_plan(kb_repo, "feature/aux")
     pdir = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-aux"
-    assert (pdir / "progress.md").read_text() == "# Progress\n"
+    assert (pdir / "progress.md").read_text() == "# Progress: feature/aux\n"
     assert (pdir / "decisions.md").read_text() == "# Decisions\n"
+
+
+def test_plan_create_forces_plan_type(kb_repo: Path, capsys):
+    """A template whose frontmatter claims another type cannot mislabel the doc."""
+    tmpl = kb_repo / "kb" / "testproject" / "exec-plans" / "_template" / "plan.md"
+    tmpl.write_text("---\ntype: spec\n---\n\n# Execution Plan: [Branch Name]\n")
+    meta = _create_plan(kb_repo, "feature/wrong-type")
+    assert meta["type"] == "plan"
 
 
 def test_spec_placeholder_is_what_the_gate_treats_as_undeclared():

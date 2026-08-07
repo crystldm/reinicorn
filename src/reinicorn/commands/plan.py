@@ -90,8 +90,9 @@ def cmd_plan_create() -> int:
             )
             target = pdir / tmpl.name
             # Aux template files (progress.md, decisions.md) are non-docs by
-            # the same definition the lint rule uses; they carry no
-            # provenance and pass through untouched.
+            # the same definition the lint rule uses: body placeholders are
+            # still substituted, but no plan meta is injected and any
+            # frontmatter of their own is kept as authored.
             if not frontmatter.is_doc(target):
                 text = frontmatter.dumps(meta, body) if meta else body
                 target.write_text(text)
@@ -100,8 +101,8 @@ def cmd_plan_create() -> int:
             # frontmatter block: a stale template must not be able to produce
             # a doc the repo's own push gate rejects. The template contributes
             # the body and any extra fields; these keys it cannot override.
-            meta.setdefault("type", "plan")
             meta.update({
+                "type": "plan",
                 "title": f"Execution Plan: {branch}",
                 "slug": pdir.name,
                 "status": "planning",
