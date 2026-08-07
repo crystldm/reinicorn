@@ -13,6 +13,7 @@ from reinicorn.frontmatter import set_meta
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.identity import TICKET_PATTERN_KEY
 from reinicorn.kb import branch_doc_path, check_overlap, commit_kb, plan_dir, require_kb_dir
+from reinicorn.linter.spec_refs import SPEC_PLACEHOLDER
 
 _EMPTY_RETRO_LINE = re.compile(r"^\s*-\s*(\[ \]\s*)?(_[^_]*_)?\s*$")
 
@@ -87,20 +88,34 @@ def cmd_plan_create() -> int:
             body = body.replace(
                 "[planning | in-progress | complete | abandoned]", "planning"
             )
-            if meta:
-                meta.update({
-                    "title": f"Execution Plan: {branch}",
-                    "slug": pdir.name,
-                    "status": "planning",
-                    "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
-                    "created": date.today(),
-                    "author": author,
-                    "branch": branch,
-                    "ticket": ticket_id or "N/A",
-                })
-                (pdir / tmpl.name).write_text(frontmatter.render(meta, body))
-            else:
-                (pdir / tmpl.name).write_text(body)
+            target = pdir / tmpl.name
+            # Aux template files (progress.md, decisions.md) are non-docs by
+            # the same definition the lint rule uses; they carry no
+            # provenance and pass through untouched.
+            if not frontmatter.is_doc(target):
+                text = frontmatter.dumps(meta, body) if meta else body
+                target.write_text(text)
+                continue
+            # The standard meta is injected whether or not the template has a
+            # frontmatter block: a stale template must not be able to produce
+            # a doc the repo's own push gate rejects. The template contributes
+            # the body and any extra fields; these keys it cannot override.
+            meta.setdefault("type", "plan")
+            meta.update({
+                "title": f"Execution Plan: {branch}",
+                "slug": pdir.name,
+                "status": "planning",
+                "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
+                "created": date.today(),
+                "author": author,
+                "branch": branch,
+                "ticket": ticket_id or "N/A",
+            })
+            # Seeded templates predating the spec gate lack 'spec:'; without
+            # this the created plan gives the author no in-doc placeholder to
+            # fill in before the gate blocks the push.
+            meta.setdefault("spec", SPEC_PLACEHOLDER)
+            target.write_text(frontmatter.render(meta, body))
         console.success("Created plan files from templates.")
     else:
         (pdir / "plan.md").write_text(frontmatter.render(
@@ -114,7 +129,7 @@ def cmd_plan_create() -> int:
                 "author": author,
                 "branch": branch,
                 "ticket": ticket_id or "N/A",
-                "spec": "[kb path to the spec this implements, or N/A]",
+                "spec": SPEC_PLACEHOLDER,
             },
             f"\n# Execution Plan: {branch}\n",
         ))

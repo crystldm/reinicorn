@@ -45,7 +45,10 @@ if TYPE_CHECKING:
 
 # Placeholder text the plan template ships with; a plan still carrying it has
 # not declared anything. YAML may also parse an unquoted `[...]` placeholder
-# into a list, which `declared_spec` treats the same way.
+# into a list, which `declared_spec` treats the same way. The constant lives
+# beside the regex that must treat it as undeclared, so the create paths that
+# stamp it and the gate that rejects it share one definition.
+SPEC_PLACEHOLDER = "[kb path to the spec this implements, or N/A]"
 SPEC_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
 
 # Explicit opt-out. Case-insensitive so "n/a" and "N/A" both count.
