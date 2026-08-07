@@ -12,6 +12,7 @@ import os
 from typing import TYPE_CHECKING
 
 from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
+from reinicorn.linter.spec_refs import SPEC_PLACEHOLDER
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -102,6 +103,7 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
         "author: '[developer or agent]'\n"
         "branch: '[Branch Name]'\n"
         "ticket: '[TICKET-ID or N/A]'\n"
+        f"spec: '{SPEC_PLACEHOLDER}'\n"
         "---\n\n"
         "# Execution Plan: [Branch Name]\n\n"
         f"{sections}\n"
