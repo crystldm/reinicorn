@@ -62,6 +62,6 @@ def cmd_idea(idea_text: str) -> int:
 
     console.success(f"Idea captured: {filepath}")
 
-    commit_kb(root, f"idea: {slug}")
+    commit_kb(root, f"idea: {slug}", paths=[filepath])
 
     return 0

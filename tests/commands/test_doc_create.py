@@ -238,6 +238,11 @@ def test_cmd_retro_create_commit_message_uses_branch(kb_repo: Path):
     assert result == 0
     msg = mock_commit.call_args[0][1]
     assert msg == "doc(retro): feature-x", f"unexpected commit message: {msg!r}"
+    # Commit is scoped to the created file (issue #35)
+    expected = (kb_repo / "kb" / "testproject" / "exec-plans"
+                / "completed" / "feature-x" / "retro.md")
+    assert mock_commit.call_args.kwargs["paths"] == [expected]
+    assert expected.is_file()
 
 
 def test_cmd_retro_create_heading_contains_branch(kb_repo: Path):
