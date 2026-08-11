@@ -314,6 +314,66 @@ def test_merge_claude_settings_idempotent(tmp_path: Path):
 
 
 
+def test_merge_claude_settings_repairs_stale_reins_entry(tmp_path: Path):
+    """A pre-rename .reins/ entry shares the matcher with the replacement, so
+    matcher dedup alone would keep the broken hook forever (#looperdooper)."""
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({
+        "hooks": {"PreToolUse": [{
+            "matcher": "Write|Edit",
+            "hooks": [{"type": "command",
+                       "command": ".reins/hooks/enforce-doc-templates.sh"}],
+        }]},
+    }))
+
+    entries = [_claude_entry(
+        '"$CLAUDE_PROJECT_DIR"/.reinicorn/hooks/enforce-doc-templates.sh'
+    )]
+    _merge_claude_settings(settings_path, entries)
+
+    pre_tool = json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
+    assert pre_tool == entries
+
+
+def test_merge_claude_settings_migrates_bare_relative_entry(tmp_path: Path):
+    """Bare-relative .reinicorn/ commands fail when the session cwd is not the
+    repo root; re-running install must upgrade them to $CLAUDE_PROJECT_DIR."""
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({
+        "hooks": {"PreToolUse": [{
+            "matcher": "Bash",
+            "hooks": [{"type": "command",
+                       "command": ".reinicorn/hooks/block-raw-kb-git.sh"}],
+        }]},
+    }))
+
+    entry = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command",
+                   "command": '"$CLAUDE_PROJECT_DIR"/.reinicorn/hooks/block-raw-kb-git.sh'}],
+    }
+    _merge_claude_settings(settings_path, [entry])
+
+    pre_tool = json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
+    assert pre_tool == [entry]
+
+
+def test_merge_claude_settings_keeps_unrelated_user_hooks(tmp_path: Path):
+    """User hooks on other paths are neither stale nor duplicates — keep them."""
+    settings_path = tmp_path / "settings.json"
+    user_entry = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "scripts/my-own-hook.sh"}],
+    }
+    settings_path.write_text(json.dumps({"hooks": {"PreToolUse": [user_entry]}}))
+
+    _merge_claude_settings(settings_path, [_claude_entry()])
+
+    pre_tool = json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
+    assert user_entry in pre_tool
+    assert len(pre_tool) == 2
+
+
 def test_merge_claude_settings_handles_corrupt_json(tmp_path: Path):
     settings_path = tmp_path / "settings.json"
     settings_path.write_text("{not valid json")
@@ -367,6 +427,11 @@ def test_hooks_install_copies_editor_hooks(kb_repo: Path):
     pre_tool = settings["hooks"]["PreToolUse"]
     assert len(pre_tool) == 1
     assert pre_tool[0]["matcher"] == "Write|Edit"
+    # Absolute via $CLAUDE_PROJECT_DIR — a bare-relative path breaks whenever
+    # the session cwd is not the repo root.
+    assert pre_tool[0]["hooks"][0]["command"] == (
+        '"$CLAUDE_PROJECT_DIR"/.reinicorn/hooks/enforce-doc-templates.sh'
+    )
 
     # Cursor hooks.json updated
     cursor_path = kb_repo / ".cursor" / "hooks.json"
