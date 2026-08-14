@@ -14,9 +14,9 @@ import shutil
 from pathlib import Path
 
 from reinicorn import console
-from reinicorn.config import KB_DIR_NAME
+from reinicorn.config import KB_DIR_NAME, config_set
 from reinicorn.git import run_git
-from reinicorn.kb_remote import resolve_kb_remote_url
+from reinicorn.kb_remote import KB_REMOTE_KEY, resolve_kb_remote_url
 from reinicorn.kb_setup import KbSetupError, ensure_kb_gitignored, setup_kb_clone
 
 _GITLINK_MODE = "160000"
@@ -79,10 +79,17 @@ def migrate_submodule_to_clone(root: Path) -> bool:
     if not url:
         console.error(
             "Cannot migrate: no kb remote URL could be resolved.\n"
+            f"  Where: {root / '.reinicorn-config'}\n"
             "  How to fix: set REINICORN_KB_REMOTE in .reinicorn-config, "
             "then rerun."
         )
         return False
+
+    # The old kb clone being torn down below may be the *only* place this
+    # URL is recorded (submodule-era repos predate REINICORN_KB_REMOTE) —
+    # record it before anything destructive runs, so a failure partway
+    # through teardown still leaves 'rcorn kb sync' able to recover.
+    config_set(KB_REMOTE_KEY, url, root)
 
     console.progress("Migrating kb from submodule to plain clone...")
 
@@ -101,18 +108,23 @@ def migrate_submodule_to_clone(root: Path) -> bool:
     )
 
     modules = _git_common_dir(root) / "modules" / KB_DIR_NAME
+    modules_backup = modules.with_name(f"{KB_DIR_NAME}.pre-clone-migration")
     if modules.exists():
-        backup = modules.with_name(f"{KB_DIR_NAME}.pre-clone-migration")
-        if backup.exists():
-            shutil.rmtree(backup)
-        shutil.move(str(modules), str(backup))
+        if modules_backup.exists():
+            shutil.rmtree(modules_backup)
+        shutil.move(str(modules), str(modules_backup))
     if kb_dir.exists():
         shutil.rmtree(kb_dir)
 
     try:
         setup_kb_clone(root, url)
     except KbSetupError as e:
-        console.error(str(e))
+        console.error(
+            f"{e}\n"
+            f"  The old kb git history is preserved at {modules_backup}.\n"
+            f"  How to fix: run 'rcorn kb sync' — it will retry the clone "
+            f"using the recorded {KB_REMOTE_KEY}."
+        )
         console.next_step("rcorn kb sync")
         return False
 
@@ -121,10 +133,14 @@ def migrate_submodule_to_clone(root: Path) -> bool:
     console.success("Kb migrated to a plain clone.")
     print()
     console.info("The gitlink removal is staged. Commit it yourself:")
-    # .gitmodules edits need staging only when the file survived (other
-    # submodules); its full deletion was already staged by the strip helper.
-    extra = " .gitmodules" if (root / ".gitmodules").is_file() else ""
-    console.info(f"  git add .gitignore{extra}")
+    # .gitignore and .reinicorn-config are always touched by migration
+    # (gitignore entry, recorded remote); .gitmodules only when it survived
+    # stripping (other submodules) — its full deletion was already staged
+    # by the strip helper.
+    parts = [".gitignore", ".reinicorn-config"]
+    if (root / ".gitmodules").is_file():
+        parts.append(".gitmodules")
+    console.info(f"  git add {' '.join(parts)}")
     console.info("  git commit -m 'chore: migrate kb from submodule to clone'")
     return True
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from reinicorn import __version__, console
 from reinicorn.assets import get_asset_path
+from reinicorn.commands.hooks_install import cmd_hooks_install
 from reinicorn.git import run_git
 from reinicorn.manifest import (
     read_manifest,
@@ -71,6 +72,11 @@ def cmd_update(*, diff_target: str | None = None) -> int:
         console.info("Detected the old kb submodule layout.")
         if not migrate_submodule_to_clone(repo_root):
             return 1
+        # The init path installs hooks as part of its own asset-setup flow;
+        # update has no such flow, so a migrated repo would otherwise be
+        # left without spec §10's pre-commit hook until the next full init.
+        if cmd_hooks_install() != 0:
+            console.warn("Hook installation had issues — review output above.")
 
     manifest_files = manifest["files"]
     legacy_agents_owned = "AGENTS.md" in manifest_files

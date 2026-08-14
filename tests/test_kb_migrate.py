@@ -63,3 +63,25 @@ def test_migration_handles_orphan_gitlink(submodule_repo: Path) -> None:
     run_git("commit", "-q", "-m", "orphan", cwd=submodule_repo)
     assert migrate_submodule_to_clone(submodule_repo) is True
     assert (submodule_repo / "kb" / ".git").is_dir()
+
+
+def test_migration_keeps_sibling_gitmodules_section(
+    submodule_repo: Path, capsys
+) -> None:
+    """A .gitmodules with an unrelated submodule survives; only kb's section goes."""
+    gitmodules = submodule_repo / ".gitmodules"
+    with gitmodules.open("a") as f:
+        f.write('[submodule "other"]\n\tpath = other\n\turl = /some/other/remote\n')
+    run_git("add", ".gitmodules", cwd=submodule_repo)
+    run_git("commit", "-q", "-m", "add sibling submodule entry", cwd=submodule_repo)
+
+    assert migrate_submodule_to_clone(submodule_repo) is True
+
+    assert gitmodules.exists()
+    text = gitmodules.read_text()
+    assert '[submodule "kb"]' not in text
+    assert '[submodule "other"]' in text
+    assert "path = other" in text
+
+    out = capsys.readouterr().out
+    assert ".gitmodules" in out
