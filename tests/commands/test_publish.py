@@ -140,7 +140,9 @@ def test_publish_refuses_diverged_history(
 
     assert result == 1
     out = capsys.readouterr().out
-    assert "diverged" in out.lower()
+    # ensure_kb_on_main now routes the ff-only failure through report_failure
+    # (git's own words), rather than a hardcoded "diverged" guess.
+    assert "Could not fast-forward kb main to origin/main" in out
     assert "rcorn kb sync" in out
     # No merge commit: local main still points at the same commit as right
     # after the local edit — divergence was reported, not reconciled.

@@ -102,11 +102,13 @@ def ensure_kb_on_main(kb_dir: Path) -> bool:
         return True  # nothing fetched to compare against
     ff = run_git("merge", "--ff-only", "origin/main", check=False, cwd=kb_dir)
     if ff.returncode != 0:
-        console.error(
-            "Kb main has diverged from origin/main and cannot fast-forward.\n"
-            f"  Where: {kb_dir}\n"
-            "  How to fix: run 'rcorn kb sync' to merge origin/main first."
-        )
+        # A ff-only merge can fail on genuine divergence, but also on local
+        # *uncommitted* edits that conflict with what origin/main advanced —
+        # the ordinary publish-time state, since this runs before commit_kb
+        # sweeps the working tree. Let git's own words distinguish the two
+        # instead of guessing "diverged" for both.
+        report_failure("fast-forward kb main to origin/main", ff)
+        console.next_step("rcorn kb sync")
         return False
     return True
 

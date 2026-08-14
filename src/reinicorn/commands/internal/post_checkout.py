@@ -12,6 +12,7 @@ from reinicorn.identity import TICKET_PATTERN_KEY
 from reinicorn.kb import checkout_kb_main, get_kb_dir
 from reinicorn.kb_remote import apply_kb_remote_url, resolve_kb_remote_url
 from reinicorn.mode import hook_check
+from reinicorn.validation import validate_git_url
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,6 +48,15 @@ def _init_kb(root: Path) -> None:
     kb_dir = root / KB_DIR_NAME
     try:
         remote = resolve_kb_remote_url(root)
+        # remote can come straight from REINICORN_KB_REMOTE in the committed
+        # .reinicorn-config — repository-controlled input — so it must be
+        # validated before it ever reaches git clone, same as every other
+        # clone path (setup_kb_clone, apply_kb_remote_url).
+        url_error = validate_git_url(remote)
+        if url_error is not None:
+            console.warn(f"Refusing kb remote URL '{remote}': {url_error}")
+            console.next_step("rcorn kb sync")
+            return
         file_allow = (
             ("-c", "protocol.file.allow=always") if remote.startswith("/") else ()
         )

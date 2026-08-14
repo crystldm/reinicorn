@@ -6,6 +6,7 @@ from pathlib import Path
 
 from reinicorn.git import run_git
 from reinicorn.kb_migrate import detect_submodule_layout, migrate_submodule_to_clone
+from reinicorn.kb_remote import KB_REMOTE_KEY, configured_kb_remote_url
 
 
 def test_detect_by_gitmodules(submodule_repo: Path) -> None:
@@ -63,6 +64,33 @@ def test_migration_handles_orphan_gitlink(submodule_repo: Path) -> None:
     run_git("commit", "-q", "-m", "orphan", cwd=submodule_repo)
     assert migrate_submodule_to_clone(submodule_repo) is True
     assert (submodule_repo / "kb" / ".git").is_dir()
+
+
+def test_migration_records_url_only_when_config_slot_is_empty(
+    submodule_repo: Path,
+) -> None:
+    """An explicitly configured REINICORN_KB_REMOTE (a shared, team-chosen
+    URL) must survive migration untouched — it must not be overwritten by
+    the resolved URL, which can be a personal override (e.g. an SSH
+    rewrite) inherited from the submodule clone being migrated away from."""
+    configured = "https://example.invalid/team/kb.git"
+    (submodule_repo / ".reinicorn-config").write_text(
+        f'{KB_REMOTE_KEY}="{configured}"\n'
+    )
+
+    assert migrate_submodule_to_clone(submodule_repo) is True
+    assert configured_kb_remote_url(submodule_repo) == configured
+
+
+def test_migration_backfills_url_when_config_slot_is_empty(
+    submodule_repo: Path,
+) -> None:
+    """Submodule-era repos predate REINICORN_KB_REMOTE — when nothing is
+    recorded yet, migration backfills it from the resolved (inherited)
+    URL so 'rcorn kb sync' can recover after teardown."""
+    assert configured_kb_remote_url(submodule_repo) == ""
+    assert migrate_submodule_to_clone(submodule_repo) is True
+    assert configured_kb_remote_url(submodule_repo) != ""
 
 
 def test_migration_keeps_sibling_gitmodules_section(

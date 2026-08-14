@@ -235,6 +235,35 @@ def test_ensure_kb_on_main_reports_failed_checkout(kb_clone_repo):
     assert ensure_kb_on_main(kb) is False
 
 
+def test_ensure_kb_on_main_reports_git_words_on_genuine_divergence(
+    kb_clone_repo, tmp_path, capsys
+):
+    """A real ff-only failure surfaces git's own diagnosis via report_failure,
+    not a hardcoded 'diverged' guess — golden principle 4, and the same
+    single seam every other kb git failure goes through."""
+    kb = kb_clone_repo / "kb"
+    remote = tmp_path / "kb-remote"
+
+    other = tmp_path / "other"
+    run_git("clone", "-q", str(remote), str(other))
+    run_git("config", "user.email", "t@t.com", cwd=other)
+    run_git("config", "user.name", "T", cwd=other)
+    (other / "remote.md").write_text("remote\n")
+    run_git("add", "-A", cwd=other)
+    run_git("commit", "-q", "-m", "remote", cwd=other)
+    run_git("push", "-q", "origin", "main", cwd=other)
+
+    (kb / "local.md").write_text("local\n")
+    run_git("add", "-A", cwd=kb)
+    run_git("commit", "-q", "-m", "local", cwd=kb)
+
+    assert ensure_kb_on_main(kb) is False
+    out = capsys.readouterr().out
+    assert "Could not fast-forward kb main to origin/main" in out
+    assert "git:" in out  # git's own stderr is reproduced, not a guessed cause
+    assert "rcorn kb sync" in out
+
+
 def test_commit_kb_refuses_off_main(kb_clone_repo, monkeypatch):
     """No commit lands on a detached HEAD — the work stays in the worktree."""
     kb = kb_clone_repo / "kb"

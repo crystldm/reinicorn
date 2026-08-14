@@ -16,7 +16,11 @@ from pathlib import Path
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_set
 from reinicorn.git import run_git
-from reinicorn.kb_remote import KB_REMOTE_KEY, resolve_kb_remote_url
+from reinicorn.kb_remote import (
+    KB_REMOTE_KEY,
+    configured_kb_remote_url,
+    resolve_kb_remote_url,
+)
 from reinicorn.kb_setup import KbSetupError, ensure_kb_gitignored, setup_kb_clone
 
 _GITLINK_MODE = "160000"
@@ -88,8 +92,13 @@ def migrate_submodule_to_clone(root: Path) -> bool:
     # The old kb clone being torn down below may be the *only* place this
     # URL is recorded (submodule-era repos predate REINICORN_KB_REMOTE) —
     # record it before anything destructive runs, so a failure partway
-    # through teardown still leaves 'rcorn kb sync' able to recover.
-    config_set(KB_REMOTE_KEY, url, root)
+    # through teardown still leaves 'rcorn kb sync' able to recover. Only
+    # when nothing is recorded yet: an explicitly configured REINICORN_KB_REMOTE
+    # (a shared, team-chosen URL) must never be overwritten by the resolved
+    # URL, which can be a personal override (e.g. an SSH rewrite) inherited
+    # from the submodule clone being migrated away from.
+    if not configured_kb_remote_url(root):
+        config_set(KB_REMOTE_KEY, url, root)
 
     console.progress("Migrating kb from submodule to plain clone...")
 
