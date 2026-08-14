@@ -163,3 +163,16 @@ def test_commit_kb_paths_stages_deletions_for_moves(
     assert shown == ["D", "active/my-plan/plan.md", "A", "completed/my-plan/plan.md"]
     status = run_git("status", "--porcelain", cwd=kb).stdout
     assert " M README.md" in status
+
+
+def test_commit_kb_stages_nothing_in_parent(kb_clone_repo: Path) -> None:
+    """After commit_kb, the parent repo must have nothing staged.
+
+    This is a regression tripwire — after stage_kb_pointer is deleted,
+    commit_kb must not stage kb pointer changes in the parent.
+    """
+    kb = kb_clone_repo / "kb"
+    (kb / "note.md").write_text("hi\n")
+    assert commit_kb(kb_clone_repo, "doc: note") is True
+    r = run_git("diff", "--cached", "--name-only", cwd=kb_clone_repo)
+    assert r.stdout.strip() == ""

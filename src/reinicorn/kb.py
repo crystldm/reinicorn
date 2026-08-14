@@ -111,19 +111,6 @@ def ensure_kb_on_main(kb_dir: Path) -> bool:
     return True
 
 
-def stage_kb_pointer(root: Path, kb_dir: Path) -> None:
-    """Stage the kb submodule pointer in the parent repo index.
-
-    Derives the relative path from root so it works even if .gitmodules
-    uses a custom path (e.g. tools/kb instead of kb).
-    """
-    try:
-        rel = kb_dir.relative_to(root)
-    except ValueError:
-        return
-    run_git("add", str(rel), check=False, cwd=root)
-
-
 def commit_kb(
     root: Path,
     message: str,
@@ -170,7 +157,6 @@ def commit_kb(
     # landing in this commit.
     r = run_git("commit", "-q", "-m", message, "--", *specs, check=False, cwd=resolved)
     if r.returncode == 0:
-        stage_kb_pointer(root, resolved)
         return True
     # Distinct from the "nothing staged" return above: there WAS work and it
     # did not get saved. Returning False silently made that look identical to

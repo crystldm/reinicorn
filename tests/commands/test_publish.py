@@ -45,24 +45,6 @@ def test_publish_stays_on_main(submodule_repo: Path) -> None:
     assert branch == "main"
 
 
-def test_publish_updates_parent_pointer(submodule_repo: Path) -> None:
-    """After publish, parent submodule pointer should be staged or committed."""
-    kb = submodule_repo / "kb"
-    (kb / "new-file.md").write_text("# New\n")
-    run_git("add", "-A", cwd=kb)
-    run_git("commit", "-q", "-m", "test commit", cwd=kb)
-
-    with patch("reinicorn.commands.publish.repo_root", return_value=submodule_repo), \
-         patch("reinicorn.commands.publish.can_publish", return_value=True):
-        result = cmd_publish()
-
-    assert result == 0
-
-    # Parent should have kb pointer staged
-    staged = run_git("diff", "--cached", "--name-only", cwd=submodule_repo).stdout
-    assert "kb" in staged
-
-
 def test_publish_shows_resolution_steps_on_retry_failure(
     submodule_repo: Path, capsys
 ) -> None:

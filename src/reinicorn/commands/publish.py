@@ -11,7 +11,6 @@ from reinicorn.kb import (
     push_main_with_retry,
     report_push_failure,
     require_kb_dir,
-    stage_kb_pointer,
 )
 from reinicorn.mode import can_publish, get_mode
 
@@ -43,9 +42,6 @@ def cmd_publish() -> int:
         return 1
 
     console.success("Kb pushed to remote main.")
-
-    # Stage parent pointer (picked up by next parent commit)
-    stage_kb_pointer(root, kb_dir)
 
     branch = current_branch()
     if branch:

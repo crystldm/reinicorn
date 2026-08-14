@@ -9,7 +9,7 @@ from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_get
 from reinicorn.git import current_branch, repo_root, report_failure, run_git
 from reinicorn.identity import TICKET_PATTERN_KEY
-from reinicorn.kb import ensure_kb_on_main, get_kb_dir, stage_kb_pointer
+from reinicorn.kb import ensure_kb_on_main, get_kb_dir
 from reinicorn.kb_remote import apply_kb_remote_url, resolve_kb_remote_url
 from reinicorn.mode import hook_check
 
@@ -72,7 +72,6 @@ def _init_kb(root: Path, kb_dir: Path) -> None:
                 "publishing from here will fail until it is."
             )
         ensure_kb_on_main(kb_dir)  # avoid a detached HEAD
-        stage_kb_pointer(root, kb_dir)
     except Exception as e:
         # Broad on purpose: a post-checkout hook that raises fails the user's
         # `git checkout`. Report and continue — a missing kb is recoverable,

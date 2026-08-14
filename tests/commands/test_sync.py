@@ -81,19 +81,6 @@ def test_sync_uses_merge_not_rebase(submodule_repo: Path, tmp_path: Path) -> Non
     assert r.returncode == 0
 
 
-def test_sync_stages_parent_pointer(submodule_repo: Path) -> None:
-    """After sync, the parent submodule pointer should be staged."""
-    with patch("reinicorn.commands.sync.repo_root", return_value=submodule_repo), \
-         patch("reinicorn.commands.sync.current_branch", return_value="feature/x"):
-        result = cmd_sync()
-
-    assert result == 0
-    r = run_git("diff", "--cached", "--name-only", cwd=submodule_repo)
-    # May or may not be staged depending on whether HEAD changed,
-    # but at minimum it should not error
-    assert r.returncode == 0
-
-
 def test_sync_shows_resolution_on_merge_conflict(
     submodule_repo: Path, tmp_path: Path, capsys
 ) -> None:

@@ -14,7 +14,6 @@ from reinicorn.kb import (
     check_overlap,
     checkout_kb_main,
     require_kb_dir,
-    stage_kb_pointer,
 )
 
 
@@ -59,9 +58,6 @@ def cmd_sync() -> int:
             return 1
 
     console.success("Kb synced to latest main.")
-
-    # Stage updated pointer in parent
-    stage_kb_pointer(root, kb_dir)
 
     print()
 
