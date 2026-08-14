@@ -202,18 +202,22 @@ def report_failure(
 def repo_root(quiet: bool = False) -> Path | None:
     """Return the repo root as a Path, or None if not in a repo.
 
-    If the cwd is inside a git submodule (e.g. the kb), walks up
-    to the superproject root so that reinicorn commands resolve paths
-    against the real project, not the submodule.
+    If the cwd is inside the kb/ clone, walks up to the parent project root
+    so that reinicorn commands resolve paths against the real project, not
+    the kb.
     """
     try:
         r = run_git("rev-parse", "--show-toplevel")
         root = Path(r.stdout.strip())
 
-        # Detect submodule: if a superproject exists, use that instead.
-        sp = run_git("rev-parse", "--show-superproject-working-tree", check=False)
-        if sp.returncode == 0 and sp.stdout.strip():
-            root = Path(sp.stdout.strip())
+        # Inside kb/ the toplevel is the kb clone itself (a plain nested
+        # repo has no superproject to ask git about). A toplevel named kb
+        # whose parent carries a .reinicorn-config is the kb; resolve to
+        # the parent so commands act on the real project.
+        from reinicorn.config import KB_DIR_NAME
+        from reinicorn.identity import CONFIG_FILE_NAME
+        if root.name == KB_DIR_NAME and (root.parent / CONFIG_FILE_NAME).is_file():
+            root = root.parent
 
         return root
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -339,9 +343,8 @@ def repo_slug() -> str:
         https://github.com/acme/reinicorn.git → "reinicorn"
 
     Returns "unknown" if no remote is configured.
-    Uses repo_root() as cwd so that running from inside a submodule
-    (e.g. the kb) resolves the parent project's remote, not the
-    submodule's.
+    Uses repo_root() as cwd so that running from inside kb/ resolves the
+    parent project's remote, not the kb's.
     """
     try:
         root = repo_root(quiet=True)

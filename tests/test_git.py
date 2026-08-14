@@ -18,6 +18,13 @@ from reinicorn.git import (
 )
 
 
+def _git_init(path: Path) -> None:
+    """Init a git repo with test user config."""
+    run_git("init", "-q", "-b", "main", str(path))
+    run_git("config", "user.email", "test@test.com", cwd=path)
+    run_git("config", "user.name", "Test User", cwd=path)
+
+
 def test_repo_root_returns_path(kb_repo: Path):
     def _fake_git(*args, **kwargs):
         if "--show-superproject-working-tree" in args:
@@ -28,37 +35,6 @@ def test_repo_root_returns_path(kb_repo: Path):
     with patch("reinicorn.git.run_git", side_effect=_fake_git):
         result = repo_root()
         assert result == kb_repo
-
-
-def test_repo_root_walks_up_from_submodule(tmp_path: Path):
-    """repo_root() returns superproject root when called from inside a submodule."""
-    parent = tmp_path / "parent-project"
-    submod = tmp_path / "parent-project" / "kb"
-
-    def _fake_git(*args, **kwargs):
-        if "--show-superproject-working-tree" in args:
-            return subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=str(parent) + "\n"
-            )
-        return subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=str(submod) + "\n"
-        )
-    with patch("reinicorn.git.run_git", side_effect=_fake_git):
-        result = repo_root()
-        assert result == parent
-
-
-def test_repo_root_when_superproject_check_fails(tmp_path: Path):
-    """repo_root() still works if --show-superproject-working-tree fails (old git)."""
-    def _fake_git(*args, **kwargs):
-        if "--show-superproject-working-tree" in args:
-            return subprocess.CompletedProcess(args=[], returncode=1, stdout="")
-        return subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=str(tmp_path) + "\n"
-        )
-    with patch("reinicorn.git.run_git", side_effect=_fake_git):
-        result = repo_root()
-        assert result == tmp_path
 
 
 def test_repo_root_returns_none_outside_repo():
@@ -183,3 +159,20 @@ def test_repo_slug_fallback_on_error():
     with patch("reinicorn.git.repo_root", return_value=None), \
          patch("reinicorn.git.run_git", side_effect=Exception("no remote")):
         assert repo_slug() == "unknown"
+
+
+def test_repo_root_resolves_parent_from_inside_kb(kb_clone_repo, monkeypatch):
+    """A command run with cwd inside kb/ must resolve the parent project,
+    not the kb — otherwise docs land in kb/kb/ (spec §7). Nothing else
+    covers this regression."""
+    monkeypatch.chdir(kb_clone_repo / "kb")
+    assert repo_root() == kb_clone_repo
+
+
+def test_repo_root_keeps_plain_repos(tmp_path: Path, monkeypatch):
+    """A repo that happens to BE named kb but has no parent config is itself."""
+    repo = tmp_path / "kb"
+    repo.mkdir()
+    _git_init(repo)
+    monkeypatch.chdir(repo)
+    assert repo_root() == repo
