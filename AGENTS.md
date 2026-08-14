@@ -26,9 +26,11 @@ Read and follow `kb/reinicorn/README.md` before planning or changing code. Use
 - stdout is the agent-facing result surface; stderr is progress/debug only.
 - Follow red-green TDD for behavior changes and use conventional commits.
 - Tests assert the protected behavior (the observable side effect), never an
-  intermediate signal — not a sentinel's shape, an exact text blob, or that a
-  flag parsed. If the guarded outcome is "nothing gets archived," the test
-  archives nothing, end to end.
+  intermediate signal that merely stands in for it — a sentinel's shape, an
+  incidental text blob, or that a flag parsed. Output that is itself the
+  contract (e.g. stdout, the agent-facing result surface) is the observable
+  behavior — assert it directly. If the guarded outcome is "nothing gets
+  archived," the test archives nothing, end to end.
 - When code encodes external-system behavior (an API's IDs or enums, a CLI's
   output format), verify against live behavior or docs and cite that evidence
   in the PR — never pattern-guess.
