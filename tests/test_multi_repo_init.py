@@ -58,7 +58,7 @@ def test_multi_repo_init_creates_scope_dir(tmp_path: Path):
 
     assert rc == 0
 
-    # The kb submodule should contain repo-b's scoped directory
+    # The kb clone should contain repo-b's scoped directory
     kb_dir = repo_b / "kb"
     assert kb_dir.is_dir()
     assert (kb_dir / "repo-b").is_dir(), "repo-b scope dir should exist in kb"

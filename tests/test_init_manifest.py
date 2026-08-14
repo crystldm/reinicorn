@@ -19,7 +19,7 @@ def test_init_writes_manifest(tmp_path: Path):
     run_git("-C", str(repo), "config", "user.name", "Test")
     run_git("-C", str(repo), "commit", "--allow-empty", "-m", "init")
 
-    with patch("reinicorn.commands.init.setup_submodule"), \
+    with patch("reinicorn.commands.init.setup_kb_clone"), \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
          patch("reinicorn.commands.init.repo_slug", return_value="test-repo"), \
          patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]):
