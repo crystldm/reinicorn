@@ -13,6 +13,7 @@ from reinicorn import __version__, console
 from reinicorn.config import kb_scope
 from reinicorn.git import current_branch, repo_root
 from reinicorn.kb import active_plan_names, branch_dir_name, get_kb_dir, overlap_line
+from reinicorn.kb_remote import configured_kb_remote_url
 
 
 def _bin_path() -> str:
@@ -35,14 +36,12 @@ def cmd_home() -> int:
 
     kb_dir = get_kb_dir(root)
     if kb_dir is None:
-        print("kb: not set up in this repo")
-        console.next_step("rcorn init", "rcorn help")
-        return 0
-    if not kb_dir.is_dir():
-        # Fresh clone: .gitmodules declares the kb but the submodule
-        # was never initialized — nothing on disk to read yet.
-        print("kb: submodule not initialized")
-        console.next_step("git submodule update --init kb")
+        if configured_kb_remote_url(root):
+            print("kb: not cloned yet")
+            console.next_step("rcorn kb sync")
+        else:
+            print("kb: not set up in this repo")
+            console.next_step("rcorn init", "rcorn help")
         return 0
 
     branch = current_branch()

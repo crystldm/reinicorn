@@ -1,17 +1,14 @@
 """Resolve the origin URL a kb clone should use.
 
-The kb's remote is recorded in three places that can disagree: the clone the
-user actually works in, `REINICORN_KB_REMOTE` in `.reinicorn-config`, and (while
-the kb is still a submodule) `.gitmodules`. Only the first reflects local
-overrides — an SSH rewrite, an internal mirror — so a kb created for a new
-worktree or a fresh clone must prefer it. Falling back to a recorded URL means
-falling back to a *protocol* the user may not be able to authenticate with,
-which is why the recorded value is adapted to the protocol `gh` reports for the
-host before it is used.
+The kb's remote is recorded in two places that can disagree: the clone the
+user actually works in, and `REINICORN_KB_REMOTE` in `.reinicorn-config`. Only
+the first reflects local overrides — an SSH rewrite, an internal mirror — so a
+kb created for a new worktree or a fresh clone must prefer it. Falling back to
+a recorded URL means falling back to a *protocol* the user may not be able to
+authenticate with, which is why the recorded value is adapted to the protocol
+`gh` reports for the host before it is used.
 
-This module is the single seam for that decision. Nothing here is
-submodule-specific except `_gitmodules_url`, which is explicitly the last
-fallback and goes away with the submodule.
+This module is the single seam for that decision.
 """
 
 from __future__ import annotations
@@ -110,31 +107,9 @@ def inherited_kb_remote_url(root: Path) -> str:
     return ""
 
 
-def _gitmodules_url(root: Path) -> str:
-    """The kb `url =` from `.gitmodules`, or ''.
-
-    Transitional: the last fallback for repos that predate
-    `REINICORN_KB_REMOTE`. Removed with the submodule.
-    """
-    gitmodules = root / ".gitmodules"
-    if not gitmodules.is_file():
-        return ""
-    in_kb_section = False
-    for line in gitmodules.read_text().splitlines():
-        stripped = line.strip()
-        if stripped.startswith("["):
-            in_kb_section = stripped == f'[submodule "{KB_DIR_NAME}"]'
-            continue
-        if in_kb_section:
-            key, _, value = stripped.partition("=")
-            if key.strip() == "url":
-                return value.strip()
-    return ""
-
-
 def configured_kb_remote_url(root: Path) -> str:
     """The kb remote as *recorded* by the repo, without protocol adaptation."""
-    return config_get(KB_REMOTE_KEY, root=root) or _gitmodules_url(root)
+    return config_get(KB_REMOTE_KEY, root=root)
 
 
 def resolve_kb_remote_url(root: Path) -> str:
@@ -187,9 +162,8 @@ def apply_kb_remote_url(kb_dir: Path, url: str) -> ApplyResult:
     exact failure this module exists to prevent, so it reports rather than
     returning quietly.
 
-    *url* can originate in `.gitmodules`, which is repository-controlled, so it
-    is validated before it reaches git — the same reason `get_kb_dir()` guards
-    the submodule path.
+    *url* can originate in `.reinicorn-config`, which is repository-controlled,
+    so it is validated before it reaches git.
     """
     if not url:
         return "unchanged"

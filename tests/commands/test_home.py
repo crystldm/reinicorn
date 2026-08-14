@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from reinicorn.commands.home import cmd_home
@@ -53,6 +55,17 @@ def test_home_no_kb_setup(kb_repo, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "kb: not set up in this repo" in out
     assert "next: rcorn init" in out
+
+
+def test_home_reports_missing_clone(kb_clone_repo, monkeypatch, capsys):
+    """Config records a kb remote, but kb/ isn't cloned yet (teammate clone)."""
+    shutil.rmtree(kb_clone_repo / "kb")
+    monkeypatch.chdir(kb_clone_repo)
+    assert cmd_home() == 0
+    out = capsys.readouterr().out
+    assert "not cloned yet" in out
+    assert "rcorn kb sync" in out
+    assert "submodule" not in out
 
 
 def test_home_plan_present_for_branch(kb_repo, monkeypatch, capsys):

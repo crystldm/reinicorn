@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 from reinicorn.commands.sync import cmd_sync
 from reinicorn.git import run_git
+
+
+def test_sync_clones_when_kb_absent(kb_clone_repo: Path) -> None:
+    """A teammate clone (config present, kb/ missing) gets a kb from one command."""
+    shutil.rmtree(kb_clone_repo / "kb")
+    with patch("reinicorn.commands.sync.repo_root", return_value=kb_clone_repo), \
+         patch("reinicorn.commands.sync.current_branch", return_value="main"):
+        assert cmd_sync() == 0
+    assert (kb_clone_repo / "kb" / ".git").exists()
 
 
 def test_sync_stays_on_main_branch(submodule_repo: Path) -> None:
