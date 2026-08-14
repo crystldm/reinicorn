@@ -161,6 +161,20 @@ def _landed_target(
     return landed[0] if len(landed) == 1 else None
 
 
+def _landed_date(kb_dir: Path, rel: str) -> str:
+    """Commit date (YYYY-MM-DD) *rel* last changed, on kb's committed HEAD.
+
+    A path existing is not proof the user's review just landed there — it
+    could equally be a mistyped slug colliding with an unrelated, long-since
+    approved doc. The date is what makes that collision self-evident to the
+    caller's message rather than silently reporting success for the wrong
+    doc. Empty when git can't say (rel was just confirmed to exist, so this
+    should not normally happen).
+    """
+    r = run_git("log", "-1", "--format=%cs", "--", rel, check=False, cwd=kb_dir)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def _push_kb_main(kb_dir: Path) -> None:
     """Publish kb main, surfacing a failed push as an agent-readable error."""
     push = push_main_with_retry(kb_dir)
@@ -307,12 +321,17 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
             console.error(f"no draft named '{slug}'")
             console.next_step("rcorn spec list --include-drafts")
             return 1
-        # CI cleanup (or another machine) already landed and finalized this
-        # review — kb was just synced above, so this is not stale, just
-        # arriving after the fact. Same message/behavior as the in-flight
-        # race caught further down by `remote_main_state`.
-        console.info(f"already landed at {landed.final_rel} — syncing local kb")
-        _pull_kb_main(kb_dir)
+        # A vanished draft with a doc already at the finalized path could be
+        # this review landing elsewhere (CI cleanup, another machine) — or a
+        # mistyped slug colliding with an unrelated, long-approved doc. Name
+        # both the path and the landing date so a stale collision is
+        # self-evident rather than silently reported as success.
+        date = _landed_date(kb_dir, landed.final_rel)
+        when = f" (landed {date})" if date else ""
+        console.info(
+            f"No open draft named '{slug}' — a finalized doc already exists "
+            f"at {landed.final_rel}{when}. Nothing to merge."
+        )
         return 0
     if len(matches) > 1:
         keys = ", ".join(sorted(t.doc_type.key for t in matches))
