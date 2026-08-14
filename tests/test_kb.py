@@ -12,6 +12,8 @@ from reinicorn.kb import (
     active_plan_names,
     branch_changed_files,
     check_overlap,
+    commit_kb,
+    ensure_kb_on_main,
     get_kb_dir,
     overlap_line,
     plan_dir,
@@ -195,3 +197,53 @@ def test_branch_changed_files_returns_empty_without_main(tmp_path: Path):
         cwd=tmp_path,
     )
     assert branch_changed_files("wip", tmp_path) == set()
+
+
+def _detach(kb: Path) -> None:
+    run_git("checkout", "-q", "--detach", "HEAD", cwd=kb)
+
+
+def test_ensure_kb_on_main_fast_forwards_stale_local_main(kb_clone_repo, tmp_path):
+    """From a detached HEAD, checkout main must not revert to a stale local main."""
+    kb = kb_clone_repo / "kb"
+    # Advance the remote past local main via a second clone
+    other = tmp_path / "other"
+    run_git("clone", "-q", str(tmp_path / "kb-remote"), str(other))
+    run_git("config", "user.email", "t@t", cwd=other)
+    run_git("config", "user.name", "T", cwd=other)
+    (other / "README.md").write_text("# Kb v2\n")
+    run_git("add", "-A", cwd=other)
+    run_git("commit", "-q", "-m", "v2", cwd=other)
+    run_git("push", "-q", "origin", "main", cwd=other)
+    _detach(kb)
+
+    assert ensure_kb_on_main(kb) is True
+    assert (kb / "README.md").read_text() == "# Kb v2\n"  # not reverted to v1
+
+
+def test_ensure_kb_on_main_reports_failed_checkout(kb_clone_repo):
+    """A checkout that cannot land on main returns False instead of lying."""
+    kb = kb_clone_repo / "kb"
+    _detach(kb)
+    # Uncommitted change conflicting with main blocks the checkout
+    run_git("rm", "-q", "README.md", cwd=kb)
+    (kb / "README.md").write_text("conflicting\n")
+    run_git("add", "README.md", cwd=kb)
+    run_git("commit", "-q", "-m", "detached edit", cwd=kb)
+    (kb / "README.md").write_text("dirty\n")
+
+    assert ensure_kb_on_main(kb) is False
+
+
+def test_commit_kb_refuses_off_main(kb_clone_repo, monkeypatch):
+    """No commit lands on a detached HEAD — the work stays in the worktree."""
+    kb = kb_clone_repo / "kb"
+    _detach(kb)
+    run_git("rm", "-q", "README.md", cwd=kb)
+    run_git("commit", "-q", "-m", "conflict setup", cwd=kb)
+    (kb / "README.md").write_text("draft\n")
+
+    assert commit_kb(kb_clone_repo, "doc: draft", kb_dir=kb) is False
+    r = run_git("log", "--oneline", "-1", cwd=kb)
+    assert "doc: draft" not in r.stdout
+    assert (kb / "README.md").read_text() == "draft\n"  # work intact

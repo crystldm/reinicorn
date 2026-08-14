@@ -30,7 +30,8 @@ def cmd_publish() -> int:
 
     console.progress("Publishing kb changes...")
 
-    ensure_kb_on_main(kb_dir)
+    if not ensure_kb_on_main(kb_dir):
+        return 1
 
     # Auto-commit any pending changes
     commit_kb(root, "chore(kb): commit before publish", kb_dir=kb_dir)

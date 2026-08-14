@@ -58,14 +58,57 @@ def require_kb_dir(root: Path | None = None) -> Path:
     return kb_dir
 
 
-def ensure_kb_on_main(kb_dir: Path) -> None:
-    """Ensure the kb submodule is on the main branch.
+def checkout_kb_main(kb_dir: Path) -> bool:
+    """Fetch origin/main (best effort) and put kb HEAD on the main branch.
 
-    Handles both detached HEAD and accidental feature-branch checkouts.
+    The fetch comes first so "main" can mean origin/main rather than a
+    possibly-stale local ref; offline is survivable (local commits publish
+    later), so a failed fetch warns and continues. A failed checkout is
+    reported and returns False — committing into a detached HEAD makes
+    work look saved when it is not.
     """
+    fta = file_transport_args(cwd=kb_dir)
+    fetch = run_git(*fta, "fetch", "origin", "main", check=False, cwd=kb_dir)
+    if fetch.returncode != 0:
+        console.warn(
+            "Could not fetch kb origin/main — continuing with the local ref."
+        )
+
     r = run_git("symbolic-ref", "--short", "HEAD", check=False, cwd=kb_dir)
     if r.returncode != 0 or r.stdout.strip() != "main":
-        run_git("checkout", "main", check=False, cwd=kb_dir)
+        co = run_git("checkout", "main", check=False, cwd=kb_dir)
+        if co.returncode != 0:
+            report_failure("put the kb on its main branch", co, warn=True)
+            return False
+    return True
+
+
+def ensure_kb_on_main(kb_dir: Path) -> bool:
+    """Put the kb on an up-to-date main. Returns False when it cannot.
+
+    "Up to date" means: HEAD is main, and local main is not behind a
+    fetched origin/main (fast-forwarded here; ahead-only is fine — those
+    are unpublished doc commits). Never moves the working tree backwards
+    and never discards uncommitted kb work.
+    """
+    if not checkout_kb_main(kb_dir):
+        return False
+    # Only meaningful when the fetch above succeeded; --ff-only on an
+    # already-ahead main is a no-op ("Already up to date").
+    has_remote_ref = run_git(
+        "rev-parse", "--verify", "-q", "origin/main", check=False, cwd=kb_dir,
+    )
+    if has_remote_ref.returncode != 0:
+        return True  # nothing fetched to compare against
+    ff = run_git("merge", "--ff-only", "origin/main", check=False, cwd=kb_dir)
+    if ff.returncode != 0:
+        console.error(
+            "Kb main has diverged from origin/main and cannot fast-forward.\n"
+            f"  Where: {kb_dir}\n"
+            "  How to fix: run 'rcorn kb sync' to merge origin/main first."
+        )
+        return False
+    return True
 
 
 def stage_kb_pointer(root: Path, kb_dir: Path) -> None:
@@ -103,7 +146,15 @@ def commit_kb(
     if resolved is None or not resolved.is_dir():
         return False
 
-    ensure_kb_on_main(resolved)
+    if not ensure_kb_on_main(resolved):
+        console.error(
+            "Refusing to commit kb changes: the kb is not on an up-to-date "
+            "main (see above).\n"
+            f"  Where: {resolved}\n"
+            "  Your edits are still in the kb working tree — nothing is lost.\n"
+            "  How to fix: resolve the state above, then rerun this command."
+        )
+        return False
 
     # Pathspecs relative to the kb dir; `add -A -- <spec>` stages deletions
     # too, which plan-complete's directory move needs.

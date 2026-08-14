@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console, github
 from reinicorn.config import kb_scope
+from reinicorn.doc_types import gated_types
 from reinicorn.frontmatter import (
     FIELD_REVIEW_CANCELLED,
     FIELD_REVIEW_PR,
@@ -49,6 +50,7 @@ from reinicorn.review import (
     cleanup_after_merge,
     collect_gated_drafts,
     delete_review_ref,
+    make_target,
     pr_new_url,
     push_candidate,
     remote_main_state,
@@ -100,14 +102,31 @@ def _gh_ready() -> bool:
     return github.gh_available() and github.gh_authenticated()
 
 
-def _ctx(slug_or_path: str, type_key: str | None) -> tuple[Path, Path, ReviewTarget] | None:
-    """(root, kb_dir, target) for a uniquely-resolved draft, or None (error printed)."""
+def _kb_and_matches(
+    slug_or_path: str, type_key: str | None,
+) -> tuple[Path, Path, list[ReviewTarget]] | None:
+    """(root, kb_dir, matches) after syncing kb to an up-to-date main.
+
+    None when root/kb resolution or the sync itself fails (error printed);
+    *matches* may legitimately be empty — callers decide what an empty list
+    means for them.
+    """
     root = repo_root()
     if root is None:
         return None
     kb_dir = require_kb_dir(root)
-    ensure_kb_on_main(kb_dir)
+    if not ensure_kb_on_main(kb_dir):
+        return None
     matches = resolve_drafts(slug_or_path, kb_dir, kb_scope(root), type_key)
+    return root, kb_dir, matches
+
+
+def _ctx(slug_or_path: str, type_key: str | None) -> tuple[Path, Path, ReviewTarget] | None:
+    """(root, kb_dir, target) for a uniquely-resolved draft, or None (error printed)."""
+    resolved = _kb_and_matches(slug_or_path, type_key)
+    if resolved is None:
+        return None
+    root, kb_dir, matches = resolved
     if not matches:
         console.error(f"no draft named '{slug_or_path}'")
         console.next_step("rcorn spec list --include-drafts")
@@ -118,6 +137,28 @@ def _ctx(slug_or_path: str, type_key: str | None) -> tuple[Path, Path, ReviewTar
         console.next_step(f"rerun with --type ({keys})")
         return None
     return root, kb_dir, matches[0]
+
+
+def _landed_target(
+    root: Path, kb_dir: Path, slug: str, type_key: str | None,
+) -> ReviewTarget | None:
+    """The single finalized doc matching `slug` on kb's synced HEAD, if any.
+
+    Only meaningful when no draft resolves: `_kb_and_matches` already ran
+    `ensure_kb_on_main` before finding none, so a vanished draft usually
+    means CI cleanup (or another machine) landed it before this command ran
+    — not that the slug never existed. Reuses `make_target`'s finalized-path
+    mapping, the same one `resolve_drafts` uses for the draft path; more
+    than one gated type landed under the same slug is treated as no match,
+    same ambiguity rule as the ordinary draft lookup.
+    """
+    candidates = [
+        make_target(dt, kb_scope(root), slug, kb_dir)
+        for dt in gated_types()
+        if type_key is None or dt.key == type_key
+    ]
+    landed = [t for t in candidates if (kb_dir / t.final_rel).is_file()]
+    return landed[0] if len(landed) == 1 else None
 
 
 def _push_kb_main(kb_dir: Path) -> None:
@@ -256,10 +297,29 @@ def cmd_review_link(slug: str, pr_url: str, type_key: str | None = None) -> int:
 def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False) -> int:
     if _mode_blocked():
         return 1
-    ctx = _ctx(slug, type_key)
-    if ctx is None:
+    resolved = _kb_and_matches(slug, type_key)
+    if resolved is None:
         return 1
-    _root, kb_dir, target = ctx
+    root, kb_dir, matches = resolved
+    if not matches:
+        landed = _landed_target(root, kb_dir, slug, type_key)
+        if landed is None:
+            console.error(f"no draft named '{slug}'")
+            console.next_step("rcorn spec list --include-drafts")
+            return 1
+        # CI cleanup (or another machine) already landed and finalized this
+        # review — kb was just synced above, so this is not stale, just
+        # arriving after the fact. Same message/behavior as the in-flight
+        # race caught further down by `remote_main_state`.
+        console.info(f"already landed at {landed.final_rel} — syncing local kb")
+        _pull_kb_main(kb_dir)
+        return 0
+    if len(matches) > 1:
+        keys = ", ".join(sorted(t.doc_type.key for t in matches))
+        console.error(f"'{slug}' matches drafts of multiple types: {keys}")
+        console.next_step(f"rerun with --type ({keys})")
+        return 1
+    target = matches[0]
     pr_url = get(target.draft_path.read_text(), FIELD_REVIEW_PR) or ""
     approved_by = ""
     final_text, remote_draft = remote_main_state(kb_dir, target)

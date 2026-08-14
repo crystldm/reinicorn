@@ -12,7 +12,7 @@ from reinicorn.git import (
 )
 from reinicorn.kb import (
     check_overlap,
-    ensure_kb_on_main,
+    checkout_kb_main,
     require_kb_dir,
     stage_kb_pointer,
 )
@@ -27,7 +27,8 @@ def cmd_sync() -> int:
     console.header("Syncing kb...")
     print()
 
-    ensure_kb_on_main(kb_dir)
+    if not checkout_kb_main(kb_dir):
+        return 1
 
     # Fetch and merge latest (file_transport_args handles local remotes on git 2.38+)
     fta = file_transport_args(cwd=kb_dir)
