@@ -57,9 +57,9 @@ rcorn init
 
 `init` asks where the shared kb should live: an existing remote your team
 already shares, a new private GitHub repo (`--create-remote`, uses the `gh`
-CLI), or a local bare repo for solo experiments (`--local`). It then adds the
-kb submodule, installs the git and editor hooks, and lays down the skills and
-agent instructions for your platforms.
+CLI), or a local bare repo for solo experiments (`--local`). It then clones the
+kb, installs the git and editor hooks, and lays down the skills and agent
+instructions for your platforms.
 
 The daily loop after that is two commands around your normal work:
 
@@ -87,7 +87,7 @@ reinicorn/
 ├── templates/              # AGENTS.md template laid down by init
 ├── workflows/              # CI workflow installed by `rcorn review setup`
 ├── upgrades/               # Version-to-version upgrade notes
-├── kb/                     # The shared knowledgebase (git submodule)
+├── kb/                     # The shared knowledgebase (gitignored clone)
 └── tests/                  # Test suite
 ```
 
@@ -174,7 +174,7 @@ a plan builds on a spec that never got approved.
 ## The CLI
 
 `rcorn` is the single entry point for kb operations; it hides the git plumbing
-so neither humans nor agents touch the submodule directly. Bare `rcorn` shows
+so neither humans nor agents touch the kb clone directly. Bare `rcorn` shows
 a live status home view (branch, active plans, overlap), and `rcorn help` has
 the full manual.
 
@@ -245,29 +245,34 @@ Skills forked from [superpowers](https://github.com/obra/superpowers) keep
 their attribution, versions, and the upstream MIT license text in
 [.agents/skills/ATTRIBUTION.md](.agents/skills/ATTRIBUTION.md).
 
-## KB as a submodule
+## KB as a shared clone
 
-The kb is a git submodule pointing at a shared repo tracked on `main` only
-(linear history, no branches). Every branch and contributor reads and writes
-the same kb, which is what makes cross-branch context and overlap detection
-possible.
+The kb is an ordinary git clone at `kb/`, gitignored in every repo that
+attaches it, tracking a shared repo on `main` only (linear history, no
+branches). Every branch and contributor reads and writes the same kb, which
+is what makes cross-branch context and overlap detection possible. On a
+fresh checkout of your repo, `rcorn kb sync` bootstraps `kb/` from scratch —
+there's no pointer to check out, so nothing to forget to init.
 
-The submodule design is also what enables multi-repo support. Several repos
-can attach the same kb repo, and each gets its own top-level scope directory
-named after its repo slug (`kb/reinicorn/`, `kb/my-service/`). All doc types
-live inside that scope, so projects sharing one kb never collide, while agents
-working in any repo can see the others' context. `rcorn init` is additive
-(safe to run against a kb that already holds other repos' scopes), and
-`rcorn kb list` / `rcorn kb remove-scope <name>` manage the scopes.
+The clone design is also what enables multi-repo support, unchanged from
+before. Several repos can attach the same kb repo, and each gets its own
+top-level scope directory named after its repo slug (`kb/reinicorn/`,
+`kb/my-service/`). All doc types live inside that scope, so projects sharing
+one kb never collide, while agents working in any repo can see the others'
+context. `rcorn init` is additive (safe to run against a kb that already
+holds other repos' scopes), and `rcorn kb list` / `rcorn kb remove-scope
+<name>` manage the scopes.
 
-As promised in the intro, nobody manages the submodule by hand:
+As promised in the intro, nobody manages the kb checkout by hand:
 
-- `rcorn kb sync` pulls the latest kb state and reports overlap.
+- `rcorn kb sync` clones `kb/` if it's missing, pulls the latest kb state, and
+  reports overlap.
 - `rcorn kb publish` rebases and pushes your changes. Namespaced files (your
   branch's plan) auto-resolve in your favor; shared-file conflicts are skipped
   with a warning so you stay unblocked.
-- Git hooks keep the submodule pointer honest across checkouts, merges, and
-  pushes.
+- `kb/` is gitignored, so there's no pointer commit to keep honest. The
+  pre-commit hook and CI enforce that boundary, rejecting any attempt to
+  stage or push `kb/` into your repo's own history.
 
 Two escape hatches for when the workflow is in your way:
 
@@ -289,7 +294,7 @@ or open an issue directly. Code and docs contributions are welcome too: see
 - [obra/superpowers](https://github.com/obra/superpowers): the skill set this one is forked from.
 - [core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md): the operating principles, adapted from the article for this project.
 - [axi principles](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/agent-native-output-surface-axi-principles.md): the agent-experience rules the CLI's output follows.
-- [Git submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules): how the kb attaches to your repo.
+- [Remove the kb submodule](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/remove-the-kb-submodule.md): why the kb is a plain clone instead of a git submodule.
 
 ## License
 

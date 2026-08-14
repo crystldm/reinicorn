@@ -105,8 +105,9 @@ def tracked_paths(kb_dir: Path) -> frozenset[str]:
         return frozenset(p for p in r.stdout.split("\0") if p)
 
     # Only now pay for a second call, to tell the two cases apart. Testing for
-    # a `.git` entry would be wrong: the kb is a submodule in a real checkout
-    # but an ordinary tracked directory in others, and both are enumerable.
+    # a `.git` entry would be wrong: the kb is a plain clone in a real
+    # checkout, but some test fixtures build it as an ordinary tracked
+    # directory instead, and both are enumerable.
     probe = run_git("rev-parse", "--is-inside-work-tree", check=False, cwd=kb_dir)
     if probe.returncode != 0:
         return frozenset()

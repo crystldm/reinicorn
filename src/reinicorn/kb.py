@@ -118,7 +118,7 @@ def commit_kb(
     kb_dir: Path | None = None,
     paths: Sequence[Path] | None = None,
 ) -> bool:
-    """Auto-commit changes inside the kb submodule.
+    """Auto-commit changes inside the kb clone.
 
     By default sweeps up every change in the kb working tree (publish and
     review rely on this). Per-artifact create commands pass ``paths`` — the
@@ -126,7 +126,7 @@ def commit_kb(
     unrelated changes into their commit (issue #35).
 
     Returns True if a commit was made, False if nothing to commit
-    or no kb submodule is configured.
+    or no kb clone is configured.
     Pass kb_dir to skip the get_kb_dir() lookup when already resolved.
     """
     resolved = kb_dir if kb_dir is not None else get_kb_dir(root)

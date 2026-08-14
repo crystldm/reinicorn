@@ -2,7 +2,7 @@
 # block-raw-kb-git.sh — PreToolUse hook for shell tools
 #
 # Blocks agents from running git commands directly inside the kb/
-# submodule directory. This surfaces Reinicorn CLI failures instead of
+# clone directory. This surfaces Reinicorn CLI failures instead of
 # letting agents silently work around them.
 #
 # Gating is presence-based, not tool-name-based: editors name their
