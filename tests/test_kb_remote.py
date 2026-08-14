@@ -235,7 +235,8 @@ def test_apply_is_a_noop_for_an_empty_url(submodule_repo: Path):
 
 
 def test_apply_refuses_an_unsafe_url(submodule_repo: Path, capsys):
-    """.gitmodules is repository-controlled: never hand it to git unvalidated."""
+    """The configured remote URL (.reinicorn-config's REINICORN_KB_REMOTE) is
+    repository-controlled: never hand it to git unvalidated."""
     kb = submodule_repo / "kb"
     before = remote_url(kb)
     assert apply_kb_remote_url(kb, "ext::sh -c 'touch /tmp/pwned'") == "failed"

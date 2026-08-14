@@ -270,9 +270,10 @@ As promised in the intro, nobody manages the kb checkout by hand:
 - `rcorn kb publish` rebases and pushes your changes. Namespaced files (your
   branch's plan) auto-resolve in your favor; shared-file conflicts are skipped
   with a warning so you stay unblocked.
-- `kb/` is gitignored, so there's no pointer commit to keep honest. The
-  pre-commit hook and CI enforce that boundary, rejecting any attempt to
-  stage or push `kb/` into your repo's own history.
+- `kb/` is gitignored, so there's no pointer commit to keep honest. A local
+  pre-commit hook blocks staging it by accident; CI is the actual backstop —
+  it fails the build if `kb/` is ever tracked, which is the layer a
+  contributor can't route around.
 
 Two escape hatches for when the workflow is in your way:
 
