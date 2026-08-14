@@ -66,6 +66,12 @@ def cmd_update(*, diff_target: str | None = None) -> int:
         )
         return 1
 
+    from reinicorn.kb_migrate import detect_submodule_layout, migrate_submodule_to_clone
+    if detect_submodule_layout(repo_root):
+        console.info("Detected the old kb submodule layout.")
+        if not migrate_submodule_to_clone(repo_root):
+            return 1
+
     manifest_files = manifest["files"]
     legacy_agents_owned = "AGENTS.md" in manifest_files
     manifest_files.pop("AGENTS.md", None)

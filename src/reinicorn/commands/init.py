@@ -136,6 +136,12 @@ def cmd_init(
         print("  Or create a repo first: git init && rcorn init")
         return 1
 
+    from reinicorn.kb_migrate import detect_submodule_layout, migrate_submodule_to_clone
+    if detect_submodule_layout(cwd):
+        console.info("Detected the old kb submodule layout.")
+        if not migrate_submodule_to_clone(cwd):
+            return 1
+
     print()
     console.header("Reinicorn Init")
     print("==============")
