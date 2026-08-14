@@ -14,7 +14,7 @@
 # PATH fails open exactly when it matters.
 # =============================================================================
 
-staged=$(git diff --cached --name-only --diff-filter=ACMRTU -- kb 2>/dev/null)
+staged=$(git diff --cached --name-only --diff-filter=d -- kb 2>/dev/null)
 if [ -n "$staged" ]; then
     echo "❌ Commit blocked: staged paths under kb/ belong to the shared kb, not this repo." >&2
     echo "$staged" | head -5 | sed 's/^/   /' >&2

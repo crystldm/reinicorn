@@ -187,29 +187,13 @@ def submodule_repo(tmp_path: Path) -> Path:
     return parent
 
 
-@pytest.fixture(autouse=True)
-def _restore_kb_git(request: pytest.FixtureRequest) -> None:
-    """Restore kb/.git after pre-commit hook tests remove it for staging."""
-    yield  # Test runs here
-    # After test, restore kb/.git if it was backed up
-    if hasattr(request.node, "_kb_git_bak"):
-        kb_git_bak = request.node._kb_git_bak
-        kb_git = kb_git_bak.parent / ".git"
-        if kb_git_bak.exists() and not kb_git.exists():
-            kb_git_bak.rename(kb_git)
-
-
 @pytest.fixture
-def kb_clone_repo(tmp_path: Path, request) -> Path:
+def kb_clone_repo(tmp_path: Path) -> Path:
     """Parent repo with kb/ as an ordinary clone of a local bare remote.
 
     The clone layout every kb-operation test uses. The remote lives at
     tmp_path/kb-remote for push/fetch assertions; `submodule_repo` remains
     only for migration tests.
-
-    Note: for tests that need to stage files under kb/ (like pre-commit hook
-    tests), kb/ is created without .git initially, then it's set up as a git
-    repo for tests that need it.
     """
     staging = tmp_path / "kb-staging"
     staging.mkdir()
@@ -230,24 +214,10 @@ def kb_clone_repo(tmp_path: Path, request) -> Path:
     )
     _git_commit(parent, "init")
 
-    kb = parent / "kb"
-    kb.mkdir()
-
-    # Clone kb as a nested git repo for all tests
     run_git("-c", "protocol.file.allow=always",
-            "clone", str(remote), str(kb))
+            "clone", str(remote), str(parent / "kb"))
+    kb = parent / "kb"
     run_git("config", "user.email", "test@test.com", cwd=kb)
     run_git("config", "user.name", "Test User", cwd=kb)
     run_git("config", "protocol.file.allow", "always", cwd=kb)
-
-    # For pre-commit hook tests, we need to temporarily save and remove kb/.git
-    # so that git add can stage files under kb/. A fixture below handles restoration.
-    if "test_pre_commit_hook" in request.node.nodeid:
-        kb_git = kb / ".git"
-        kb_git_bak = kb / ".git.bak"
-        if kb_git.exists():
-            kb_git.rename(kb_git_bak)
-            # Store the backup path for the cleanup fixture
-            request.node._kb_git_bak = kb_git_bak
-
     return parent
