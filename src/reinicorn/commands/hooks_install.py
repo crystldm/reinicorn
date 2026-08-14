@@ -34,10 +34,26 @@ _EDITOR_HOOK_SCRIPTS = (
 )
 
 
+# Claude Code runs hook commands via /bin/sh from wherever the session was
+# launched, not the repo root, so a bare-relative path breaks in worktrees and
+# subdirectory sessions. "$CLAUDE_PROJECT_DIR" is expanded by Claude Code.
+_CLAUDE_COMMAND_PREFIX = '"$CLAUDE_PROJECT_DIR"'
+
+# Hook commands written by older installs: pre-rename `.reins/` paths and
+# bare-relative `.reinicorn/` paths. Both fail with "not found" at hook time
+# and must be replaced, not deduped around.
+_STALE_SCRIPT_DIRS = (".reins/hooks", _SCRIPT_DEST)
+
+
 def _claude_entry(script: str, matcher: str) -> dict:
     return {
         "matcher": matcher,
-        "hooks": [{"type": "command", "command": f"{_SCRIPT_DEST}/{script}"}],
+        "hooks": [
+            {
+                "type": "command",
+                "command": f"{_CLAUDE_COMMAND_PREFIX}/{_SCRIPT_DEST}/{script}",
+            }
+        ],
     }
 
 
@@ -256,19 +272,65 @@ def _merge_claude_settings(
         pre_tool = []
         hooks["PreToolUse"] = pre_tool
 
-    # Add entries that aren't already present (match by matcher)
-    # NOTE: dedup is by matcher only — a future third script reusing an existing
-    # matcher would be dropped; extend dedup (e.g. by command) if that ever happens.
-    existing_matchers = {e.get("matcher") for e in pre_tool if isinstance(e, dict)}
+    # Drop entries pointing at stale script paths (.reins/, bare-relative
+    # .reinicorn/) so the matcher dedup below can't keep a broken hook alive.
+    stale_commands = {
+        f"{d}/{script}"
+        for d in _STALE_SCRIPT_DIRS
+        for script, _ in _EDITOR_HOOK_SCRIPTS
+    }
+
+    repaired = 0
+    kept_entries = []
+    for entry in pre_tool:
+        entry_hooks = entry.get("hooks") if isinstance(entry, dict) else None
+        if not isinstance(entry_hooks, list):
+            kept_entries.append(entry)
+            continue
+        fresh = [
+            h for h in entry_hooks
+            if not (isinstance(h, dict) and h.get("command") in stale_commands)
+        ]
+        if len(fresh) != len(entry_hooks):
+            repaired += 1
+            if fresh:
+                entry["hooks"] = fresh
+                kept_entries.append(entry)
+            # an entry whose every command was stale is dropped entirely
+        else:
+            kept_entries.append(entry)
+    pre_tool[:] = kept_entries
+
+    # Add hooks that aren't already present, matched by command identity — a
+    # user entry sharing a matcher must not suppress the managed command.
+    # Quoting styles vary ("$CLAUDE_PROJECT_DIR"/x vs "${CLAUDE_PROJECT_DIR}/x")
+    # yet name the same hook, so compare with quotes and braces stripped.
+    def _command_key(command: object) -> object:
+        if not isinstance(command, str):
+            return command
+        return command.replace('"', "").replace("${", "$").replace("}", "")
+
+    existing_commands = {
+        _command_key(h.get("command"))
+        for e in pre_tool
+        if isinstance(e, dict) and isinstance(e.get("hooks"), list)
+        for h in e["hooks"]
+        if isinstance(h, dict)
+    }
     added = 0
     for entry in hook_entries:
-        if entry.get("matcher") not in existing_matchers:
+        if _command_key(entry["hooks"][0]["command"]) not in existing_commands:
             pre_tool.append(entry)
             added += 1
 
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-    if added:
-        console.success(f"Updated {settings_path} ({added} hook(s) added)")
+    if added or repaired:
+        parts = []
+        if added:
+            parts.append(f"{added} hook(s) added")
+        if repaired:
+            parts.append(f"{repaired} stale hook(s) repaired")
+        console.success(f"Updated {settings_path} ({', '.join(parts)})")
     else:
         console.warn(f"{settings_path} — hooks already configured")
 
