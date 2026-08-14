@@ -23,6 +23,7 @@ from reinicorn.git import (
 
 if TYPE_CHECKING:
     import subprocess
+    from collections.abc import Sequence
 
 
 def _parse_kb_submodule_path(text: str) -> str | None:
@@ -113,8 +114,19 @@ def stage_kb_pointer(root: Path, kb_dir: Path) -> None:
     run_git("add", str(rel), check=False, cwd=root)
 
 
-def commit_kb(root: Path, message: str, *, kb_dir: Path | None = None) -> bool:
-    """Auto-commit all changes inside the kb submodule.
+def commit_kb(
+    root: Path,
+    message: str,
+    *,
+    kb_dir: Path | None = None,
+    paths: Sequence[Path] | None = None,
+) -> bool:
+    """Auto-commit changes inside the kb submodule.
+
+    By default sweeps up every change in the kb working tree (publish and
+    review rely on this). Per-artifact create commands pass ``paths`` — the
+    file(s) or dir(s) they touched — so an already-dirty tree cannot leak
+    unrelated changes into their commit (issue #35).
 
     Returns True if a commit was made, False if nothing to commit
     or no kb submodule is configured.
@@ -126,13 +138,19 @@ def commit_kb(root: Path, message: str, *, kb_dir: Path | None = None) -> bool:
 
     ensure_kb_on_main(resolved)
 
-    run_git("add", "-A", cwd=resolved, check=False)
+    # Pathspecs relative to the kb dir; `add -A -- <spec>` stages deletions
+    # too, which plan-complete's directory move needs.
+    specs = [str(p.relative_to(resolved)) for p in paths] if paths else []
 
-    r = run_git("diff", "--cached", "--quiet", check=False, cwd=resolved)
+    run_git("add", "-A", "--", *specs, cwd=resolved, check=False)
+
+    r = run_git("diff", "--cached", "--quiet", "--", *specs, check=False, cwd=resolved)
     if r.returncode == 0:
         return False  # Nothing staged
 
-    r = run_git("commit", "-q", "-m", message, check=False, cwd=resolved)
+    # The pathspec on commit keeps anything staged outside `specs` from
+    # landing in this commit.
+    r = run_git("commit", "-q", "-m", message, "--", *specs, check=False, cwd=resolved)
     if r.returncode == 0:
         stage_kb_pointer(root, resolved)
         return True
