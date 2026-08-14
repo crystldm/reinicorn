@@ -22,15 +22,11 @@ def _init_repo(path: Path) -> None:
 
 
 def _configure_existing_kb(repo: Path) -> None:
-    """Mark a repository as a genuine teammate clone: a populated kb submodule
+    """Mark a repository as a genuine teammate clone: a populated kb clone
     plus the committed manifest that init writes when it lays down assets."""
-    (repo / ".gitmodules").write_text(
-        '[submodule "kb"]\n'
-        "\tpath = kb\n"
-        "\turl = https://example.com/kb.git\n"
-    )
     kb_dir = repo / "kb"
     kb_dir.mkdir()
+    (kb_dir / ".git").write_text("gitdir: ../.git/modules/kb\n")
     (kb_dir / "README.md").write_text("# Existing kb\n")
     manifest = repo / ".reinicorn" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)

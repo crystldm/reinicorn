@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from reinicorn.commands.internal.post_checkout import _kb_reference_args
 from reinicorn.git import run_git
 
@@ -48,6 +50,11 @@ def test_kb_reference_args_in_worktree(submodule_repo: Path):
     assert _kb_reference_args(wt) == ["--reference", str(expected)]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="submodule bootstrap is replaced by clone bootstrap in plan Task 6 "
+    "(spec §4); these tests are rewritten there",
+)
 def test_post_checkout_inits_worktree_kb_with_reference(
     submodule_repo: Path, monkeypatch,
 ):

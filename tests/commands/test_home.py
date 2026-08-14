@@ -43,21 +43,11 @@ def test_bare_reins_invokes_home(kb_repo, monkeypatch, capsys):
     assert "usage:" not in out
 
 
-def test_home_uninitialized_kb_submodule(kb_repo, monkeypatch, capsys):
-    """Fresh clone: .gitmodules declares kb but the submodule dir is absent."""
+def test_home_no_kb_setup(kb_repo, monkeypatch, capsys):
+    """No kb/ at all — kb never set up."""
     import shutil
 
     shutil.rmtree(kb_repo / "kb")
-    monkeypatch.chdir(kb_repo)
-    assert cmd_home() == 0
-    out = capsys.readouterr().out
-    assert "kb: submodule not initialized" in out
-    assert "next: git submodule update --init kb" in out
-
-
-def test_home_no_kb_setup(kb_repo, monkeypatch, capsys):
-    """Git repo with no .gitmodules at all — kb never set up."""
-    (kb_repo / ".gitmodules").unlink()
     monkeypatch.chdir(kb_repo)
     assert cmd_home() == 0
     out = capsys.readouterr().out

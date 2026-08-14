@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from reinicorn import console
@@ -24,68 +23,36 @@ from reinicorn.git import (
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Sequence
-
-
-def _parse_kb_submodule_path(text: str) -> str | None:
-    """Extract the path= value from [submodule "kb"] in .gitmodules text.
-
-    Returns None if no kb submodule entry is found.
-    """
-    in_kb_section = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped == f'[submodule "{KB_DIR_NAME}"]':
-            in_kb_section = True
-            continue
-        if in_kb_section:
-            if stripped.startswith("["):
-                break  # entered next section
-            key, _, value = stripped.partition("=")
-            if key.strip() == "path":
-                return value.strip() or None
-    return None
+    from pathlib import Path
 
 
 def get_kb_dir(root: Path | None = None) -> Path | None:
-    """Return the kb submodule directory, or None if no submodule is configured."""
+    """Return the kb clone directory, or None when no kb exists yet.
+
+    The kb is an ordinary git clone at <root>/kb. A directory without a
+    .git entry is not a kb — a leftover empty dir must not be treated as
+    one. `.git` may be a file (transitional submodule checkout, linked
+    worktree) or a directory (plain clone); both are real kbs.
+    """
     if root is None:
         root = repo_root()
         if root is None:
             return None
-
-    gitmodules = root / ".gitmodules"
-    if not gitmodules.is_file():
-        return None
-
-    path_str = _parse_kb_submodule_path(gitmodules.read_text())
-    if path_str is None:
-        return None
-
-    # .gitmodules is repository-controlled; refuse a path that resolves outside
-    # the repo root (absolute paths, ../ traversal) before it is used for reads,
-    # writes, or removals.
-    candidate = root / path_str
-    try:
-        rel = candidate.resolve().relative_to(root.resolve())
-    except ValueError:
-        rel = None
-    if rel is None or rel == Path():
-        console.error(
-            f"Refusing kb submodule path '{path_str}' from .gitmodules: "
-            f"it does not resolve to a directory inside the repository root."
-        )
-        return None
-
-    return candidate
+    candidate = root / KB_DIR_NAME
+    if (candidate / ".git").exists():
+        return candidate
+    return None
 
 
 def require_kb_dir(root: Path | None = None) -> Path:
-    """Return the kb submodule path, or print an error and raise SystemExit(1)."""
+    """Return the kb directory, or print an error and raise SystemExit(1)."""
     kb_dir = get_kb_dir(root)
     if kb_dir is None:
         console.error(
-            "No kb submodule found. "
-            "Run 'rcorn init' to set up the kb."
+            f"No kb found at {KB_DIR_NAME}/.\n"
+            "  If this repo already uses Reinicorn (teammate clone): "
+            "run 'rcorn kb sync' to clone it.\n"
+            "  If Reinicorn was never set up here: run 'rcorn init'."
         )
         raise SystemExit(1)
     return kb_dir
@@ -350,7 +317,7 @@ def overlapping_branches(
     by branch name; only branches with a non-empty overlap are included.
 
     Returns None when there is no basis for comparison (no repo root, no kb
-    submodule, no other active branches, or the current branch has no
+    clone, no other active branches, or the current branch has no
     changed files vs main) — distinct from an empty list, which means the
     comparison actually ran and found no overlap.
     """

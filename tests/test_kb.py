@@ -9,7 +9,6 @@ import pytest
 
 from reinicorn.git import run_git
 from reinicorn.kb import (
-    _parse_kb_submodule_path,
     active_plan_names,
     branch_changed_files,
     check_overlap,
@@ -21,46 +20,6 @@ from reinicorn.kb import (
 )
 
 
-def test_parse_kb_submodule_path_standard():
-    text = '[submodule "kb"]\n    path = kb\n    url = fake\n'
-    assert _parse_kb_submodule_path(text) == "kb"
-
-
-def test_parse_kb_submodule_path_custom_dir():
-    text = '[submodule "kb"]\n    path = tools/kb\n    url = fake\n'
-    assert _parse_kb_submodule_path(text) == "tools/kb"
-
-
-def test_parse_kb_submodule_path_no_kb_section():
-    text = '[submodule "other"]\n    path = other\n    url = fake\n'
-    assert _parse_kb_submodule_path(text) is None
-
-
-def test_parse_kb_submodule_path_empty():
-    assert _parse_kb_submodule_path("") is None
-
-
-def test_parse_kb_submodule_path_blank_value():
-    # A blank path= value must not resolve to the repo root.
-    text = '[submodule "kb"]\n    path = \n    url = fake\n'
-    assert _parse_kb_submodule_path(text) is None
-
-
-def test_parse_kb_submodule_path_does_not_match_pathname():
-    # "pathname" key must not be confused with "path"
-    text = '[submodule "kb"]\n    pathname = wrong\n    path = correct\n'
-    assert _parse_kb_submodule_path(text) == "correct"
-
-
-def test_parse_kb_submodule_path_url_contains_kb():
-    # A URL with "kb" in it must not trigger a false positive
-    text = (
-        '[submodule "other"]\n    path = other\n'
-        "    url = git@github.com:org/kb-tools.git\n"
-    )
-    assert _parse_kb_submodule_path(text) is None
-
-
 def test_get_kb_dir_returns_path(kb_repo: Path):
     assert get_kb_dir(kb_repo) == kb_repo / "kb"
 
@@ -69,21 +28,24 @@ def test_get_kb_dir_returns_none_when_absent(tmp_path: Path):
     assert get_kb_dir(tmp_path) is None
 
 
-def test_get_kb_dir_rejects_traversal_path(tmp_path: Path, capsys):
-    """A .gitmodules path that escapes the repo root is refused."""
-    (tmp_path / ".gitmodules").write_text(
-        '[submodule "kb"]\n    path = ../escape\n    url = fake\n'
-    )
-    assert get_kb_dir(tmp_path) is None
-    assert "Refusing kb submodule path" in capsys.readouterr().out
+def test_get_kb_dir_requires_git_entry(tmp_path):
+    """A kb/ directory without .git is not a kb."""
+    root = tmp_path / "repo"
+    (root / "kb").mkdir(parents=True)
+    assert get_kb_dir(root) is None
 
 
-def test_get_kb_dir_rejects_absolute_path(tmp_path: Path):
-    """An absolute .gitmodules path is refused (would resolve outside root)."""
-    (tmp_path / ".gitmodules").write_text(
-        '[submodule "kb"]\n    path = /etc\n    url = fake\n'
-    )
-    assert get_kb_dir(tmp_path) is None
+def test_get_kb_dir_detects_clone(kb_clone_repo):
+    assert get_kb_dir(kb_clone_repo) == kb_clone_repo / "kb"
+
+
+def test_get_kb_dir_accepts_gitfile(tmp_path):
+    """A .git *file* (submodule/worktree checkout) also counts — transition safety."""
+    root = tmp_path / "repo"
+    kb = root / "kb"
+    kb.mkdir(parents=True)
+    (kb / ".git").write_text("gitdir: ../.git/modules/kb\n")
+    assert get_kb_dir(root) == kb
 
 
 def test_require_kb_dir_raises_when_none(tmp_path: Path):
@@ -95,6 +57,16 @@ def test_require_kb_dir_returns_path(kb_repo: Path):
     result = require_kb_dir(kb_repo)
     assert isinstance(result, Path)
     assert result == kb_repo / "kb"
+
+
+def test_require_kb_dir_error_names_both_paths(tmp_path, capsys):
+    root = tmp_path / "repo"
+    root.mkdir()
+    with pytest.raises(SystemExit):
+        require_kb_dir(root)
+    out = capsys.readouterr().out
+    assert "rcorn kb sync" in out
+    assert "rcorn init" in out
 
 
 def test_plan_dir(kb_repo: Path):

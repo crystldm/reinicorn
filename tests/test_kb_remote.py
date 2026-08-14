@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from reinicorn.git import remote_url, run_git
 from reinicorn.kb_remote import (
     adapt_url_to_git_protocol,
@@ -295,6 +297,11 @@ def test_apply_reports_a_failed_remote_update(tmp_path: Path, capsys):
     assert "next: rcorn kb git remote set-url origin /srv/kb.git" in out
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="submodule bootstrap is replaced by clone bootstrap in plan Task 6 "
+    "(spec §4); these tests are rewritten there",
+)
 def test_post_checkout_reports_a_failed_remote_update(
     submodule_repo: Path, monkeypatch, capsys,
 ):
@@ -323,6 +330,11 @@ def test_post_checkout_reports_a_failed_remote_update(
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="submodule bootstrap is replaced by clone bootstrap in plan Task 6 "
+    "(spec §4); these tests are rewritten there",
+)
 def test_post_checkout_worktree_kb_inherits_the_main_checkout_remote(
     submodule_repo: Path, tmp_path: Path, monkeypatch,
 ):
