@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-commit — Reinicorn git hook
+#
+# Refuses to commit any path at or under kb/ into the parent repo. The kb
+# is a separate repository that publishes through `rcorn kb publish`;
+# .gitignore alone is a convention that `git add -f` and a stray
+# `git submodule add` both defeat.
+#
+# Deletions are allowed (--diff-filter=d): the submodule->clone migration
+# commits the REMOVAL of the old kb gitlink through this hook.
+#
+# Self-contained bash on purpose: a boundary guard that needs rcorn on
+# PATH fails open exactly when it matters.
+# =============================================================================
+
+staged=$(git diff --cached --name-only --diff-filter=ACMRTU -- kb 2>/dev/null)
+if [ -n "$staged" ]; then
+    echo "❌ Commit blocked: staged paths under kb/ belong to the shared kb, not this repo." >&2
+    echo "$staged" | head -5 | sed 's/^/   /' >&2
+    echo "   Publish kb changes with: rcorn kb publish" >&2
+    echo "   Unstage with: git restore --staged -- kb" >&2
+    exit 1
+fi
+
+exit 0

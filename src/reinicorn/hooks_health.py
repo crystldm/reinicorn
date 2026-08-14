@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 MARKER = "# --- reinicorn hooks below ---"
 OLD_MARKER = "# --- reins hooks below ---"
-HOOK_NAMES = ("post-checkout", "post-merge", "pre-push")
+HOOK_NAMES = ("post-checkout", "post-merge", "pre-push", "pre-commit")
 
 # Delegation to the pre-rename binary: `command -v reins` guards or a direct
 # `reins _pre-push`-style call. Tight enough not to match prose or "reinicorn".
