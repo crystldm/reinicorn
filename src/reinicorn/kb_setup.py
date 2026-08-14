@@ -44,6 +44,9 @@ def seed_remote(url: str, repo_slug: str) -> None:
         tmp_path = scratch_clone(
             url, Path(tmp) / "kb-seed", transport=file_allow, ident="init",
         )
+        # Seed on main regardless of the user's init.defaultBranch — sync,
+        # publish, and the clone message all assume origin/main.
+        run_git("symbolic-ref", "HEAD", "refs/heads/main", cwd=tmp_path)
         generate_seed_tree(tmp_path, repo_slug)
         run_git("add", "-A", cwd=tmp_path)
         run_git("commit", "-q", "-m", "chore: initialize reinicorn kb", cwd=tmp_path)

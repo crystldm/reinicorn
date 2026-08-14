@@ -70,6 +70,31 @@ def test_is_remote_empty_false(seeded_bare: Path):
     assert is_remote_empty(str(seeded_bare)) is False
 
 
+def test_seed_remote_seeds_main_despite_master_default(
+    empty_bare: Path, monkeypatch
+):
+    """Seeding must land on main even when init.defaultBranch is master —
+    sync, publish, and the clone message all assume origin/main."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "init.defaultBranch")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "master")
+
+    seed_remote(str(empty_bare), repo_slug="test-project")
+
+    r = run_git(
+        "--git-dir", str(empty_bare),
+        "rev-parse", "--verify", "-q", "refs/heads/main",
+        check=False,
+    )
+    assert r.returncode == 0, "seed did not create main on the remote"
+    r = run_git(
+        "--git-dir", str(empty_bare),
+        "rev-parse", "--verify", "-q", "refs/heads/master",
+        check=False,
+    )
+    assert r.returncode != 0, "seed created master instead of (or besides) main"
+
+
 def test_seed_remote_populates_empty(empty_bare: Path, tmp_path: Path):
     seed_remote(str(empty_bare), repo_slug="test-project")
     # Should now have refs

@@ -57,8 +57,8 @@ def test_migration_refuses_when_safety_fetch_fails(
     # Nothing destructive ran: still a submodule, worktree intact.
     assert detect_submodule_layout(submodule_repo) is True
     assert (kb / "README.md").exists()
-    captured = capsys.readouterr()
-    assert "cannot be verified" in captured.out + captured.err
+    # stdout only: the refusal is agent-facing data, not progress/debug.
+    assert "cannot be verified" in capsys.readouterr().out
 
 
 def test_migration_reads_url_from_gitmodules_when_kb_uninitialized(
