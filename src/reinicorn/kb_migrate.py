@@ -48,7 +48,15 @@ def kb_unpublished_reason(kb_dir: Path) -> str | None:
     dirty = run_git("status", "--porcelain", check=False, cwd=kb_dir)
     if dirty.stdout.strip():
         return "it has uncommitted changes"
-    run_git("fetch", "origin", "main", check=False, cwd=kb_dir)
+    fetched = run_git("fetch", "origin", "main", check=False, cwd=kb_dir)
+    if fetched.returncode != 0:
+        # A stale cached origin/main must not vouch for publication when
+        # the remote is unreachable — refusing beats deleting kb/ on
+        # cached evidence.
+        return (
+            "its publication state cannot be verified "
+            "(fetching origin/main failed)"
+        )
     ahead = run_git(
         "rev-list", "--count", "origin/main..HEAD", check=False, cwd=kb_dir,
     )
@@ -80,6 +88,19 @@ def migrate_submodule_to_clone(root: Path) -> bool:
 
     # Resolve the clone URL before dismantling anything that records it.
     url = resolve_kb_remote_url(root)
+    if not url:
+        # Migration-only fallback: a parent cloned without submodule init
+        # has no kb/.git to inherit from, and legacy repos predate
+        # REINICORN_KB_REMOTE — the URL lives only in .gitmodules, the
+        # very file this migration deletes. Normal clone remote
+        # resolution deliberately does not read it.
+        r = run_git(
+            "config", "-f", ".gitmodules",
+            "--get", f"submodule.{KB_DIR_NAME}.url",
+            check=False, cwd=root,
+        )
+        if r.returncode == 0:
+            url = r.stdout.strip()
     if not url:
         console.error(
             "Cannot migrate: no kb remote URL could be resolved.\n"

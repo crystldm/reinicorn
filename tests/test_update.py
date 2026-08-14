@@ -290,6 +290,28 @@ def test_update_diff_shows_changes(tmp_path: Path, capsys):
     assert "My Custom Skill" in captured.out
 
 
+def test_update_diff_does_not_migrate_submodule_layout(
+    submodule_repo: Path, tmp_path: Path
+):
+    """--diff is read-only: it must not run the submodule-to-clone migration."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.kb_migrate import detect_submodule_layout
+
+    write_manifest(submodule_repo, version="0.1.0")
+    assets = _setup_package_assets(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=submodule_repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update(diff_target="brainstorming/SKILL.md")
+
+    assert rc == 0
+    assert detect_submodule_layout(submodule_repo) is True
+    assert (submodule_repo / ".gitmodules").is_file()
+    # Still a submodule-style gitfile, not a plain clone's .git directory.
+    assert (submodule_repo / "kb" / ".git").is_file()
+
+
 def test_update_never_reclaims_user_owned_maps(tmp_path: Path) -> None:
     from reinicorn.commands.update import cmd_update
 

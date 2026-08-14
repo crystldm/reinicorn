@@ -67,6 +67,15 @@ def cmd_update(*, diff_target: str | None = None) -> int:
         )
         return 1
 
+    manifest_files = manifest["files"]
+    legacy_agents_owned = "AGENTS.md" in manifest_files
+    manifest_files.pop("AGENTS.md", None)
+
+    # --diff mode: read-only, so it must return before the migration below
+    # can tear anything down.
+    if diff_target is not None:
+        return _show_diff(repo_root, diff_target)
+
     from reinicorn.kb_migrate import detect_submodule_layout, migrate_submodule_to_clone
     if detect_submodule_layout(repo_root):
         console.info("Detected the old kb submodule layout.")
@@ -77,14 +86,6 @@ def cmd_update(*, diff_target: str | None = None) -> int:
         # left without spec §10's pre-commit hook until the next full init.
         if cmd_hooks_install() != 0:
             console.warn("Hook installation had issues — review output above.")
-
-    manifest_files = manifest["files"]
-    legacy_agents_owned = "AGENTS.md" in manifest_files
-    manifest_files.pop("AGENTS.md", None)
-
-    # --diff mode
-    if diff_target is not None:
-        return _show_diff(repo_root, diff_target)
 
     manifest_version = manifest["reinicorn_version"]
     if manifest_version == pkg_version:

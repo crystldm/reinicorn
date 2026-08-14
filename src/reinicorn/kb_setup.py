@@ -14,7 +14,7 @@ from pathlib import Path
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.git import explain_failure, run_git, scratch_clone
+from reinicorn.git import GitError, explain_failure, run_git, scratch_clone
 from reinicorn.kb_seed import generate_seed_tree
 from reinicorn.validation import validate_git_url
 
@@ -115,7 +115,15 @@ def setup_kb_clone(
         if repo_slug is None:
             from reinicorn.git import repo_slug as get_slug
             repo_slug = get_slug()
-        seed_remote(url, repo_slug)
+        try:
+            seed_remote(url, repo_slug)
+        except GitError as e:
+            # Callers catch KbSetupError, not GitError — an unconverted
+            # seeding failure surfaces as a raw traceback.
+            raise KbSetupError("\n".join(explain_failure(
+                "seed the empty kb remote", e,
+                detail=[f"URL: {url}"],
+            ))) from e
 
     file_allow = ("-c", "protocol.file.allow=always") if url.startswith("/") else ()
     r = run_git(*file_allow, "clone", url, str(kb_dir), check=False)

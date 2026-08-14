@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
@@ -40,7 +41,9 @@ class TestEnsureKbPushed:
         """Kb main already matches origin/main → returns 0, no push attempted."""
         assert _ensure_kb_pushed(kb_clone_repo) == 0
 
-    def test_pre_push_pushes_ahead_kb(self, kb_clone_repo: Path, monkeypatch):
+    def test_pre_push_pushes_ahead_kb(
+        self, kb_clone_repo: Path, monkeypatch, tmp_path
+    ):
         """Local kb main ahead of origin/main gets pushed before the parent push."""
         kb = kb_clone_repo / "kb"
         (kb / "doc.md").write_text("x\n")
@@ -49,8 +52,11 @@ class TestEnsureKbPushed:
         monkeypatch.chdir(kb_clone_repo)
 
         assert _ensure_kb_pushed(kb_clone_repo) == 0
-        r = run_git("rev-list", "--count", "origin/main..main", cwd=kb)
-        assert r.stdout.strip() == "0"  # nothing left unpublished
+        # The commit reached the bare remote itself, not just the local
+        # origin/main tracking ref.
+        assert run_git("rev-parse", "main", cwd=kb).stdout == run_git(
+            "--git-dir", str(tmp_path / "kb-remote"), "rev-parse", "main"
+        ).stdout
 
     def test_push_failure_blocks_with_error(self, kb_clone_repo: Path, capsys):
         """Kb push fails → returns 1 with error message."""
@@ -419,6 +425,28 @@ class TestEnsurePlanSpecApproved:
         """A push with no branch refs (tags only) has no plan to check."""
         self._setup(kb_clone_repo, plan=self._plan("specs/typo.md"))
         assert self._run(kb_clone_repo, []) == 0
+
+    def test_empty_kb_clone_allows_quietly(self, kb_clone_repo: Path, capsys):
+        """An unborn HEAD (rev-parse exit 1) is a real state — a freshly
+        initialized kb — and skipping it is expected, not a degraded gate."""
+        shutil.rmtree(kb_clone_repo / "kb")
+        run_git("init", "-q", str(kb_clone_repo / "kb"))
+        assert self._run(kb_clone_repo) == 0
+        assert "did not run" not in capsys.readouterr().out
+
+    def test_broken_kb_head_fails_open_loudly(self, kb_clone_repo: Path, capsys):
+        """rev-parse failing for any reason other than an unborn HEAD is a
+        broken kb, not an empty one — silently skipping would hide a
+        degraded gate."""
+        self._setup(kb_clone_repo, plan=self._plan("specs/hot.md"))
+        # A gitfile naming a missing gitdir is definitively broken (exit 128);
+        # corrupting HEAD instead would let git discovery escape to the parent.
+        shutil.rmtree(kb_clone_repo / "kb" / ".git")
+        (kb_clone_repo / "kb" / ".git").write_text("gitdir: /nonexistent/kb-git\n")
+        assert self._run(kb_clone_repo) == 0
+        out = capsys.readouterr().out
+        assert "Spec-approval gate did not run" in out
+        assert "NOT checked" in out
 
     def test_git_failure_fails_open_loudly(self, kb_clone_repo: Path, capsys):
         """A broken kb must not read as 'every spec unresolved' and block.

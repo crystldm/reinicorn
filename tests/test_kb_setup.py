@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from reinicorn.git import run_git
+from reinicorn.git import GitError, run_git
 from reinicorn.kb_setup import (
     KbSetupError,
     cleanup_failed_kb,
@@ -81,6 +81,21 @@ def test_setup_kb_clone_with_seeded_remote(parent_repo: Path, seeded_bare: Path)
     assert result is True
     assert (parent_repo / "kb").is_dir()
     assert (parent_repo / "kb" / ".git").is_dir()
+
+
+def test_setup_kb_clone_seed_failure_raises_setup_error(
+    parent_repo: Path, empty_bare: Path, monkeypatch
+):
+    """A git failure while seeding surfaces as KbSetupError — callers catch
+    that, not GitError, so an unconverted failure is a raw traceback."""
+    def boom(url: str, repo_slug: str) -> None:
+        raise GitError(1, ["git", "push"], "", "remote hung up")
+
+    monkeypatch.setattr("reinicorn.kb_setup.seed_remote", boom)
+    with pytest.raises(KbSetupError) as exc:
+        setup_kb_clone(parent_repo, str(empty_bare), repo_slug="test-project")
+    assert "seed the empty kb remote" in str(exc.value)
+    assert "remote hung up" in str(exc.value)
 
 
 def test_setup_kb_clone_with_empty_remote_seeds_first(parent_repo: Path, empty_bare: Path):

@@ -26,8 +26,7 @@ def _configure_existing_kb(repo: Path) -> None:
     """Mark a repository as a genuine teammate clone: a populated kb clone
     plus the committed manifest that init writes when it lays down assets."""
     kb_dir = repo / "kb"
-    kb_dir.mkdir()
-    (kb_dir / ".git").write_text("gitdir: ../.git/modules/kb\n")
+    _init_repo(kb_dir)
     (kb_dir / "README.md").write_text("# Existing kb\n")
     manifest = repo / ".reinicorn" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)

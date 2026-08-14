@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from reinicorn.config import KB_DIR_NAME, kb_scope
-from reinicorn.git import run_git
+from reinicorn.git import explain_failure, run_git
 from reinicorn.kb import branch_doc_path, get_kb_dir
 from reinicorn.linter.spec_refs import (
     SPEC_DIR_NAME,
@@ -66,8 +66,14 @@ def ensure_plan_spec_approved(root: Path, branches: list[str]) -> int:
         head = run_git(
             "rev-parse", "--verify", "-q", "HEAD", check=False, cwd=kb_dir,
         )
+        if head.returncode == 1:
+            return 0  # unborn HEAD: an empty kb clone has nothing to gate on
         if head.returncode != 0:
-            return 0  # empty kb clone: nothing committed to gate on
+            # Any other failure is a broken kb, not an empty one — route it
+            # through the loud fail-open handler below.
+            raise RuntimeError(
+                "\n".join(explain_failure("resolve the kb clone's HEAD", head))
+            )
         rev = head.stdout.strip()
         tracked = tracked_paths_at(kb_dir, rev)
 

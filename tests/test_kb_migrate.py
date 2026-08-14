@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from reinicorn.git import run_git
@@ -40,6 +41,44 @@ def test_migration_refuses_unpushed_kb_commits(submodule_repo: Path) -> None:
     run_git("commit", "-q", "-m", "local only", cwd=kb)
     assert migrate_submodule_to_clone(submodule_repo) is False
     assert detect_submodule_layout(submodule_repo) is True
+
+
+def test_migration_refuses_when_safety_fetch_fails(
+    submodule_repo: Path, capsys
+) -> None:
+    """A stale cached origin/main must not vouch for publication when the
+    remote is unreachable — refusing beats deleting kb/ on cached evidence."""
+    kb = submodule_repo / "kb"
+    run_git(
+        "remote", "set-url", "origin",
+        str(submodule_repo.parent / "missing-remote"), cwd=kb,
+    )
+    assert migrate_submodule_to_clone(submodule_repo) is False
+    # Nothing destructive ran: still a submodule, worktree intact.
+    assert detect_submodule_layout(submodule_repo) is True
+    assert (kb / "README.md").exists()
+    captured = capsys.readouterr()
+    assert "cannot be verified" in captured.out + captured.err
+
+
+def test_migration_reads_url_from_gitmodules_when_kb_uninitialized(
+    submodule_repo: Path,
+) -> None:
+    """A parent cloned without submodule init has no kb/.git to inherit a
+    URL from, and legacy repos predate REINICORN_KB_REMOTE — the URL lives
+    only in .gitmodules, so migration must read it before deleting that
+    file."""
+    shutil.rmtree(submodule_repo / "kb")
+    (submodule_repo / "kb").mkdir()  # uninitialized submodules leave an empty dir
+    shutil.rmtree(submodule_repo / ".git" / "modules" / "kb")
+    run_git(
+        "config", "--remove-section", "submodule.kb",
+        check=False, cwd=submodule_repo,
+    )
+
+    assert migrate_submodule_to_clone(submodule_repo) is True
+    assert (submodule_repo / "kb" / ".git").is_dir()  # plain clone now
+    assert configured_kb_remote_url(submodule_repo) != ""
 
 
 def test_migration_converts_clean_repo(submodule_repo: Path) -> None:

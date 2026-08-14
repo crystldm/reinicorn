@@ -26,8 +26,7 @@ def test_init_path_classifies_platform_handling_paths(tmp_path: Path):
     assert _init_path(tmp_path) == "full"
 
     kb_dir = tmp_path / "kb"
-    kb_dir.mkdir()
-    (kb_dir / ".git").write_text("gitdir: ../.git/modules/kb\n")
+    _init_repo(kb_dir)
     assert _init_path(tmp_path) == "assets_only"
 
     manifest = tmp_path / ".reinicorn" / "manifest.json"
@@ -220,8 +219,7 @@ def test_init_platforms_raw_ignored_on_hooks_only_teammate_clone(
     repo = tmp_path / "teammate-repo"
     _init_repo(repo)
     kb_dir = repo / "kb"
-    kb_dir.mkdir()
-    (kb_dir / ".git").write_text("gitdir: ../.git/modules/kb\n")
+    _init_repo(kb_dir)
     (kb_dir / "README.md").write_text("# Existing kb\n")
     manifest = repo / ".reinicorn" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
