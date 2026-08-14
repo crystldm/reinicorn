@@ -1,7 +1,7 @@
 """Review-lane policy gate: refuse a push that builds on an unapproved spec.
 
-Kept separate from `pre_push.py`, which owns the hook protocol and kb-submodule
-synchronization. This module knows only about policy: given a repo and the
+Kept separate from `pre_push.py`, which owns the hook protocol and kb
+publication. This module knows only about policy: given a repo and the
 branches being pushed, decide whether the review lane was respected.
 """
 
@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from reinicorn.config import KB_DIR_NAME, kb_scope
-from reinicorn.kb import branch_doc_path, get_kb_dir, kb_gitlink
+from reinicorn.git import run_git
+from reinicorn.kb import branch_doc_path, get_kb_dir
 from reinicorn.linter.spec_refs import (
     SPEC_DIR_NAME,
     declared_spec,
@@ -27,17 +28,18 @@ from reinicorn.mode import get_mode
 def ensure_plan_spec_approved(root: Path, branches: list[str]) -> int:
     """Block the push when any pushed branch's plan builds on an unapproved spec.
 
-    Everything here is read from the kb commit each pushed branch pins
-    (``<branch>:kb``) — never from the kb index or worktree. What a reviewer
-    checks out is that pinned commit, so a staged-but-uncommitted spec, an
-    uncommitted status edit, or a kb commit the branch never pointed at must
-    not satisfy the gate.
+    Everything here is read from the kb clone's committed HEAD — always
+    `main`, since `_ensure_kb_pushed` just published it — never from the kb
+    index or worktree. What a reviewer checks out is that committed HEAD, so
+    a staged-but-uncommitted spec or an uncommitted status edit must not
+    satisfy the gate.
 
     Fails *open*, unlike `_ensure_kb_pushed`. That asymmetry is deliberate: the
-    kb-pointer check guards data integrity, where a dangling pointer breaks every
-    downstream checkout, so it must fail closed. This one guards a process norm,
-    and a parse hiccup that silently bricks every push in the repo is worse than
-    a missed policy warning.
+    kb-push check guards data integrity — an unpublished kb commit leaves
+    reviewers and CI unable to read the docs a push references — so it must
+    fail closed. This one guards a process norm, and a parse hiccup that
+    silently bricks every push in the repo is worse than a missed policy
+    warning.
 
     Fail-open is loud, though. A gate that degrades silently is indistinguishable
     from one that was never wired up, which is exactly how the `reins`-era hooks
@@ -61,17 +63,19 @@ def ensure_plan_spec_approved(root: Path, branches: list[str]) -> int:
 
         scope = kb_scope(root)
 
+        head = run_git(
+            "rev-parse", "--verify", "-q", "HEAD", check=False, cwd=kb_dir,
+        )
+        if head.returncode != 0:
+            return 0  # empty kb clone: nothing committed to gate on
+        rev = head.stdout.strip()
+        tracked = tracked_paths_at(kb_dir, rev)
+
         for branch in branches:
             if not branch:
-                # A bare '' would make rev-parse read ':kb' — the index, the
-                # exact desk state this gate must not consult.
-                continue
-            rev = kb_gitlink(root, branch)
-            if rev is None:
                 continue
             # A relative base yields the kb-relative path for tree lookup.
             plan_rel = branch_doc_path("plan", Path(scope), branch).as_posix()
-            tracked = tracked_paths_at(kb_dir, rev)
             if plan_rel not in tracked:
                 continue
             plan_path = f"{KB_DIR_NAME}/{plan_rel}"
@@ -121,9 +125,8 @@ def _check_plan(
         return _block(
             plan_path,
             f"'spec: {value}' matches no path in the kb commit this "
-            "branch pins",
-            "Fix the path, or commit the doc to the kb and update the "
-            "branch's kb pointer.",
+            "push publishes",
+            "Fix the path, or commit the doc to the kb before pushing.",
         )
 
     if not is_spec_path(res.path):

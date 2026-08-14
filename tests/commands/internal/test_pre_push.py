@@ -1,4 +1,4 @@
-"""Tests for rcorn _pre-push — kb submodule sync and the review-lane gate."""
+"""Tests for rcorn _pre-push — kb publication and the review-lane gate."""
 
 from __future__ import annotations
 
@@ -16,78 +16,55 @@ class TestEnsureKbPushed:
     """Tests for synchronous kb push before parent push."""
 
     def test_no_kb_dir_returns_zero(self, tmp_path: Path):
-        """No kb submodule → nothing to do."""
+        """No kb → nothing to do."""
         with patch(
             "reinicorn.commands.internal.pre_push.get_kb_dir", return_value=None
         ):
-            assert _ensure_kb_pushed(tmp_path, ["HEAD"]) == 0
+            assert _ensure_kb_pushed(tmp_path) == 0
 
-    def test_disabled_mode_skips(self, submodule_repo: Path):
+    def test_disabled_mode_skips(self, kb_clone_repo: Path):
         """Disabled mode → skip kb push check."""
-        state_dir = submodule_repo / ".reinicorn"
+        state_dir = kb_clone_repo / ".reinicorn"
         state_dir.mkdir()
         (state_dir / "mode").write_text("disabled")
-        assert _ensure_kb_pushed(submodule_repo, ["HEAD"]) == 0
+        assert _ensure_kb_pushed(kb_clone_repo) == 0
 
-    def test_incognito_mode_skips(self, submodule_repo: Path):
+    def test_incognito_mode_skips(self, kb_clone_repo: Path):
         """Incognito mode → skip kb push check."""
-        state_dir = submodule_repo / ".reinicorn"
+        state_dir = kb_clone_repo / ".reinicorn"
         state_dir.mkdir()
         (state_dir / "mode").write_text("incognito")
-        assert _ensure_kb_pushed(submodule_repo, ["HEAD"]) == 0
+        assert _ensure_kb_pushed(kb_clone_repo) == 0
 
-    def test_already_pushed_returns_zero(self, submodule_repo: Path):
-        """Kb pointer already on remote → returns 0, no push attempted."""
-        # submodule_repo starts with kb in sync with remote
-        assert _ensure_kb_pushed(submodule_repo, ["HEAD"]) == 0
+    def test_pre_push_noop_when_kb_current(self, kb_clone_repo: Path):
+        """Kb main already matches origin/main → returns 0, no push attempted."""
+        assert _ensure_kb_pushed(kb_clone_repo) == 0
 
-    def test_no_branches_returns_zero(self, submodule_repo: Path):
-        """Nothing pushed (tags only) or an unnamed subject → nothing pinned."""
-        assert _ensure_kb_pushed(submodule_repo, []) == 0
-        assert _ensure_kb_pushed(submodule_repo, [""]) == 0
-
-    def test_unpushed_kb_auto_pushes(self, submodule_repo: Path):
-        """Kb has unpushed commits → auto-push succeeds, returns 0."""
-        kb = submodule_repo / "kb"
-
-        # Make a new commit in the kb (unpushed)
-        (kb / "new-file.md").write_text("new content\n")
+    def test_pre_push_pushes_ahead_kb(self, kb_clone_repo: Path, monkeypatch):
+        """Local kb main ahead of origin/main gets pushed before the parent push."""
+        kb = kb_clone_repo / "kb"
+        (kb / "doc.md").write_text("x\n")
         run_git("add", "-A", cwd=kb)
-        run_git("commit", "-q", "-m", "new kb content", cwd=kb)
+        run_git("commit", "-q", "-m", "local doc", cwd=kb)
+        monkeypatch.chdir(kb_clone_repo)
 
-        # Update parent's submodule pointer to reference the new commit
-        run_git("add", "kb", cwd=submodule_repo)
-        run_git("commit", "-q", "-m", "update kb pointer", cwd=submodule_repo)
+        assert _ensure_kb_pushed(kb_clone_repo) == 0
+        r = run_git("rev-list", "--count", "origin/main..main", cwd=kb)
+        assert r.stdout.strip() == "0"  # nothing left unpublished
 
-        # The kb commit is NOT on the remote yet
-        local_sha = run_git("rev-parse", "HEAD", cwd=kb).stdout.strip()
-        remote_sha = run_git("rev-parse", "origin/main", cwd=kb).stdout.strip()
-        assert local_sha != remote_sha, "precondition: kb should be ahead of remote"
-
-        # _ensure_kb_pushed should auto-push and return 0
-        result = _ensure_kb_pushed(submodule_repo, ["HEAD"])
-        assert result == 0
-
-        # Verify the commit is now on the remote
-        run_git("fetch", "origin", cwd=kb)
-        remote_sha_after = run_git("rev-parse", "origin/main", cwd=kb).stdout.strip()
-        assert remote_sha_after == local_sha
-
-    def test_push_failure_blocks_with_error(self, submodule_repo: Path, capsys):
+    def test_push_failure_blocks_with_error(self, kb_clone_repo: Path, capsys):
         """Kb push fails → returns 1 with error message."""
-        kb = submodule_repo / "kb"
+        kb = kb_clone_repo / "kb"
 
         # Make an unpushed commit
         (kb / "new-file.md").write_text("content\n")
         run_git("add", "-A", cwd=kb)
         run_git("commit", "-q", "-m", "unpushed", cwd=kb)
-        run_git("add", "kb", cwd=submodule_repo)
-        run_git("commit", "-q", "-m", "update pointer", cwd=submodule_repo)
 
         # Make the push fail by pointing origin to a nonexistent path
         run_git("remote", "set-url", "origin", "/nonexistent/path", cwd=kb)
 
-        result = _ensure_kb_pushed(submodule_repo, ["HEAD"])
+        result = _ensure_kb_pushed(kb_clone_repo)
         assert result == 1
 
         captured = capsys.readouterr()
@@ -98,10 +75,10 @@ class TestEnsureKbPushed:
         assert "/nonexistent/path" in captured.out
         assert "rcorn kb publish" in captured.out
 
-    def test_no_git_dir_in_kb_skips(self, submodule_repo: Path):
-        """Kb exists but no .git → skip (not a real submodule)."""
-        kb = submodule_repo / "kb"
-        # Remove .git to simulate a non-submodule kb dir
+    def test_no_git_dir_in_kb_skips(self, kb_clone_repo: Path):
+        """Kb exists but no .git → skip (not a real kb clone)."""
+        kb = kb_clone_repo / "kb"
+        # Remove .git to simulate a non-kb directory
         git_path = kb / ".git"
         if git_path.is_file():
             git_path.unlink()
@@ -109,47 +86,7 @@ class TestEnsureKbPushed:
             import shutil
             shutil.rmtree(git_path)
 
-        assert _ensure_kb_pushed(submodule_repo, ["HEAD"]) == 0
-
-    def test_checks_the_pushed_branch_pointer_not_heads(self, submodule_repo: Path):
-        """`git push origin other-branch` must verify *that* branch's pointer.
-
-        The kb commit pinned by a branch that is not checked out is exactly as
-        capable of dangling as HEAD's — anchoring on HEAD would let it through.
-        """
-        kb = submodule_repo / "kb"
-        run_git("checkout", "-q", "-b", "feat/other", cwd=submodule_repo)
-        (kb / "new-file.md").write_text("new content\n")
-        run_git("add", "-A", cwd=kb)
-        run_git("commit", "-q", "-m", "new kb content", cwd=kb)
-        run_git("add", "kb", cwd=submodule_repo)
-        run_git("commit", "-q", "-m", "pin kb", cwd=submodule_repo)
-        pinned = run_git("rev-parse", "HEAD", cwd=kb).stdout.strip()
-
-        # Back on main, whose (already-pushed) pointer would satisfy a
-        # HEAD-anchored check.
-        run_git("checkout", "-q", "main", cwd=submodule_repo)
-
-        assert _ensure_kb_pushed(submodule_repo, ["feat/other"]) == 0
-        run_git("fetch", "origin", cwd=kb)
-        remote = run_git("rev-parse", "origin/main", cwd=kb).stdout.strip()
-        assert remote == pinned
-
-    def test_pinned_commit_not_on_kb_main_blocks(self, submodule_repo: Path, capsys):
-        """A branch pinning a kb commit off kb main cannot be made safe by
-        pushing kb main — the pointer would dangle, so the push must stop."""
-        kb = submodule_repo / "kb"
-        run_git("checkout", "-q", "-b", "side", cwd=kb)
-        (kb / "orphan.md").write_text("stranded\n")
-        run_git("add", "-A", cwd=kb)
-        run_git("commit", "-q", "-m", "orphaned kb commit", cwd=kb)
-        run_git("add", "kb", cwd=submodule_repo)
-        run_git("commit", "-q", "-m", "pin orphan", cwd=submodule_repo)
-        run_git("checkout", "-q", "main", cwd=kb)
-
-        assert _ensure_kb_pushed(submodule_repo, ["HEAD"]) == 1
-        out = capsys.readouterr().out
-        assert "not on the kb's main" in out
+        assert _ensure_kb_pushed(kb_clone_repo) == 0
 
 
 def test_cmd_pre_push_fails_closed_on_unexpected_error(capsys):
@@ -237,7 +174,7 @@ class TestEnsurePlanSpecApproved:
         self, repo: Path, branch: str = "feat/thing", *,
         plan: str | None = None, spec: tuple[str, str] | None = None,
     ) -> None:
-        """Put the parent on `branch` with an optional plan + spec pinned in it."""
+        """Put the parent on `branch` with an optional plan + spec committed to the kb."""
         run_git("checkout", "-q", "-b", branch, cwd=repo)
         kb = repo / "kb"
 
@@ -255,21 +192,18 @@ class TestEnsurePlanSpecApproved:
             pdir.mkdir(parents=True, exist_ok=True)
             (pdir / "plan.md").write_text(plan)
 
-        self._pin(repo)
+        self._commit_kb(kb)
 
     @staticmethod
-    def _pin(repo: Path) -> None:
-        """Commit the kb state and record its pointer on the current branch.
+    def _commit_kb(kb: Path) -> None:
+        """Commit whatever is dirty in the kb clone.
 
-        The gate reads the kb commit the branch pins, so a doc only exists for
-        it once committed to the kb AND recorded in the parent's tree. Both
-        commits tolerate emptiness so setups that add nothing still work.
+        The gate reads the kb clone's committed HEAD, so a doc only exists
+        for it once committed here — there is no parent-side pointer to bump
+        anymore. Tolerates emptiness so setups that add nothing still work.
         """
-        kb = repo / "kb"
         run_git("add", "-A", cwd=kb)
         run_git("commit", "-q", "-m", "kb docs", cwd=kb, check=False)
-        run_git("add", "kb", cwd=repo)
-        run_git("commit", "-q", "-m", "pin kb", cwd=repo, check=False)
 
     @staticmethod
     def _plan(spec_value: str, branch: str = "feat/thing") -> str:
@@ -293,167 +227,156 @@ class TestEnsurePlanSpecApproved:
         ):
             assert ensure_plan_spec_approved(tmp_path, ["feat/thing"]) == 0
 
-    def test_no_plan_for_branch_allows(self, submodule_repo: Path):
-        self._setup(submodule_repo)
-        assert self._run(submodule_repo) == 0
+    def test_no_plan_for_branch_allows(self, kb_clone_repo: Path):
+        self._setup(kb_clone_repo)
+        assert self._run(kb_clone_repo) == 0
 
-    def test_not_applicable_allows(self, submodule_repo: Path):
-        self._setup(submodule_repo, plan=self._plan("N/A"))
-        assert self._run(submodule_repo) == 0
+    def test_not_applicable_allows(self, kb_clone_repo: Path):
+        self._setup(kb_clone_repo, plan=self._plan("N/A"))
+        assert self._run(kb_clone_repo) == 0
 
-    def test_approved_spec_allows(self, submodule_repo: Path):
+    def test_approved_spec_allows(self, kb_clone_repo: Path):
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("specs/ok.md"),
             spec=("specs/ok.md", "approved"),
         )
-        assert self._run(submodule_repo) == 0
+        assert self._run(kb_clone_repo) == 0
 
-    def test_non_spec_doc_blocks(self, submodule_repo: Path, capsys):
+    def test_non_spec_doc_blocks(self, kb_clone_repo: Path, capsys):
         """A tracked doc outside specs/ must not satisfy the field.
 
         It resolves, and carries no review status for `unapproved_reason` to
         object to, so without a doc-type check it would pass the gate.
         """
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("references/git-notes.md"),
             spec=("references/git-notes.md", "n/a"),
         )
-        assert self._run(submodule_repo) == 1
+        assert self._run(kb_clone_repo) == 1
         assert "is not a spec" in capsys.readouterr().out
 
-    def test_in_review_spec_blocks(self, submodule_repo: Path, capsys):
+    def test_in_review_spec_blocks(self, kb_clone_repo: Path, capsys):
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("specs/hot.md"),
             spec=("specs/hot.md", "in-review"),
         )
-        assert self._run(submodule_repo) == 1
+        assert self._run(kb_clone_repo) == 1
         out = capsys.readouterr().out
         assert "Push blocked" in out
         assert "specs/hot.md" in out
         assert "rcorn review status hot" in out
         assert "--no-verify" in out
 
-    def test_draft_spec_blocks(self, submodule_repo: Path, capsys):
+    def test_draft_spec_blocks(self, kb_clone_repo: Path, capsys):
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("specs/drafts/wip.md"),
             spec=("specs/drafts/wip.md", "draft"),
         )
-        assert self._run(submodule_repo) == 1
+        assert self._run(kb_clone_repo) == 1
         assert "drafts" in capsys.readouterr().out
 
     def test_drafts_fallback_blocks_on_future_approved_path(
-        self, submodule_repo: Path, capsys
+        self, kb_clone_repo: Path, capsys
     ):
         """Citing the path the spec *will* have while it is still a draft."""
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("specs/wip.md"),
             spec=("specs/drafts/wip.md", "in-review"),
         )
-        assert self._run(submodule_repo) == 1
+        assert self._run(kb_clone_repo) == 1
         assert "specs/drafts/wip.md" in capsys.readouterr().out
 
-    def test_missing_spec_field_blocks(self, submodule_repo: Path, capsys):
+    def test_missing_spec_field_blocks(self, kb_clone_repo: Path, capsys):
         """Omitting the field must not be a way to dodge the gate."""
-        self._setup(submodule_repo, plan="# Plan\n\n## Goal\n\nx\n")
-        assert self._run(submodule_repo) == 1
+        self._setup(kb_clone_repo, plan="# Plan\n\n## Goal\n\nx\n")
+        assert self._run(kb_clone_repo) == 1
         assert "missing or still the template placeholder" in capsys.readouterr().out
 
-    def test_placeholder_spec_field_blocks(self, submodule_repo: Path):
+    def test_placeholder_spec_field_blocks(self, kb_clone_repo: Path):
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("[kb path to the spec this implements, or N/A]"),
         )
-        assert self._run(submodule_repo) == 1
+        assert self._run(kb_clone_repo) == 1
 
-    def test_unresolved_spec_blocks(self, submodule_repo: Path, capsys):
+    def test_unresolved_spec_blocks(self, kb_clone_repo: Path, capsys):
         """Cannot determine approval is an error state, not a pass."""
-        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
-        assert self._run(submodule_repo) == 1
+        self._setup(kb_clone_repo, plan=self._plan("specs/typo.md"))
+        assert self._run(kb_clone_repo) == 1
         assert "matches no path in the kb commit" in capsys.readouterr().out
 
-    def test_staged_but_uncommitted_spec_blocks(self, submodule_repo: Path):
+    def test_staged_but_uncommitted_spec_blocks(self, kb_clone_repo: Path):
         """The index is desk state, not what ships.
 
-        A spec staged in the kb but absent from the commit the branch pins is
-        invisible to whoever checks the branch out — resolving against
-        `ls-files` would let it satisfy the gate anyway.
+        A spec staged in the kb but absent from its committed HEAD is
+        invisible to whoever checks the kb clone out at that HEAD — resolving
+        against `ls-files` would let it satisfy the gate anyway.
         """
-        self._setup(submodule_repo, plan=self._plan("specs/ghost.md"))
-        ghost = submodule_repo / "kb" / self.SCOPE / "specs" / "ghost.md"
+        self._setup(kb_clone_repo, plan=self._plan("specs/ghost.md"))
+        ghost = kb_clone_repo / "kb" / self.SCOPE / "specs" / "ghost.md"
         ghost.parent.mkdir(parents=True, exist_ok=True)
         ghost.write_text(doc_text(title="Ghost", slug="ghost", status="approved"))
-        run_git("add", "-A", cwd=submodule_repo / "kb")  # staged, never committed
-        assert self._run(submodule_repo) == 1
-
-    def test_spec_committed_but_pointer_not_bumped_blocks(self, submodule_repo: Path):
-        """A kb commit the branch never pinned does not ship with it."""
-        self._setup(submodule_repo, plan=self._plan("specs/late.md"))
-        kb = submodule_repo / "kb"
-        late = kb / self.SCOPE / "specs" / "late.md"
-        late.parent.mkdir(parents=True, exist_ok=True)
-        late.write_text(doc_text(title="Late", slug="late", status="approved"))
-        run_git("add", "-A", cwd=kb)
-        run_git("commit", "-q", "-m", "late spec", cwd=kb)  # pointer stays put
-        assert self._run(submodule_repo) == 1
+        run_git("add", "-A", cwd=kb_clone_repo / "kb")  # staged, never committed
+        assert self._run(kb_clone_repo) == 1
 
     def test_worktree_status_edit_does_not_launder_a_draft(
-        self, submodule_repo: Path, capsys
+        self, kb_clone_repo: Path, capsys
     ):
         """Editing the status on disk without committing must change nothing."""
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("specs/hot.md"),
             spec=("specs/hot.md", "in-review"),
         )
-        doctored = submodule_repo / "kb" / self.SCOPE / "specs" / "hot.md"
+        doctored = kb_clone_repo / "kb" / self.SCOPE / "specs" / "hot.md"
         doctored.write_text(doc_text(title="Doc", slug="doc", status="approved"))
-        assert self._run(submodule_repo) == 1
+        assert self._run(kb_clone_repo) == 1
         assert "in-review" in capsys.readouterr().out
 
-    def test_ambiguous_spec_blocks(self, submodule_repo: Path, capsys):
+    def test_ambiguous_spec_blocks(self, kb_clone_repo: Path, capsys):
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("specs/dup.md"),
             spec=("specs/dup.md", "approved"),
         )
-        top = submodule_repo / "kb" / "specs"
+        top = kb_clone_repo / "kb" / "specs"
         top.mkdir(parents=True, exist_ok=True)
         (top / "dup.md").write_text(doc_text(title="Other", slug="other", status="approved"))
-        self._pin(submodule_repo)
-        assert self._run(submodule_repo) == 1
+        self._commit_kb(kb_clone_repo / "kb")
+        assert self._run(kb_clone_repo) == 1
         assert "ambiguous" in capsys.readouterr().out
 
-    def test_disabled_mode_skips(self, submodule_repo: Path):
-        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
-        state = submodule_repo / ".reinicorn"
+    def test_disabled_mode_skips(self, kb_clone_repo: Path):
+        self._setup(kb_clone_repo, plan=self._plan("specs/typo.md"))
+        state = kb_clone_repo / ".reinicorn"
         state.mkdir(exist_ok=True)
         (state / "mode").write_text("disabled")
-        assert self._run(submodule_repo) == 0
+        assert self._run(kb_clone_repo) == 0
 
-    def test_incognito_mode_skips(self, submodule_repo: Path):
-        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
-        state = submodule_repo / ".reinicorn"
+    def test_incognito_mode_skips(self, kb_clone_repo: Path):
+        self._setup(kb_clone_repo, plan=self._plan("specs/typo.md"))
+        state = kb_clone_repo / ".reinicorn"
         state.mkdir(exist_ok=True)
         (state / "mode").write_text("incognito")
-        assert self._run(submodule_repo) == 0
+        assert self._run(kb_clone_repo) == 0
 
-    def test_exception_fails_open_and_says_so(self, submodule_repo: Path, capsys):
+    def test_exception_fails_open_and_says_so(self, kb_clone_repo: Path, capsys):
         """Unlike _ensure_kb_pushed, a policy gate must not brick every push.
 
         But it must be loud — a silently degraded gate is indistinguishable from
         one that was never wired up.
         """
-        self._setup(submodule_repo, plan=self._plan("specs/hot.md"))
+        self._setup(kb_clone_repo, plan=self._plan("specs/hot.md"))
         with patch(
             "reinicorn.commands.internal.spec_gate.tracked_paths_at",
             side_effect=RuntimeError("boom"),
         ):
-            assert self._run(submodule_repo) == 0
+            assert self._run(kb_clone_repo) == 0
         out = capsys.readouterr().out
         assert "Spec-approval gate did not run" in out
         assert "boom" in out
@@ -461,7 +384,7 @@ class TestEnsurePlanSpecApproved:
         assert "NOT checked" in out
 
     def test_checks_the_pushed_branch_not_the_checked_out_one(
-        self, submodule_repo: Path, capsys
+        self, kb_clone_repo: Path, capsys
     ):
         """`git push origin other-branch` must check *that* branch's plan.
 
@@ -469,42 +392,42 @@ class TestEnsurePlanSpecApproved:
         that is not checked out — an ordinary workflow, not a workaround.
         """
         self._setup(
-            submodule_repo, "feat/other",
+            kb_clone_repo, "feat/other",
             plan=self._plan("specs/hot.md", branch="feat/other"),
             spec=("specs/hot.md", "in-review"),
         )
-        run_git("checkout", "-q", "main", cwd=submodule_repo)
-        assert self._run(submodule_repo, ["feat/other"]) == 1
+        run_git("checkout", "-q", "main", cwd=kb_clone_repo)
+        assert self._run(kb_clone_repo, ["feat/other"]) == 1
         assert "specs/hot.md" in capsys.readouterr().out
 
     def test_multi_ref_push_blocks_on_any_offending_branch(
-        self, submodule_repo: Path, capsys
+        self, kb_clone_repo: Path, capsys
     ):
         self._setup(
-            submodule_repo, "feat/clean",
+            kb_clone_repo, "feat/clean",
             plan=self._plan("N/A", branch="feat/clean"),
         )
         self._setup(
-            submodule_repo, "feat/dirty",
+            kb_clone_repo, "feat/dirty",
             plan=self._plan("specs/wip.md", branch="feat/dirty"),
             spec=("specs/drafts/wip.md", "draft"),
         )
-        assert self._run(submodule_repo, ["feat/clean", "feat/dirty"]) == 1
+        assert self._run(kb_clone_repo, ["feat/clean", "feat/dirty"]) == 1
         assert "feat-dirty" in capsys.readouterr().out
 
-    def test_no_branches_allows(self, submodule_repo: Path):
+    def test_no_branches_allows(self, kb_clone_repo: Path):
         """A push with no branch refs (tags only) has no plan to check."""
-        self._setup(submodule_repo, plan=self._plan("specs/typo.md"))
-        assert self._run(submodule_repo, []) == 0
+        self._setup(kb_clone_repo, plan=self._plan("specs/typo.md"))
+        assert self._run(kb_clone_repo, []) == 0
 
-    def test_git_failure_fails_open_loudly(self, submodule_repo: Path, capsys):
+    def test_git_failure_fails_open_loudly(self, kb_clone_repo: Path, capsys):
         """A broken kb must not read as 'every spec unresolved' and block.
 
         tracked_paths raising is what routes this to the loud fail-open path
         instead of a misleading 'matches no git-tracked kb path' block.
         """
         self._setup(
-            submodule_repo,
+            kb_clone_repo,
             plan=self._plan("specs/ok.md"),
             spec=("specs/ok.md", "approved"),
         )
@@ -512,7 +435,7 @@ class TestEnsurePlanSpecApproved:
             "reinicorn.commands.internal.spec_gate.tracked_paths_at",
             side_effect=RuntimeError("git ls-tree failed"),
         ):
-            assert self._run(submodule_repo) == 0
+            assert self._run(kb_clone_repo) == 0
         out = capsys.readouterr().out
         assert "did not run" in out
         assert "NOT checked" in out
@@ -600,7 +523,7 @@ class TestPushedBranchSelection:
         # Called as repo_root(quiet=True), so accept the keyword.
         monkeypatch.setattr(pre_push, "repo_root", lambda **_: Path("/repo"))
         monkeypatch.setattr(
-            pre_push, "_ensure_kb_pushed", lambda _root, _branches: 0
+            pre_push, "_ensure_kb_pushed", lambda _root: 0
         )
         monkeypatch.setattr(
             pre_push, "ensure_plan_spec_approved",
