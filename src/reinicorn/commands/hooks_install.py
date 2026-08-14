@@ -280,28 +280,46 @@ def _merge_claude_settings(
         for script, _ in _EDITOR_HOOK_SCRIPTS
     }
 
-    def _is_stale(entry: object) -> bool:
-        if not isinstance(entry, dict):
-            return False
-        entry_hooks = entry.get("hooks")
+    repaired = 0
+    kept_entries = []
+    for entry in pre_tool:
+        entry_hooks = entry.get("hooks") if isinstance(entry, dict) else None
         if not isinstance(entry_hooks, list):
-            return False
-        return any(
-            isinstance(h, dict) and h.get("command") in stale_commands
-            for h in entry_hooks
-        )
+            kept_entries.append(entry)
+            continue
+        fresh = [
+            h for h in entry_hooks
+            if not (isinstance(h, dict) and h.get("command") in stale_commands)
+        ]
+        if len(fresh) != len(entry_hooks):
+            repaired += 1
+            if fresh:
+                entry["hooks"] = fresh
+                kept_entries.append(entry)
+            # an entry whose every command was stale is dropped entirely
+        else:
+            kept_entries.append(entry)
+    pre_tool[:] = kept_entries
 
-    repaired = sum(1 for e in pre_tool if _is_stale(e))
-    if repaired:
-        pre_tool[:] = [e for e in pre_tool if not _is_stale(e)]
+    # Add hooks that aren't already present, matched by command identity — a
+    # user entry sharing a matcher must not suppress the managed command.
+    # Quoting styles vary ("$CLAUDE_PROJECT_DIR"/x vs "${CLAUDE_PROJECT_DIR}/x")
+    # yet name the same hook, so compare with quotes and braces stripped.
+    def _command_key(command: object) -> object:
+        if not isinstance(command, str):
+            return command
+        return command.replace('"', "").replace("${", "$").replace("}", "")
 
-    # Add entries that aren't already present (match by matcher)
-    # NOTE: dedup is by matcher only — a future third script reusing an existing
-    # matcher would be dropped; extend dedup (e.g. by command) if that ever happens.
-    existing_matchers = {e.get("matcher") for e in pre_tool if isinstance(e, dict)}
+    existing_commands = {
+        _command_key(h.get("command"))
+        for e in pre_tool
+        if isinstance(e, dict) and isinstance(e.get("hooks"), list)
+        for h in e["hooks"]
+        if isinstance(h, dict)
+    }
     added = 0
     for entry in hook_entries:
-        if entry.get("matcher") not in existing_matchers:
+        if _command_key(entry["hooks"][0]["command"]) not in existing_commands:
             pre_tool.append(entry)
             added += 1
 

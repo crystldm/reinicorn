@@ -28,7 +28,8 @@ def test_hooks_install_new(kb_repo: Path, capsys):
     hooks_dest = git_dir / "hooks"
 
     with patch("reinicorn.commands.hooks_install.run_git") as mock_git, \
-         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo):
+         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo), \
+         patch("reinicorn.commands.hooks_install.repo_root", return_value=kb_repo):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=str(git_dir) + "\n"
         )
@@ -57,7 +58,8 @@ def test_hooks_install_idempotent(kb_repo: Path, capsys):
         (hooks_dest / name).write_text(f"#!/usr/bin/env bash\nexisting\n{MARKER}\n# reinicorn\n")
 
     with patch("reinicorn.commands.hooks_install.run_git") as mock_git, \
-         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo):
+         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo), \
+         patch("reinicorn.commands.hooks_install.repo_root", return_value=kb_repo):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=str(git_dir) + "\n"
         )
@@ -82,7 +84,8 @@ def test_hooks_install_idempotent_prints_noop(kb_repo: Path, capsys):
         (hooks_dest / name).write_text(f"#!/usr/bin/env bash\nexisting\n{MARKER}\n# reinicorn\n")
 
     with patch("reinicorn.commands.hooks_install.run_git") as mock_git, \
-         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo):
+         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo), \
+         patch("reinicorn.commands.hooks_install.repo_root", return_value=kb_repo):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=str(git_dir) + "\n"
         )
@@ -100,7 +103,8 @@ def test_hooks_install_missing_sources_is_not_noop(kb_repo: Path, capsys):
     git_dir = kb_repo / ".git"
 
     with patch("reinicorn.commands.hooks_install.run_git") as mock_git, \
-         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo):
+         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo), \
+         patch("reinicorn.commands.hooks_install.repo_root", return_value=kb_repo):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=str(git_dir) + "\n"
         )
@@ -127,7 +131,8 @@ _REINS_HOOK = (
 def _run_install(kb_repo: Path) -> int:
     git_dir = kb_repo / ".git"
     with patch("reinicorn.commands.hooks_install.run_git") as mock_git, \
-         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo):
+         patch("reinicorn.commands.hooks_install.reinicorn_root", return_value=kb_repo), \
+         patch("reinicorn.commands.hooks_install.repo_root", return_value=kb_repo):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=str(git_dir) + "\n"
         )
@@ -372,6 +377,67 @@ def test_merge_claude_settings_keeps_unrelated_user_hooks(tmp_path: Path):
     pre_tool = json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
     assert user_entry in pre_tool
     assert len(pre_tool) == 2
+
+
+def test_merge_claude_settings_keeps_user_command_in_stale_matcher_group(tmp_path: Path):
+    """Only the stale command object is removed from a shared matcher group —
+    a user command living alongside it must survive the repair."""
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({
+        "hooks": {"PreToolUse": [{
+            "matcher": "Bash",
+            "hooks": [
+                {"type": "command", "command": ".reins/hooks/block-raw-kb-git.sh"},
+                {"type": "command", "command": "scripts/my-own-hook.sh"},
+            ],
+        }]},
+    }))
+
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command",
+                   "command": '"$CLAUDE_PROJECT_DIR"/.reinicorn/hooks/block-raw-kb-git.sh'}],
+    }
+    _merge_claude_settings(settings_path, [managed])
+
+    pre_tool = json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
+    commands = [h["command"] for e in pre_tool for h in e["hooks"]]
+    assert "scripts/my-own-hook.sh" in commands
+    assert '"$CLAUDE_PROJECT_DIR"/.reinicorn/hooks/block-raw-kb-git.sh' in commands
+    assert ".reins/hooks/block-raw-kb-git.sh" not in commands
+
+
+def test_merge_claude_settings_same_matcher_user_entry_does_not_suppress_managed_hook(
+    tmp_path: Path,
+):
+    """A user's own entry keeping a matcher alive must not stop the managed
+    replacement from being re-added after a stale entry is repaired."""
+    settings_path = tmp_path / "settings.json"
+    user_entry = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "scripts/my-own-hook.sh"}],
+    }
+    settings_path.write_text(json.dumps({
+        "hooks": {"PreToolUse": [
+            {"matcher": "Bash",
+             "hooks": [{"type": "command",
+                        "command": ".reinicorn/hooks/block-raw-kb-git.sh"}]},
+            user_entry,
+        ]},
+    }))
+
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command",
+                   "command": '"$CLAUDE_PROJECT_DIR"/.reinicorn/hooks/block-raw-kb-git.sh'}],
+    }
+    _merge_claude_settings(settings_path, [managed])
+
+    pre_tool = json.loads(settings_path.read_text())["hooks"]["PreToolUse"]
+    assert user_entry in pre_tool
+    commands = [h["command"] for e in pre_tool for h in e["hooks"]]
+    assert '"$CLAUDE_PROJECT_DIR"/.reinicorn/hooks/block-raw-kb-git.sh' in commands
+    assert ".reinicorn/hooks/block-raw-kb-git.sh" not in commands
 
 
 def test_merge_claude_settings_handles_corrupt_json(tmp_path: Path):
