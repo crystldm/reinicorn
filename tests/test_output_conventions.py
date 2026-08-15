@@ -50,9 +50,19 @@ def test_stderr_confinement_is_ruff_enforced():
     )
     exempt = [
         path for path, rules in lint["per-file-ignores"].items()
-        if "TID251" in rules and "console" in path
+        if "TID251" in rules and path.startswith("src/")
     ]
-    assert exempt == ["src/reinicorn/console.py"], (
-        "console.py must be the one module exempt from the stderr ban "
-        f"(found: {exempt})"
+    assert sorted(exempt) == [
+        "src/reinicorn/console.py",
+        "src/reinicorn/kb.py",
+    ], (
+        "unexpected TID251 exemption in src/ — a new entry would also lift "
+        f"the stderr ban for that module (found: {exempt})"
+    )
+    # kb.py's exemption exists for sanitize_branch, but TID251 is per-rule:
+    # it lifts the stderr ban there too. Ruff can't see that, so pin it here.
+    kb_src = (pyproject.parent / "src" / "reinicorn" / "kb.py").read_text()
+    assert "sys.stderr" not in kb_src and "from sys import stderr" not in kb_src, (
+        "kb.py writes to stderr directly — its TID251 exemption is for "
+        "sanitize_branch only; route output through console.py"
     )
