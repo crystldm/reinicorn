@@ -190,7 +190,7 @@ def _create_typed(doc_type: str, title: str) -> int:
         console.error(f"Unknown doc type '{doc_type}'.")
         return 1
 
-    if REGISTRY[doc_type].title_required and not title.strip():
+    if REGISTRY[doc_type].title_source == "title" and not title.strip():
         console.error("Title is required.")
         return 1
 

@@ -109,3 +109,82 @@ def test_gated_defaults_false():
 def test_drafts_dir_under_type_dir():
     repo_dir = Path("/kb/myrepo")
     assert drafts_dir("spec", repo_dir) == repo_dir / "specs" / DRAFTS_DIR_NAME
+
+
+def test_addressing_values():
+    assert REGISTRY["spec"].addressing == "slug"
+    assert REGISTRY["prd"].addressing == "slug"
+    assert REGISTRY["debt"].addressing == "slug"
+    assert REGISTRY["idea"].addressing == "slug"
+    assert REGISTRY["plan"].addressing == "branch"
+    assert REGISTRY["retro"].addressing == "branch"
+    assert REGISTRY["principle"].addressing == "singleton"
+
+
+def test_title_source_values():
+    assert REGISTRY["idea"].title_source == "free_text"
+    assert REGISTRY["plan"].title_source == "none"
+    assert REGISTRY["retro"].title_source == "none"
+    for key in ("spec", "prd", "debt", "principle"):
+        assert REGISTRY[key].title_source == "title"
+
+
+def test_principle_append_mode():
+    p = REGISTRY["principle"]
+    assert p.create_verb == "add"
+    assert p.create_mode == "append"
+    assert p.create_status == "active"
+
+
+def test_create_status_values():
+    assert REGISTRY["idea"].create_status == "new"
+    assert REGISTRY["plan"].create_status == "planning"
+    for key in ("spec", "prd", "debt", "retro"):
+        assert REGISTRY[key].create_status == "draft"
+
+
+def test_debt_extra_meta():
+    assert dict(REGISTRY["debt"].extra_meta) == {
+        "severity": "medium", "category": "_domain_", "remediation": "planned",
+    }
+    for key in ("spec", "prd", "idea", "plan", "retro", "principle"):
+        assert REGISTRY[key].extra_meta == ()
+
+
+def test_readme_labels():
+    assert REGISTRY["spec"].readme_label == "Approved specs"
+    assert REGISTRY["prd"].readme_label == "Product requirements"
+    assert REGISTRY["plan"].readme_label == "Active plans"
+    assert REGISTRY["debt"].readme_label == "Technical debt"
+    assert REGISTRY["principle"].readme_label == "Golden principles"
+    assert REGISTRY["idea"].readme_label is None
+    assert REGISTRY["retro"].readme_label is None
+
+
+def test_registry_invariant_required_fields_nonempty():
+    for dt in REGISTRY.values():
+        assert dt.help_text, dt.key
+        assert dt.create_verb, dt.key
+        assert dt.create_status, dt.key
+        assert dt.create_hint, dt.key
+
+
+def test_gated_implies_slug_addressing():
+    for dt in gated_types():
+        assert dt.addressing == "slug"
+
+
+def test_registry_rejects_gated_non_slug_row():
+    from unittest.mock import patch
+
+    import pytest
+
+    from reinicorn.doc_types import _validate_registry
+    bad = DocType(
+        key="phantom", dir_path="phantoms", filename="active/{branch}/doc.md",
+        protected=True, create_hint="rcorn phantom create",
+        help_text="Phantom ops", template_body="",
+        addressing="branch", gated=True,
+    )
+    with patch.dict(REGISTRY, {"phantom": bad}), pytest.raises(ValueError, match="phantom"):
+        _validate_registry()
