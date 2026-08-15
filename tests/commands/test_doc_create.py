@@ -326,3 +326,26 @@ def test_cmd_principle_add(kb_repo: Path):
     doc = kb_repo / "kb" / "testproject" / "golden-principles.md"
     assert doc.is_file()
     assert "Always test" in doc.read_text()
+
+
+def test_phantom_type_creates_with_no_other_change(kb_repo: Path):
+    """Spec's executable design goal, stage-1 slice: a synthetic registry row
+    gets working creation from the row alone."""
+    from reinicorn.commands.doc_create import cmd_doc_create
+    from reinicorn.doc_types import REGISTRY, DocType
+    phantom = DocType(
+        key="phantom", dir_path="phantoms", filename="{slug}.md",
+        protected=True, create_hint='rcorn phantom create "<title>"',
+        help_text="Phantom doc operations",
+        template_body="\n## Body\n\n_Filled by {author} on {date}._\n",
+        addressing="slug",
+    )
+    p1, p2, p3, p4 = _create_env(kb_repo)
+    with patch.dict(REGISTRY, {"phantom": phantom}), p1, p2, p3, p4:
+        assert cmd_doc_create("phantom", "A Test Doc") == 0
+    doc = kb_repo / "kb" / "testproject" / "phantoms" / "a-test-doc.md"
+    assert doc.is_file()
+    text = doc.read_text()
+    assert fm.get(text, "type") == "phantom"
+    assert "## Body" in text
+    assert "Filled by Test User on" in text
