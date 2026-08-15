@@ -222,21 +222,27 @@ def _load(module: str, func: str):
 # exit code. Top-level nouns with no sub-verb use a None verb. Each handler lazily
 # imports its command so importing this module stays cheap.
 _DISPATCH = {
-    ("spec", "create"): lambda a: _load("doc_create", "cmd_spec_create")(" ".join(a.title)),
+    ("spec", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
+        "spec", " ".join(a.title)
+    ),
     ("spec", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
         "spec", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
     ),
     ("spec", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
         "spec", include_drafts=getattr(a, "include_drafts", False)
     ),
-    ("prd", "create"): lambda a: _load("doc_create", "cmd_prd_create")(" ".join(a.title)),
+    ("prd", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
+        "prd", " ".join(a.title)
+    ),
     ("prd", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
         "prd", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
     ),
     ("prd", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
         "prd", include_drafts=getattr(a, "include_drafts", False)
     ),
-    ("debt", "create"): lambda a: _load("doc_create", "cmd_debt_create")(" ".join(a.title)),
+    ("debt", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
+        "debt", " ".join(a.title)
+    ),
     ("debt", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
         "debt", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
     ),
@@ -256,9 +262,11 @@ _DISPATCH = {
     ("plan", "status"): lambda _: _load("plan", "cmd_plan_status")(),
     ("plan", "complete"): lambda a: _load("plan", "cmd_plan_complete")(a.branch),
     ("plan", "show"): lambda a: _load("doc_show", "cmd_plan_show")(a.branch, full=a.full),
-    ("retro", "create"): lambda _: _load("doc_create", "cmd_retro_create")(),
+    ("retro", "create"): lambda _: _load("doc_create", "cmd_doc_create")("retro"),
     ("retro", "show"): lambda a: _load("doc_show", "cmd_retro_show")(a.branch, full=a.full),
-    ("principle", "add"): lambda a: _load("doc_create", "cmd_principle_add")(" ".join(a.title)),
+    ("principle", "add"): lambda a: _load("doc_create", "cmd_doc_create")(
+        "principle", " ".join(a.title)
+    ),
     ("review", "start"): lambda a: _load("review", "cmd_review_start")(
         a.slug, a.reviewers, type_key=a.type_key
     ),

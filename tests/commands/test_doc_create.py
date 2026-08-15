@@ -63,7 +63,7 @@ def test_check_path_allows_progress_md(tmp_path: Path):
 
 def test_cmd_spec_create_creates_doc(kb_repo: Path):
     """Spec is a gated doc type, so create scaffolds into the drafts/ annex."""
-    from reinicorn.commands.doc_create import cmd_spec_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -71,7 +71,7 @@ def test_cmd_spec_create_creates_doc(kb_repo: Path):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_spec_create("My Feature")
+        result = cmd_doc_create("spec", "My Feature")
     assert result == 0
     doc = kb_repo / "kb" / "testproject" / "specs" / "drafts" / "my-feature.md"
     assert doc.is_file()
@@ -79,7 +79,7 @@ def test_cmd_spec_create_creates_doc(kb_repo: Path):
 
 def test_spec_create_writes_to_drafts(kb_repo: Path, capsys):
     """Gated doc types (spec) land in the drafts/ annex with Status: draft."""
-    from reinicorn.commands.doc_create import cmd_spec_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -87,7 +87,7 @@ def test_spec_create_writes_to_drafts(kb_repo: Path, capsys):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_spec_create("My Gated Spec")
+        result = cmd_doc_create("spec", "My Gated Spec")
     assert result == 0
     doc = kb_repo / "kb" / "testproject" / "specs" / "drafts" / "my-gated-spec.md"
     assert doc.is_file()
@@ -98,7 +98,7 @@ def test_spec_create_writes_to_drafts(kb_repo: Path, capsys):
 
 def test_prd_create_stays_flat(kb_repo: Path, capsys):
     """Non-gated doc types (prd) are unaffected and still land flat."""
-    from reinicorn.commands.doc_create import cmd_prd_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -106,7 +106,7 @@ def test_prd_create_stays_flat(kb_repo: Path, capsys):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_prd_create("My PRD")
+        result = cmd_doc_create("prd", "My PRD")
     assert result == 0
     doc = kb_repo / "kb" / "testproject" / "prds" / "my-prd.md"
     assert doc.is_file()
@@ -139,10 +139,10 @@ def test_spec_create_refuses_when_slug_already_landed(kb_repo: Path, capsys):
     final = kb_repo / "kb" / "testproject" / "specs" / "my-feature.md"
     final.parent.mkdir(parents=True, exist_ok=True)
     final.write_text("# My Feature\n\n**Status:** approved\n")
-    from reinicorn.commands.doc_create import cmd_spec_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     p1, p2, p3, p4 = _create_env(kb_repo)
     with p1, p2, p3, p4:
-        assert cmd_spec_create("My Feature") == 1
+        assert cmd_doc_create("spec", "My Feature") == 1
     assert not (
         kb_repo / "kb" / "testproject" / "specs" / "drafts" / "my-feature.md"
     ).exists()
@@ -155,10 +155,10 @@ def test_spec_create_refuses_to_clobber_existing_draft(kb_repo: Path, capsys):
     draft = kb_repo / "kb" / "testproject" / "specs" / "drafts" / "my-feature.md"
     draft.parent.mkdir(parents=True, exist_ok=True)
     draft.write_text("# My Feature\n\n**Status:** draft\n\nprecious edits\n")
-    from reinicorn.commands.doc_create import cmd_spec_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     p1, p2, p3, p4 = _create_env(kb_repo)
     with p1, p2, p3, p4:
-        assert cmd_spec_create("My Feature") == 1
+        assert cmd_doc_create("spec", "My Feature") == 1
     assert "precious edits" in draft.read_text()
     assert "error:" in capsys.readouterr().out
 
@@ -168,16 +168,16 @@ def test_prd_create_refuses_to_clobber_existing_doc(kb_repo: Path, capsys):
     doc = kb_repo / "kb" / "testproject" / "prds" / "my-prd.md"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text("# My PRD\n\nprecious edits\n")
-    from reinicorn.commands.doc_create import cmd_prd_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     p1, p2, p3, p4 = _create_env(kb_repo)
     with p1, p2, p3, p4:
-        assert cmd_prd_create("My PRD") == 1
+        assert cmd_doc_create("prd", "My PRD") == 1
     assert "precious edits" in doc.read_text()
     assert "error:" in capsys.readouterr().out
 
 
 def test_cmd_prd_create_creates_doc(kb_repo: Path):
-    from reinicorn.commands.doc_create import cmd_prd_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -185,14 +185,14 @@ def test_cmd_prd_create_creates_doc(kb_repo: Path):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_prd_create("My Spec")
+        result = cmd_doc_create("prd", "My Spec")
     assert result == 0
     doc = kb_repo / "kb" / "testproject" / "prds" / "my-spec.md"
     assert doc.is_file()
 
 
 def test_cmd_debt_create_creates_doc(kb_repo: Path):
-    from reinicorn.commands.doc_create import cmd_debt_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -200,14 +200,14 @@ def test_cmd_debt_create_creates_doc(kb_repo: Path):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_debt_create("Old coupling")
+        result = cmd_doc_create("debt", "Old coupling")
     assert result == 0
     doc = kb_repo / "kb" / "testproject" / "tech-debt" / "old-coupling.md"
     assert doc.is_file()
 
 
 def test_cmd_retro_create_uses_branch(kb_repo: Path):
-    from reinicorn.commands.doc_create import cmd_retro_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -216,7 +216,7 @@ def test_cmd_retro_create_uses_branch(kb_repo: Path):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_retro_create()
+        result = cmd_doc_create("retro", "")
     assert result == 0
     doc = (kb_repo / "kb" / "testproject" / "exec-plans"
            / "completed" / "feature-x" / "retro.md")
@@ -225,7 +225,7 @@ def test_cmd_retro_create_uses_branch(kb_repo: Path):
 
 def test_cmd_retro_create_commit_message_uses_branch(kb_repo: Path):
     """Retro commit message must include the branch slug, not an empty title."""
-    from reinicorn.commands.doc_create import cmd_retro_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb") as mock_commit, \
@@ -234,7 +234,7 @@ def test_cmd_retro_create_commit_message_uses_branch(kb_repo: Path):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_retro_create()
+        result = cmd_doc_create("retro", "")
     assert result == 0
     msg = mock_commit.call_args[0][1]
     assert msg == "doc(retro): feature-x", f"unexpected commit message: {msg!r}"
@@ -247,7 +247,7 @@ def test_cmd_retro_create_commit_message_uses_branch(kb_repo: Path):
 
 def test_cmd_retro_create_heading_contains_branch(kb_repo: Path):
     """Retro file heading must include the branch name (derived inside _create_retro)."""
-    from reinicorn.commands.doc_create import cmd_retro_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -256,7 +256,7 @@ def test_cmd_retro_create_heading_contains_branch(kb_repo: Path):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_retro_create()
+        result = cmd_doc_create("retro", "")
     assert result == 0
     doc = (kb_repo / "kb" / "testproject" / "exec-plans"
            / "completed" / "feature-x" / "retro.md")
@@ -305,15 +305,15 @@ def test_principle_add_appends_numbered_item(kb_repo: Path):
 
 
 def test_create_suggests_publish(kb_repo, monkeypatch, capsys):
-    from reinicorn.commands.doc_create import cmd_spec_create
+    from reinicorn.commands.doc_create import cmd_doc_create
     monkeypatch.chdir(kb_repo)
-    assert cmd_spec_create("My Spec") == 0
+    assert cmd_doc_create("spec", "My Spec") == 0
     out = capsys.readouterr().out
     assert "next: rcorn kb publish" in out
 
 
 def test_cmd_principle_add(kb_repo: Path):
-    from reinicorn.commands.doc_create import cmd_principle_add
+    from reinicorn.commands.doc_create import cmd_doc_create
     with patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_create.run_git") as mock_git, \
          patch("reinicorn.commands.doc_create.commit_kb"), \
@@ -321,7 +321,7 @@ def test_cmd_principle_add(kb_repo: Path):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_principle_add("Always test")
+        result = cmd_doc_create("principle", "Always test")
     assert result == 0
     doc = kb_repo / "kb" / "testproject" / "golden-principles.md"
     assert doc.is_file()

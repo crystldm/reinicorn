@@ -1,4 +1,4 @@
-"""Per-type kb doc creation (cmd_spec_create, cmd_prd_create, etc.) and path protection."""
+"""Kb doc creation (cmd_doc_create, the registry-driven entry point) and path protection."""
 
 from __future__ import annotations
 
@@ -225,26 +225,6 @@ def cmd_doc_create(doc_type: str, title: str = "") -> int:
     commit_kb(root, f"doc({dt.key}): {slug}", paths=[filepath])
     console.next_step("rcorn kb publish")
     return 0
-
-
-def cmd_spec_create(title: str) -> int:
-    return cmd_doc_create("spec", title)
-
-
-def cmd_prd_create(title: str) -> int:
-    return cmd_doc_create("prd", title)
-
-
-def cmd_debt_create(title: str) -> int:
-    return cmd_doc_create("debt", title)
-
-
-def cmd_retro_create() -> int:
-    return cmd_doc_create("retro", "")
-
-
-def cmd_principle_add(title: str) -> int:
-    return cmd_doc_create("principle", title)
 
 
 def cmd_doc_check_path(file_path: str) -> int:
