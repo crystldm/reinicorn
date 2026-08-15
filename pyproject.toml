@@ -145,6 +145,7 @@ ignore = [
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "reinicorn.git.sanitize_branch".msg = "Branch→path conversion is owned by kb.py; use kb.branch_dir_name/kb.branch_doc_path."
+"sys.stderr".msg = "stderr is the progress/debug channel and console.py owns it (axi channel model); route output through console.progress()/console.error()."
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
@@ -155,6 +156,9 @@ ignore = [
 ]
 "src/reinicorn/kb.py" = [
     "TID251", # kb.py is the one consumer allowed to wrap sanitize_branch
+]
+"src/reinicorn/console.py" = [
+    "TID251", # console.py owns the stderr channel (axi: stdout=data, stderr=progress)
 ]
 
 [tool.pyright]

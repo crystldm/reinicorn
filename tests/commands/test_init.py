@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from reinicorn.commands.init import cmd_init
+from reinicorn.config import config_get
 from reinicorn.git import run_git
 
 
@@ -35,7 +36,7 @@ def existing_repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def seeded_bare(tmp_path: Path) -> Path:
-    """A bare repo with a commit (ready for submodule add)."""
+    """A bare repo with a commit (ready to clone as kb)."""
     bare = tmp_path / "kb.git"
     bare.mkdir()
     _git(["init", "--bare", "-q", "-b", "main"], bare)
@@ -76,7 +77,8 @@ def test_init_with_kb_url_flag(existing_repo: Path, seeded_bare: Path, tmp_path:
 
     assert result == 0
     assert (existing_repo / "kb").is_dir()
-    assert (existing_repo / ".gitmodules").is_file()
+    assert (existing_repo / "kb" / ".git").is_dir()
+    assert "kb/" in (existing_repo / ".gitignore").read_text()
     assert (existing_repo / "AGENTS.md").is_file()
 
 
@@ -135,7 +137,6 @@ def test_init_reports_missing_packaged_agents_template(
         "Missing packaged template 'templates/AGENTS.md'. Reinstall Reinicorn, "
         "then rerun 'rcorn init'."
     ) in output
-    assert not (existing_repo / ".gitmodules").exists()
     assert not (existing_repo / "kb").exists()
     assert not (existing_repo / ".reinicorn" / "manifest.json").exists()
     assert "Reins initialized!" not in output
@@ -150,9 +151,8 @@ def test_init_reports_missing_packaged_agents_template(
         ) == 0
 
     assert "kb/sample/README.md" in (existing_repo / "AGENTS.md").read_text()
-    assert (existing_repo / ".reinicorn-config").read_text() == (
-        "REINICORN_KB_SCOPE=sample\n"
-    )
+    assert config_get("REINICORN_KB_SCOPE", root=existing_repo) == "sample"
+    assert config_get("REINICORN_KB_REMOTE", root=existing_repo) == str(seeded_bare)
     assert (existing_repo / ".reinicorn/manifest.json").is_file()
 
 
@@ -207,9 +207,9 @@ def test_init_detects_existing_kb(kb_repo: Path):
 def test_init_existing_kb_without_manifest_sets_up_assets(
     kb_repo: Path, tmp_path: Path
 ):
-    """init on a repo whose kb submodule exists but was never fully set up
+    """init on a repo whose kb clone exists but was never fully set up
     (no manifest) should lay down assets and write a manifest, without
-    re-adding the submodule."""
+    re-cloning kb."""
     r_root = tmp_path / "r_root"
     r_root.mkdir()
     (r_root / "templates").mkdir()
@@ -225,7 +225,7 @@ def test_init_existing_kb_without_manifest_sets_up_assets(
          patch("reinicorn.commands.init.repo_slug", return_value="testproject"), \
          patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]), \
          patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
-         patch("reinicorn.commands.init.setup_submodule") as mock_submodule:
+         patch("reinicorn.commands.init.setup_kb_clone") as mock_setup_kb_clone:
         def _resolve(name: str) -> Path | None:
             p = r_root / name
             return p if p.exists() else None
@@ -234,8 +234,8 @@ def test_init_existing_kb_without_manifest_sets_up_assets(
         result = cmd_init(cwd=kb_repo)
 
     assert result == 0
-    # Submodule already present — must NOT be re-added
-    mock_submodule.assert_not_called()
+    # Kb clone already present — must NOT be re-cloned
+    mock_setup_kb_clone.assert_not_called()
     # Assets laid down + manifest written
     assert (kb_repo / ".reinicorn" / "manifest.json").is_file()
     assert (kb_repo / "AGENTS.md").is_file()

@@ -28,7 +28,7 @@ def test_lint_runs_rules_and_reports(kb_repo: Path, capsys):
     assert "Lint Summary" in capsys.readouterr().out
 
 
-def test_lint_exits_when_no_kb_submodule(tmp_path: Path):
+def test_lint_exits_when_no_kb_dir(tmp_path: Path):
     """require_kb_dir raises SystemExit(1) rather than returning a code."""
     with (
         patch("reinicorn.commands.lint.repo_root", return_value=tmp_path),

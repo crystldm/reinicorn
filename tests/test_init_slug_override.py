@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from reinicorn.commands.init import cmd_init
+from reinicorn.config import config_get
 from reinicorn.git import run_git
 
 
@@ -22,15 +23,10 @@ def _init_repo(path: Path) -> None:
 
 
 def _configure_existing_kb(repo: Path) -> None:
-    """Mark a repository as a genuine teammate clone: a populated kb submodule
+    """Mark a repository as a genuine teammate clone: a populated kb clone
     plus the committed manifest that init writes when it lays down assets."""
-    (repo / ".gitmodules").write_text(
-        '[submodule "kb"]\n'
-        "\tpath = kb\n"
-        "\turl = https://example.com/kb.git\n"
-    )
     kb_dir = repo / "kb"
-    kb_dir.mkdir()
+    _init_repo(kb_dir)
     (kb_dir / "README.md").write_text("# Existing kb\n")
     manifest = repo / ".reinicorn" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -54,9 +50,7 @@ def test_init_slug_override(tmp_path: Path):
     assert (kb_dir / "custom-name" / "README.md").read_text().startswith(
         "# custom-name knowledge base\n"
     )
-    assert (repo / ".reinicorn-config").read_text() == (
-        "REINICORN_KB_SCOPE=custom-name\n"
-    )
+    assert config_get("REINICORN_KB_SCOPE", root=repo) == "custom-name"
 
 
 def _assert_invalid_scope_has_no_side_effects(
@@ -73,7 +67,7 @@ def _assert_invalid_scope_has_no_side_effects(
         patch("reinicorn.commands.init._prompt_kb_source") as prompt_source,
         patch("reinicorn.commands.init._create_local_bare") as create_local,
         patch("reinicorn.commands.init._create_github_remote") as create_github,
-        patch("reinicorn.commands.init.setup_submodule") as setup,
+        patch("reinicorn.commands.init.setup_kb_clone") as setup,
         patch("reinicorn.commands.init.config_set") as write_config,
         patch("reinicorn.commands.init.cmd_hooks_install") as install_hooks,
     ):

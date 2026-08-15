@@ -93,12 +93,10 @@ def kb_repo(tmp_path: Path) -> Path:
         "# Decisions\n"
     )
 
-    # .gitmodules so get_kb_dir() resolves to kb/
-    (repo / ".gitmodules").write_text(
-        '[submodule "kb"]\n'
-        '    path = kb\n'
-        '    url = fake-for-tests\n'
-    )
+    # kb/ is a plain nested git repo, gitignored by the parent (clone layout)
+    _git_init(kb)
+    (repo / ".gitignore").write_text("kb/\n")
+    _git_commit(kb, "kb init")
 
     # Config
     (repo / ".reinicorn-config").write_text(
@@ -186,4 +184,40 @@ def submodule_repo(tmp_path: Path) -> Path:
     if r.returncode != 0:
         run_git("checkout", "-q", "-b", "main", cwd=kb)
 
+    return parent
+
+
+@pytest.fixture
+def kb_clone_repo(tmp_path: Path) -> Path:
+    """Parent repo with kb/ as an ordinary clone of a local bare remote.
+
+    The clone layout every kb-operation test uses. The remote lives at
+    tmp_path/kb-remote for push/fetch assertions; `submodule_repo` remains
+    only for migration tests.
+    """
+    staging = tmp_path / "kb-staging"
+    staging.mkdir()
+    _git_init(staging)
+    (staging / "README.md").write_text("# Kb\n")
+    _git_commit(staging, "init")
+
+    remote = tmp_path / "kb-remote"
+    run_git("-c", "protocol.file.allow=always",
+            "clone", "--bare", str(staging), str(remote))
+
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    _git_init(parent)
+    (parent / ".gitignore").write_text("kb/\n")
+    (parent / ".reinicorn-config").write_text(
+        f'REINICORN_KB_REMOTE="{remote}"\n'
+    )
+    _git_commit(parent, "init")
+
+    run_git("-c", "protocol.file.allow=always",
+            "clone", str(remote), str(parent / "kb"))
+    kb = parent / "kb"
+    run_git("config", "user.email", "test@test.com", cwd=kb)
+    run_git("config", "user.name", "Test User", cwd=kb)
+    run_git("config", "protocol.file.allow", "always", cwd=kb)
     return parent

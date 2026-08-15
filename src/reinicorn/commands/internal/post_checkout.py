@@ -3,40 +3,38 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_get
 from reinicorn.git import current_branch, repo_root, report_failure, run_git
 from reinicorn.identity import TICKET_PATTERN_KEY
-from reinicorn.kb import ensure_kb_on_main, get_kb_dir, stage_kb_pointer
+from reinicorn.kb import checkout_kb_main, get_kb_dir
 from reinicorn.kb_remote import apply_kb_remote_url, resolve_kb_remote_url
 from reinicorn.mode import hook_check
+from reinicorn.validation import validate_git_url
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
-def _kb_reference_args(root: Path) -> list[str]:
-    """`git submodule update` args that borrow kb objects from the shared module.
+def _clone_reference_args(root: Path) -> list[str]:
+    """`git clone` args that borrow kb objects from the main checkout's kb.
 
-    In a linked worktree, <git-common-dir>/modules/kb already holds every kb
-    object, so cloning with --reference avoids re-fetching over the network.
-    Returns [] when no usable shared module exists — on a fresh clone that
-    path is the module dir about to be created, so a plain --init is correct
-    there, and a module dir without objects/ would make the clone error out
-    where plain --init would have worked.
+    A new linked worktree clones its own kb; --reference-if-able borrows
+    objects from the main checkout's clone when one exists (no network
+    cost for history), --dissociate copies them so the new kb never
+    depends on the other clone staying alive. Falls back to a plain
+    clone when there is nothing to borrow.
     """
-    r = run_git("rev-parse", "--git-common-dir", cwd=root, check=False)
-    if r.returncode != 0:
-        return []
-    common = Path(r.stdout.strip())
-    if not common.is_absolute():
-        common = root / common
-    ref = (common / "modules" / KB_DIR_NAME).resolve()
-    if (ref / "objects").is_dir():
-        return ["--reference", str(ref)]
+    from reinicorn.kb_remote import _main_checkout_root
+    ref = _main_checkout_root(root) / KB_DIR_NAME
+    if (ref / ".git").exists():
+        return ["--reference-if-able", str(ref), "--dissociate"]
     return []
 
 
-def _init_kb(root: Path, kb_dir: Path) -> None:
+def _init_kb(root: Path) -> None:
     """Create the kb for a fresh clone or a new worktree.
 
     Reports failures instead of swallowing them — this is the site where a
@@ -47,22 +45,34 @@ def _init_kb(root: Path, kb_dir: Path) -> None:
     """
     # Resolve before creating the kb: afterwards the new clone is itself an
     # "existing kb", and it carries the recorded URL we are trying to look past.
+    kb_dir = root / KB_DIR_NAME
     try:
         remote = resolve_kb_remote_url(root)
+        # remote can come straight from REINICORN_KB_REMOTE in the committed
+        # .reinicorn-config — repository-controlled input — so it must be
+        # validated before it ever reaches git clone, same as every other
+        # clone path (setup_kb_clone, apply_kb_remote_url).
+        url_error = validate_git_url(remote)
+        if url_error is not None:
+            console.warn(f"Refusing kb remote URL '{remote}': {url_error}")
+            console.next_step("rcorn kb sync")
+            return
+        file_allow = (
+            ("-c", "protocol.file.allow=always") if remote.startswith("/") else ()
+        )
         r = run_git(
-            "submodule", "update", "--init",
-            *_kb_reference_args(root),
-            KB_DIR_NAME, cwd=root, check=False,
+            *file_allow, "clone",
+            *_clone_reference_args(root),
+            remote, str(kb_dir), check=False,
         )
         if r.returncode != 0:
             report_failure("initialize the kb", r, warn=True)
             console.next_step("rcorn kb sync")
             return
-        # The clone above takes its URL from submodule.kb.url, which git copied
-        # out of .gitmodules — so it loses any local override and can land on a
-        # protocol this machine cannot authenticate with. Reads still work
-        # (objects are borrowed via --reference), so without this the breakage
-        # would only surface at publish time.
+        # The clone above already used `remote` as origin, so this is normally
+        # a no-op — it exists to catch and report the case where git accepted
+        # the clone but the origin ended up wrong (or unset), rather than
+        # leaving that to surface silently at publish time.
         if apply_kb_remote_url(kb_dir, remote) == "failed":
             # apply_kb_remote_url has already reported the cause and the fix.
             # Say what it means for the kb that was just created, and carry on:
@@ -71,8 +81,7 @@ def _init_kb(root: Path, kb_dir: Path) -> None:
                 f"{KB_DIR_NAME}/ was created but its remote could not be set — "
                 "publishing from here will fail until it is."
             )
-        ensure_kb_on_main(kb_dir)  # avoid a detached HEAD
-        stage_kb_pointer(root, kb_dir)
+        checkout_kb_main(kb_dir)  # avoid a detached HEAD
     except Exception as e:
         # Broad on purpose: a post-checkout hook that raises fails the user's
         # `git checkout`. Report and continue — a missing kb is recoverable,
@@ -95,11 +104,8 @@ def cmd_post_checkout(args: list[str]) -> int:
         return 0
 
     # Ensure kb exists (fresh clone / new worktree only)
-    kb_dir = get_kb_dir(root)
-    if kb_dir is not None:
-        kb_empty = not kb_dir.is_dir() or not any(kb_dir.iterdir())
-        if kb_empty:
-            _init_kb(root, kb_dir)
+    if get_kb_dir(root) is None and resolve_kb_remote_url(root):
+        _init_kb(root)
 
     # New branch detection
     branch = current_branch()

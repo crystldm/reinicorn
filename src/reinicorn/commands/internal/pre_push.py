@@ -1,4 +1,4 @@
-"""rcorn _pre-push — kb submodule sync and the review-lane gate."""
+"""rcorn _pre-push — kb publication and the review-lane gate."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from reinicorn.commands.internal.spec_gate import ensure_plan_spec_approved
 from reinicorn.config import KB_DIR_NAME
 from reinicorn.git import current_branch, explain_failure, repo_root, run_git
-from reinicorn.kb import get_kb_dir, kb_gitlink
+from reinicorn.kb import get_kb_dir
 from reinicorn.mode import get_mode
 
 if TYPE_CHECKING:
@@ -35,18 +35,19 @@ def cmd_pre_push() -> int:
         root = repo_root(quiet=True)
         if root is None:
             return 0
-        rc = _ensure_kb_pushed(root, branches)
+        rc = _ensure_kb_pushed(root)
         if rc != 0:
             return rc
         return ensure_plan_spec_approved(root, branches)
     except Exception as e:
-        # Fail closed: this guard exists to stop a parent push that would leave
-        # a dangling kb submodule pointer. If the check itself errors we cannot
-        # confirm the kb is pushed, so block the push rather than risk the
-        # dangling ref. A genuine hook bug can still be bypassed per-push.
+        # Fail closed: this guard exists to stop a parent push that would
+        # reference unpublished kb commits. If the check itself errors we
+        # cannot confirm the kb is pushed, so block the push rather than risk
+        # shipping docs reviewers and CI cannot read. A genuine hook bug can
+        # still be bypassed per-push.
         print(
             f"\n❌ Kb pre-push check failed unexpectedly: {e}\n"
-            "   Refusing the push to avoid a dangling kb submodule pointer.\n"
+            "   Refusing the push to avoid unpublished kb commits.\n"
             f"   Inspect the kb (cd {KB_DIR_NAME} && git status), or bypass this\n"
             "   one push with: git push --no-verify\n",
             flush=True,
@@ -54,17 +55,14 @@ def cmd_pre_push() -> int:
         return 1
 
 
-def _ensure_kb_pushed(root: Path, branches: list[str]) -> int:
-    """Push the kb commits the pushed branches pin, if the remote lacks them.
+def _ensure_kb_pushed(root: Path) -> int:
+    """Push local kb main when it is ahead of origin/main.
 
-    Anchored on each pushed branch's gitlink (``<branch>:kb``), not on HEAD:
-    `git push origin other-branch` ships *that* branch's pointer, and verifying
-    the checked-out one instead would let the push create exactly the dangling
-    pointer this check exists to stop.
-
-    Runs synchronously BEFORE the parent push so CI can always fetch the
-    submodule commit. Returns non-zero only if a pinned kb commit cannot be
-    confirmed on the kb remote.
+    The invariant is simply "the kb is always published" \u2014 no pointer is
+    consulted, because none exists. Runs synchronously BEFORE the parent
+    push so reviewers and CI can always read the docs the pushed work
+    references. Returns non-zero only when unpublished kb commits cannot
+    be pushed.
     """
     kb_dir = get_kb_dir(root)
     if kb_dir is None:
@@ -74,65 +72,30 @@ def _ensure_kb_pushed(root: Path, branches: list[str]) -> int:
     if mode in ("incognito", "disabled"):
         return 0
 
-    if not (kb_dir / ".git").exists():
-        return 0
-
-    pinned: list[str] = []
-    for branch in branches:
-        sha = kb_gitlink(root, branch) if branch else None
-        if sha and sha not in pinned:
-            pinned.append(sha)
-    if not pinned:
-        return 0
-
     run_git("fetch", "origin", "main", "--quiet", cwd=kb_dir, check=False)
-
-    missing = [s for s in pinned if not _on_kb_remote_main(s, kb_dir)]
-    if not missing:
+    ahead = run_git(
+        "rev-list", "--count", "origin/main..main", check=False, cwd=kb_dir,
+    )
+    if ahead.returncode != 0 or ahead.stdout.strip() in ("", "0"):
+        # No origin/main to compare against (brand-new kb, offline first
+        # fetch) fails open: this guard protects publication, and blocking
+        # every push on an unverifiable comparison would brick the repo.
         return 0
 
-    print("\U0001f984 Kb submodule has unpushed commits, pushing now...")
+    print("\U0001f984 Kb has unpushed commits, pushing now...")
     r = run_git("push", "origin", "main", check=False, cwd=kb_dir)
     if r.returncode != 0:
-        # A git hook writes straight to the user's terminal, so this prints
-        # rather than going through console \u2014 but the text still comes from the
-        # one seam, so "why" is never guessed at and git's own words survive.
         print("\n\u274c " + "\n".join(explain_failure("push the kb", r)))
         print(
-            "\n   The parent push would create a dangling submodule pointer\n"
-            "   that breaks CI and other checkouts.\n"
+            "\n   The parent push would reference kb docs that are not\n"
+            "   published, so reviewers and CI could not read them.\n"
             "   Fix: rcorn kb publish (or bypass once with git push --no-verify)\n",
-            flush=True,
-        )
-        return 1
-
-    # Pushing kb main covers the ordinary flow. A pinned commit still absent
-    # afterwards is not on kb main at all \u2014 a stale branch pinning an orphaned
-    # kb commit \u2014 and pushing the parent anyway would dangle it.
-    still_missing = [s for s in missing if not _on_kb_remote_main(s, kb_dir)]
-    if still_missing:
-        print(
-            "\n\u274c Kb push did not publish every pinned kb commit.\n"
-            f"   Still missing from the kb remote: {', '.join(still_missing)}\n"
-            "   A pushed branch pins a kb commit that is not on the kb's main\n"
-            "   branch, so the parent push would create a dangling submodule\n"
-            "   pointer. Fix: update that branch's kb pointer to a commit on\n"
-            "   kb main (or bypass once with git push --no-verify)\n",
             flush=True,
         )
         return 1
 
     print("\U0001f984 Kb pushed successfully.")
     return 0
-
-
-def _on_kb_remote_main(sha: str, kb_dir: Path) -> bool:
-    """True when ``sha`` is reachable from the kb's fetched origin/main."""
-    r = run_git(
-        "merge-base", "--is-ancestor", sha, "origin/main",
-        check=False, cwd=kb_dir,
-    )
-    return r.returncode == 0
 
 
 def _pushed_branches() -> list[str] | None:

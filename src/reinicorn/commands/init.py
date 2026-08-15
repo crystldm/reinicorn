@@ -4,7 +4,7 @@ Replaces both `attach` (bolt onto existing repo) and `init` (new project).
 Detects context and runs the appropriate flow.
 
 Modes:
-- Existing repo, no kb -> full setup (submodule + AGENTS + skills + hooks)
+- Existing repo, no kb -> full setup (kb clone + AGENTS + skills + hooks)
 - Existing repo, has kb -> hooks-only setup (teammate clone scenario)
 - Not in a git repo -> error with guidance
 """
@@ -41,8 +41,8 @@ from reinicorn.github import (
     gh_repo_create,
 )
 from reinicorn.identity import KB_SCOPE_KEY
+from reinicorn.kb_setup import KbSetupError, setup_kb_clone
 from reinicorn.manifest import MANIFEST_PATH, write_manifest
-from reinicorn.submodule import SubmoduleError, setup_submodule
 from reinicorn.validation import is_valid_scope_name
 
 if TYPE_CHECKING:
@@ -53,28 +53,9 @@ AGENTS_DESTINATION = "AGENTS.md"
 SKILLS_ASSET = ".agents/skills"
 
 
-def _has_kb_submodule_path(gitmodules_text: str) -> bool:
-    """Return whether a submodule entry is configured at the KB path."""
-    in_submodule_section = False
-    for line in gitmodules_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("["):
-            in_submodule_section = stripped.startswith('[submodule "')
-            continue
-        if not in_submodule_section:
-            continue
-        key, _, value = stripped.partition("=")
-        if key.strip().lower() == "path" and value.strip() == KB_DIR_NAME:
-            return True
-    return False
-
-
 def _init_path(cwd: Path) -> Literal["full", "assets_only", "hooks_only"]:
     """Classify the setup path without changing repository state."""
-    gitmodules = cwd / ".gitmodules"
-    if not (
-        gitmodules.is_file() and _has_kb_submodule_path(gitmodules.read_text())
-    ):
+    if not ((cwd / KB_DIR_NAME) / ".git").exists():
         return "full"
     if (cwd / MANIFEST_PATH).is_file():
         return "hooks_only"
@@ -155,6 +136,12 @@ def cmd_init(
         print("  Or create a repo first: git init && rcorn init")
         return 1
 
+    from reinicorn.kb_migrate import detect_submodule_layout, migrate_submodule_to_clone
+    if detect_submodule_layout(cwd):
+        console.info("Detected the old kb submodule layout.")
+        if not migrate_submodule_to_clone(cwd):
+            return 1
+
     print()
     console.header("Reinicorn Init")
     print("==============")
@@ -190,16 +177,17 @@ def cmd_init(
                 return 1
         if slug is not None:
             config_set(KB_SCOPE_KEY, slug, cwd)
-        if not kb_dir.is_dir() or not any(kb_dir.iterdir()):
-            console.info("Initializing kb submodule...")
-            run_git("submodule", "update", "--init", KB_DIR_NAME, cwd=cwd)
+        # `_init_path` only returns non-"full" when kb/.git already exists, so
+        # there is no missing-clone case to bootstrap here — a kb clone that is
+        # absent or empty falls through to the "full" path above. (The
+        # remote-driven clone-on-missing bootstrap lives in `rcorn kb sync`.)
         # A committed manifest means the assets were already laid down (a genuine
         # teammate clone) — just wire up hooks + agent instructions. Without one,
-        # the kb submodule exists but Reinicorn assets were never installed (e.g.
-        # the submodule was added by hand), so fall through to full asset setup,
-        # skipping the submodule creation that is already done.
+        # the kb clone exists but Reinicorn assets were never installed (e.g.
+        # the clone was added by hand), so fall through to full asset setup,
+        # skipping the clone creation that is already done.
         if init_path == "hooks_only":
-            console.info("Kb submodule already configured — setting up hooks.")
+            console.info("Kb already configured — setting up hooks.")
             if not _copy_agent_instructions(
                 reinicorn_root(), cwd, effective_slug, template=agent_template
             ):
@@ -208,7 +196,7 @@ def cmd_init(
             _print_teammate_summary(hooks_rc)
             return 0
         console.info(
-            "Kb submodule configured but Reinicorn assets missing — setting up assets."
+            "Kb configured but Reinicorn assets missing — setting up assets."
         )
         asset_slug = effective_slug or kb_scope(cwd)
         if not _validate_scope_name(asset_slug):
@@ -251,16 +239,18 @@ def cmd_init(
     if local:
         kb_url = _create_local_bare(cwd)
 
-    # Setup submodule (handles empty remotes, cleanup, etc.)
+    # Clone kb (handles empty remotes, cleanup, etc.)
     console.info(f"Kb scope: {slug}")
     if kb_url is None:
         console.error("No kb URL resolved — cannot continue.")
         return 1
     try:
-        setup_submodule(cwd, kb_url, repo_slug=slug)
-    except SubmoduleError as e:
+        setup_kb_clone(cwd, kb_url, repo_slug=slug)
+    except KbSetupError as e:
         console.error(str(e))
         return 1
+    from reinicorn.kb_remote import KB_REMOTE_KEY
+    config_set(KB_REMOTE_KEY, kb_url, cwd)
     if explicit_slug:
         config_set(KB_SCOPE_KEY, slug, cwd)
 
@@ -398,7 +388,7 @@ def _create_local_bare(target_dir: Path) -> str:
     console.info(f"Creating bare kb repo at: {bare}")
     bare.mkdir(parents=True, exist_ok=True)
     run_git("init", "--bare", "-q", "-b", "main", str(bare))
-    # seed_remote will be called by setup_submodule when it detects empty.
+    # seed_remote will be called by setup_kb_clone when it detects empty.
     # Return an absolute path so it passes the git-transport allow-list.
     return str(bare.resolve())
 
@@ -661,8 +651,8 @@ def _print_full_summary(hooks_rc: int, slug: str, *, local_bare_path: str | None
     print("  2. Review .agents/skills/ for your workflow")
     print(f"  3. Review {KB_DIR_NAME}/{slug}/golden-principles.md")
     print(
-        f"  4. Commit: git add .gitmodules {KB_DIR_NAME} AGENTS.md "
-        f".agents .claude .cursor .github .reinicorn CLAUDE.md"
+        "  4. Commit: git add .gitignore AGENTS.md "
+        ".agents .claude .cursor .github .reinicorn CLAUDE.md .reinicorn-config"
     )
     print("     git commit -m 'chore: initialize reinicorn kb'")
     if local_bare_path:

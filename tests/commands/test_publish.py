@@ -45,24 +45,6 @@ def test_publish_stays_on_main(submodule_repo: Path) -> None:
     assert branch == "main"
 
 
-def test_publish_updates_parent_pointer(submodule_repo: Path) -> None:
-    """After publish, parent submodule pointer should be staged or committed."""
-    kb = submodule_repo / "kb"
-    (kb / "new-file.md").write_text("# New\n")
-    run_git("add", "-A", cwd=kb)
-    run_git("commit", "-q", "-m", "test commit", cwd=kb)
-
-    with patch("reinicorn.commands.publish.repo_root", return_value=submodule_repo), \
-         patch("reinicorn.commands.publish.can_publish", return_value=True):
-        result = cmd_publish()
-
-    assert result == 0
-
-    # Parent should have kb pointer staged
-    staged = run_git("diff", "--cached", "--name-only", cwd=submodule_repo).stdout
-    assert "kb" in staged
-
-
 def test_publish_shows_resolution_steps_on_retry_failure(
     submodule_repo: Path, capsys
 ) -> None:
@@ -117,12 +99,18 @@ def test_publish_blocked_suggests_mode_enable(kb_repo: Path, capsys) -> None:
         assert "rcorn mode incognito" not in out
 
 
-def test_publish_retries_after_diverged_history(
-    submodule_repo: Path, tmp_path: Path
+def test_publish_refuses_diverged_history(
+    submodule_repo: Path, tmp_path: Path, capsys
 ) -> None:
-    """Publish should auto-retry after pull when remote has diverged."""
+    """Publish must refuse rather than silently auto-merge through a real fork.
+
+    ensure_kb_on_main() now fast-forwards only; a genuine divergence between
+    local and origin main is reported and refused, not blindly reconciled
+    with a merge commit (that was the old, spec-flagged-as-wrong behavior).
+    """
     kb = submodule_repo / "kb"
     remote = tmp_path / "kb-remote"
+    before = run_git("rev-parse", "HEAD", cwd=kb).stdout.strip()
 
     # Push a divergent commit to remote
     staging = tmp_path / "staging-clone"
@@ -144,10 +132,20 @@ def test_publish_retries_after_diverged_history(
     (kb / "local.md").write_text("local\n")
     run_git("add", "-A", cwd=kb)
     run_git("commit", "-q", "-m", "local", cwd=kb)
+    after_local_commit = run_git("rev-parse", "HEAD", cwd=kb).stdout.strip()
 
     with patch("reinicorn.commands.publish.repo_root", return_value=submodule_repo), \
          patch("reinicorn.commands.publish.can_publish", return_value=True):
         result = cmd_publish()
 
-    assert result == 0
+    assert result == 1
+    out = capsys.readouterr().out
+    # ensure_kb_on_main now routes the ff-only failure through report_failure
+    # (git's own words), rather than a hardcoded "diverged" guess.
+    assert "Could not fast-forward kb main to origin/main" in out
+    assert "rcorn kb sync" in out
+    # No merge commit: local main still points at the same commit as right
+    # after the local edit — divergence was reported, not reconciled.
+    assert run_git("rev-parse", "HEAD", cwd=kb).stdout.strip() == after_local_commit
+    assert after_local_commit != before
 

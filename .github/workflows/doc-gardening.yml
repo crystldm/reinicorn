@@ -19,15 +19,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          submodules: recursive
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Clone kb
+        run: git clone https://github.com/crystldm/reinicorn-kb.git kb
 
       - name: Check for stale docs
         id: stale
         # Only the living dashboards are expected to stay fresh — historical
-        # docs (specs, ideas, completed plans) age by design. Kb files live in
-        # a submodule, so ages come from `git -C kb`, not the parent repo.
+        # docs (specs, ideas, completed plans) age by design. The kb is cloned
+        # separately, so ages come from `git -C kb`, not the parent repo.
         run: |
           threshold_days=60
           now=$(date +%s)

@@ -3,7 +3,7 @@
 # pre-push — Reinicorn git hook
 #
 # Runs before `git push`. Responsibility:
-#   1. Ensure kb submodule is pushed (BLOCKS push if not and auto-push fails)
+#   1. Ensure kb clone is pushed (BLOCKS push if not and auto-push fails)
 #
 # Delegates all logic to `rcorn _pre-push` (Python).
 # =============================================================================

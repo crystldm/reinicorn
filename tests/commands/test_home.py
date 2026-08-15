@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from reinicorn.commands.home import cmd_home
@@ -43,26 +45,27 @@ def test_bare_reins_invokes_home(kb_repo, monkeypatch, capsys):
     assert "usage:" not in out
 
 
-def test_home_uninitialized_kb_submodule(kb_repo, monkeypatch, capsys):
-    """Fresh clone: .gitmodules declares kb but the submodule dir is absent."""
+def test_home_no_kb_setup(kb_repo, monkeypatch, capsys):
+    """No kb/ at all — kb never set up."""
     import shutil
 
     shutil.rmtree(kb_repo / "kb")
     monkeypatch.chdir(kb_repo)
     assert cmd_home() == 0
     out = capsys.readouterr().out
-    assert "kb: submodule not initialized" in out
-    assert "next: git submodule update --init kb" in out
-
-
-def test_home_no_kb_setup(kb_repo, monkeypatch, capsys):
-    """Git repo with no .gitmodules at all — kb never set up."""
-    (kb_repo / ".gitmodules").unlink()
-    monkeypatch.chdir(kb_repo)
-    assert cmd_home() == 0
-    out = capsys.readouterr().out
     assert "kb: not set up in this repo" in out
     assert "next: rcorn init" in out
+
+
+def test_home_reports_missing_clone(kb_clone_repo, monkeypatch, capsys):
+    """Config records a kb remote, but kb/ isn't cloned yet (teammate clone)."""
+    shutil.rmtree(kb_clone_repo / "kb")
+    monkeypatch.chdir(kb_clone_repo)
+    assert cmd_home() == 0
+    out = capsys.readouterr().out
+    assert "not cloned yet" in out
+    assert "rcorn kb sync" in out
+    assert "submodule" not in out
 
 
 def test_home_plan_present_for_branch(kb_repo, monkeypatch, capsys):

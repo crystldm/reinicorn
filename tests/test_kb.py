@@ -9,56 +9,17 @@ import pytest
 
 from reinicorn.git import run_git
 from reinicorn.kb import (
-    _parse_kb_submodule_path,
     active_plan_names,
     branch_changed_files,
     check_overlap,
+    commit_kb,
+    ensure_kb_on_main,
     get_kb_dir,
     overlap_line,
     plan_dir,
     repo_kb_dir,
     require_kb_dir,
 )
-
-
-def test_parse_kb_submodule_path_standard():
-    text = '[submodule "kb"]\n    path = kb\n    url = fake\n'
-    assert _parse_kb_submodule_path(text) == "kb"
-
-
-def test_parse_kb_submodule_path_custom_dir():
-    text = '[submodule "kb"]\n    path = tools/kb\n    url = fake\n'
-    assert _parse_kb_submodule_path(text) == "tools/kb"
-
-
-def test_parse_kb_submodule_path_no_kb_section():
-    text = '[submodule "other"]\n    path = other\n    url = fake\n'
-    assert _parse_kb_submodule_path(text) is None
-
-
-def test_parse_kb_submodule_path_empty():
-    assert _parse_kb_submodule_path("") is None
-
-
-def test_parse_kb_submodule_path_blank_value():
-    # A blank path= value must not resolve to the repo root.
-    text = '[submodule "kb"]\n    path = \n    url = fake\n'
-    assert _parse_kb_submodule_path(text) is None
-
-
-def test_parse_kb_submodule_path_does_not_match_pathname():
-    # "pathname" key must not be confused with "path"
-    text = '[submodule "kb"]\n    pathname = wrong\n    path = correct\n'
-    assert _parse_kb_submodule_path(text) == "correct"
-
-
-def test_parse_kb_submodule_path_url_contains_kb():
-    # A URL with "kb" in it must not trigger a false positive
-    text = (
-        '[submodule "other"]\n    path = other\n'
-        "    url = git@github.com:org/kb-tools.git\n"
-    )
-    assert _parse_kb_submodule_path(text) is None
 
 
 def test_get_kb_dir_returns_path(kb_repo: Path):
@@ -69,21 +30,24 @@ def test_get_kb_dir_returns_none_when_absent(tmp_path: Path):
     assert get_kb_dir(tmp_path) is None
 
 
-def test_get_kb_dir_rejects_traversal_path(tmp_path: Path, capsys):
-    """A .gitmodules path that escapes the repo root is refused."""
-    (tmp_path / ".gitmodules").write_text(
-        '[submodule "kb"]\n    path = ../escape\n    url = fake\n'
-    )
-    assert get_kb_dir(tmp_path) is None
-    assert "Refusing kb submodule path" in capsys.readouterr().out
+def test_get_kb_dir_requires_git_entry(tmp_path):
+    """A kb/ directory without .git is not a kb."""
+    root = tmp_path / "repo"
+    (root / "kb").mkdir(parents=True)
+    assert get_kb_dir(root) is None
 
 
-def test_get_kb_dir_rejects_absolute_path(tmp_path: Path):
-    """An absolute .gitmodules path is refused (would resolve outside root)."""
-    (tmp_path / ".gitmodules").write_text(
-        '[submodule "kb"]\n    path = /etc\n    url = fake\n'
-    )
-    assert get_kb_dir(tmp_path) is None
+def test_get_kb_dir_detects_clone(kb_clone_repo):
+    assert get_kb_dir(kb_clone_repo) == kb_clone_repo / "kb"
+
+
+def test_get_kb_dir_accepts_gitfile(tmp_path):
+    """A .git *file* (submodule/worktree checkout) also counts — transition safety."""
+    root = tmp_path / "repo"
+    kb = root / "kb"
+    kb.mkdir(parents=True)
+    (kb / ".git").write_text("gitdir: ../.git/modules/kb\n")
+    assert get_kb_dir(root) == kb
 
 
 def test_require_kb_dir_raises_when_none(tmp_path: Path):
@@ -95,6 +59,16 @@ def test_require_kb_dir_returns_path(kb_repo: Path):
     result = require_kb_dir(kb_repo)
     assert isinstance(result, Path)
     assert result == kb_repo / "kb"
+
+
+def test_require_kb_dir_error_names_both_paths(tmp_path, capsys):
+    root = tmp_path / "repo"
+    root.mkdir()
+    with pytest.raises(SystemExit):
+        require_kb_dir(root)
+    out = capsys.readouterr().out
+    assert "rcorn kb sync" in out
+    assert "rcorn init" in out
 
 
 def test_plan_dir(kb_repo: Path):
@@ -223,3 +197,82 @@ def test_branch_changed_files_returns_empty_without_main(tmp_path: Path):
         cwd=tmp_path,
     )
     assert branch_changed_files("wip", tmp_path) == set()
+
+
+def _detach(kb: Path) -> None:
+    run_git("checkout", "-q", "--detach", "HEAD", cwd=kb)
+
+
+def test_ensure_kb_on_main_fast_forwards_stale_local_main(kb_clone_repo, tmp_path):
+    """From a detached HEAD, checkout main must not revert to a stale local main."""
+    kb = kb_clone_repo / "kb"
+    # Advance the remote past local main via a second clone
+    other = tmp_path / "other"
+    run_git("clone", "-q", str(tmp_path / "kb-remote"), str(other))
+    run_git("config", "user.email", "t@t", cwd=other)
+    run_git("config", "user.name", "T", cwd=other)
+    (other / "README.md").write_text("# Kb v2\n")
+    run_git("add", "-A", cwd=other)
+    run_git("commit", "-q", "-m", "v2", cwd=other)
+    run_git("push", "-q", "origin", "main", cwd=other)
+    _detach(kb)
+
+    assert ensure_kb_on_main(kb) is True
+    assert (kb / "README.md").read_text() == "# Kb v2\n"  # not reverted to v1
+
+
+def test_ensure_kb_on_main_reports_failed_checkout(kb_clone_repo):
+    """A checkout that cannot land on main returns False instead of lying."""
+    kb = kb_clone_repo / "kb"
+    _detach(kb)
+    # Uncommitted change conflicting with main blocks the checkout
+    run_git("rm", "-q", "README.md", cwd=kb)
+    (kb / "README.md").write_text("conflicting\n")
+    run_git("add", "README.md", cwd=kb)
+    run_git("commit", "-q", "-m", "detached edit", cwd=kb)
+    (kb / "README.md").write_text("dirty\n")
+
+    assert ensure_kb_on_main(kb) is False
+
+
+def test_ensure_kb_on_main_reports_git_words_on_genuine_divergence(
+    kb_clone_repo, tmp_path, capsys
+):
+    """A real ff-only failure surfaces git's own diagnosis via report_failure,
+    not a hardcoded 'diverged' guess — golden principle 4, and the same
+    single seam every other kb git failure goes through."""
+    kb = kb_clone_repo / "kb"
+    remote = tmp_path / "kb-remote"
+
+    other = tmp_path / "other"
+    run_git("clone", "-q", str(remote), str(other))
+    run_git("config", "user.email", "t@t.com", cwd=other)
+    run_git("config", "user.name", "T", cwd=other)
+    (other / "remote.md").write_text("remote\n")
+    run_git("add", "-A", cwd=other)
+    run_git("commit", "-q", "-m", "remote", cwd=other)
+    run_git("push", "-q", "origin", "main", cwd=other)
+
+    (kb / "local.md").write_text("local\n")
+    run_git("add", "-A", cwd=kb)
+    run_git("commit", "-q", "-m", "local", cwd=kb)
+
+    assert ensure_kb_on_main(kb) is False
+    out = capsys.readouterr().out
+    assert "Could not fast-forward kb main to origin/main" in out
+    assert "git:" in out  # git's own stderr is reproduced, not a guessed cause
+    assert "rcorn kb sync" in out
+
+
+def test_commit_kb_refuses_off_main(kb_clone_repo, monkeypatch):
+    """No commit lands on a detached HEAD — the work stays in the worktree."""
+    kb = kb_clone_repo / "kb"
+    _detach(kb)
+    run_git("rm", "-q", "README.md", cwd=kb)
+    run_git("commit", "-q", "-m", "conflict setup", cwd=kb)
+    (kb / "README.md").write_text("draft\n")
+
+    assert commit_kb(kb_clone_repo, "doc: draft", kb_dir=kb) is False
+    r = run_git("log", "--oneline", "-1", cwd=kb)
+    assert "doc: draft" not in r.stdout
+    assert (kb / "README.md").read_text() == "draft\n"  # work intact

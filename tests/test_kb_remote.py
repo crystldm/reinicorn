@@ -9,6 +9,7 @@ actually uses, not the URL recorded in repository-controlled config.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -162,45 +163,16 @@ def test_inherited_url_skips_a_kb_clone_with_no_origin(tmp_path: Path):
 # --------------------------------------------------------------------------
 
 
-def test_configured_url_prefers_reinicorn_config(tmp_path: Path):
+def test_configured_url_reads_reinicorn_config(tmp_path: Path):
     repo = tmp_path / "cfg"
     repo.mkdir()
     (repo / ".reinicorn-config").write_text(f'REINICORN_KB_REMOTE="{HTTPS}"\n')
-    (repo / ".gitmodules").write_text(
-        '[submodule "kb"]\n\tpath = kb\n\turl = https://example.invalid/other.git\n'
-    )
-    assert configured_kb_remote_url(repo) == HTTPS
-
-
-def test_configured_url_falls_back_to_gitmodules(tmp_path: Path):
-    repo = tmp_path / "gm"
-    repo.mkdir()
-    (repo / ".gitmodules").write_text(
-        f'[submodule "kb"]\n\tpath = kb\n\turl = {HTTPS}\n\tbranch = main\n'
-    )
-    assert configured_kb_remote_url(repo) == HTTPS
-
-
-def test_configured_url_ignores_other_gitmodules_sections(tmp_path: Path):
-    repo = tmp_path / "gm2"
-    repo.mkdir()
-    (repo / ".gitmodules").write_text(
-        '[submodule "vendor"]\n\tpath = vendor\n\turl = https://example.invalid/v.git\n'
-        f'[submodule "kb"]\n\tpath = kb\n\turl = {HTTPS}\n'
-    )
     assert configured_kb_remote_url(repo) == HTTPS
 
 
 def test_configured_url_empty_when_nothing_declares_it(tmp_path: Path):
     repo = tmp_path / "nothing"
     repo.mkdir()
-    assert configured_kb_remote_url(repo) == ""
-
-
-def test_configured_url_empty_when_gitmodules_has_no_kb_url(tmp_path: Path):
-    repo = tmp_path / "gm3"
-    repo.mkdir()
-    (repo / ".gitmodules").write_text('[submodule "kb"]\n\tpath = kb\n\tbranch = main\n')
     assert configured_kb_remote_url(repo) == ""
 
 
@@ -263,7 +235,8 @@ def test_apply_is_a_noop_for_an_empty_url(submodule_repo: Path):
 
 
 def test_apply_refuses_an_unsafe_url(submodule_repo: Path, capsys):
-    """.gitmodules is repository-controlled: never hand it to git unvalidated."""
+    """The configured remote URL (.reinicorn-config's REINICORN_KB_REMOTE) is
+    repository-controlled: never hand it to git unvalidated."""
     kb = submodule_repo / "kb"
     before = remote_url(kb)
     assert apply_kb_remote_url(kb, "ext::sh -c 'touch /tmp/pwned'") == "failed"
@@ -296,16 +269,15 @@ def test_apply_reports_a_failed_remote_update(tmp_path: Path, capsys):
 
 
 def test_post_checkout_reports_a_failed_remote_update(
-    submodule_repo: Path, monkeypatch, capsys,
+    kb_clone_repo: Path, monkeypatch, capsys,
 ):
     """The hook surfaces the failure and still exits 0 — a post-checkout hook
     that fails would fail the user's `git checkout`."""
     from reinicorn.commands.internal.post_checkout import cmd_post_checkout
 
-    run_git("config", "protocol.file.allow", "always", cwd=submodule_repo)
-    wt = _add_worktree(submodule_repo, "wt-apply-fail")
+    shutil.rmtree(kb_clone_repo / "kb")
 
-    monkeypatch.chdir(wt)
+    monkeypatch.chdir(kb_clone_repo)
     with patch(
         "reinicorn.commands.internal.post_checkout.hook_check", return_value=True,
     ), patch(
@@ -313,6 +285,7 @@ def test_post_checkout_reports_a_failed_remote_update(
         return_value="failed",
     ):
         assert cmd_post_checkout(["", "", "1"]) == 0
+    assert (kb_clone_repo / "kb" / ".git").exists()
     out = capsys.readouterr().out
     assert "remote could not be set" in out
     assert "publishing from here will fail" in out
@@ -324,20 +297,19 @@ def test_post_checkout_reports_a_failed_remote_update(
 
 
 def test_post_checkout_worktree_kb_inherits_the_main_checkout_remote(
-    submodule_repo: Path, tmp_path: Path, monkeypatch,
+    kb_clone_repo: Path, tmp_path: Path, monkeypatch,
 ):
     """The reported failure: a worktree kb must not silently take the
     repository-recorded URL when the main checkout's kb overrides it."""
     from reinicorn.commands.internal.post_checkout import cmd_post_checkout
 
-    recorded = remote_url(submodule_repo / "kb")
+    recorded = configured_kb_remote_url(kb_clone_repo)
     override = tmp_path / "kb-remote-preferred"
     run_git("-c", "protocol.file.allow=always", "clone", "--bare",
             str(tmp_path / "kb-remote"), str(override))
-    run_git("remote", "set-url", "origin", str(override), cwd=submodule_repo / "kb")
+    run_git("remote", "set-url", "origin", str(override), cwd=kb_clone_repo / "kb")
 
-    run_git("config", "protocol.file.allow", "always", cwd=submodule_repo)
-    wt = _add_worktree(submodule_repo, "wt-remote")
+    wt = _add_worktree(kb_clone_repo, "wt-remote")
 
     monkeypatch.chdir(wt)
     with patch(

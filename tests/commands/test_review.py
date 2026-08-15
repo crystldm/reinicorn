@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -933,10 +934,35 @@ def test_merge_after_ci_cleanup_syncs_local(env: Path, monkeypatch, capsys, tmp_
 
     assert review_cmds.cmd_review_merge("x") == 0
     out = capsys.readouterr().out
-    assert "already landed" in out
+    assert "testproject/specs/x.md" in out
+    assert "Nothing to merge" in out
     # local kb synced: draft gone, approved doc present
     assert not (env / "kb/testproject/specs/drafts/x.md").exists()
     assert fm.get((env / "kb/testproject/specs/x.md").read_text(), "status") == "approved"
+
+
+def test_merge_reports_landed_doc_with_date_for_collision(env: Path, monkeypatch, capsys):
+    """No draft was ever created for this slug — an unrelated, already-
+    approved doc just happens to occupy the finalized path. Merge must not
+    silently report success without saying so: naming the doc and the date
+    it landed makes a stale collision (approved months ago, not "the review
+    I just did") self-evident rather than masked as a successful merge."""
+    kb = env / "kb"
+    final = kb / "testproject" / "specs" / "old-slug.md"
+    final.parent.mkdir(parents=True, exist_ok=True)
+    final.write_text(doc_text(
+        title="Old", slug="old-slug", status="approved", body="\n# Old\n",
+    ))
+    run_git("add", "-A", cwd=kb)
+    run_git("commit", "-q", "-m", "old landed doc", cwd=kb)
+    run_git("push", "-q", "origin", "main", cwd=kb)
+    _gh(monkeypatch)
+
+    assert review_cmds.cmd_review_merge("old-slug") == 0
+    out = capsys.readouterr().out
+    assert "testproject/specs/old-slug.md" in out
+    assert re.search(r"landed \d{4}-\d{2}-\d{2}", out)
+    assert "Nothing to merge" in out
 
 
 def test_cancel_warns_when_gh_pr_lookup_fails(env: Path, monkeypatch, capsys):

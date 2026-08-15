@@ -124,9 +124,11 @@ def _track(repo: Path) -> None:
     """Stage everything so `git ls-files` sees it.
 
     draft-refs resolves against git, not the filesystem, so a doc only counts
-    once it is tracked. Staging is enough — no commit needed.
+    once it is tracked. Staging is enough — no commit needed. kb/ is its own
+    nested git repo (clone layout), so staging happens inside it, not at the
+    parent root.
     """
-    run_git("add", "-A", cwd=repo)
+    run_git("add", "-A", cwd=repo / "kb")
 
 
 class TestDraftRefs:

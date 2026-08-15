@@ -25,3 +25,4 @@ htmlcov/
 
 # Local git worktrees
 .worktrees/
+kb/

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from reinicorn import console
@@ -24,94 +23,94 @@ from reinicorn.git import (
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Sequence
-
-
-def _parse_kb_submodule_path(text: str) -> str | None:
-    """Extract the path= value from [submodule "kb"] in .gitmodules text.
-
-    Returns None if no kb submodule entry is found.
-    """
-    in_kb_section = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped == f'[submodule "{KB_DIR_NAME}"]':
-            in_kb_section = True
-            continue
-        if in_kb_section:
-            if stripped.startswith("["):
-                break  # entered next section
-            key, _, value = stripped.partition("=")
-            if key.strip() == "path":
-                return value.strip() or None
-    return None
+    from pathlib import Path
 
 
 def get_kb_dir(root: Path | None = None) -> Path | None:
-    """Return the kb submodule directory, or None if no submodule is configured."""
+    """Return the kb clone directory, or None when no kb exists yet.
+
+    The kb is an ordinary git clone at <root>/kb. A directory without a
+    .git entry is not a kb — a leftover empty dir must not be treated as
+    one. `.git` may be a file (transitional submodule checkout, linked
+    worktree) or a directory (plain clone); both are real kbs.
+    """
     if root is None:
         root = repo_root()
         if root is None:
             return None
-
-    gitmodules = root / ".gitmodules"
-    if not gitmodules.is_file():
-        return None
-
-    path_str = _parse_kb_submodule_path(gitmodules.read_text())
-    if path_str is None:
-        return None
-
-    # .gitmodules is repository-controlled; refuse a path that resolves outside
-    # the repo root (absolute paths, ../ traversal) before it is used for reads,
-    # writes, or removals.
-    candidate = root / path_str
-    try:
-        rel = candidate.resolve().relative_to(root.resolve())
-    except ValueError:
-        rel = None
-    if rel is None or rel == Path():
-        console.error(
-            f"Refusing kb submodule path '{path_str}' from .gitmodules: "
-            f"it does not resolve to a directory inside the repository root."
-        )
-        return None
-
-    return candidate
+    candidate = root / KB_DIR_NAME
+    if (candidate / ".git").exists():
+        return candidate
+    return None
 
 
 def require_kb_dir(root: Path | None = None) -> Path:
-    """Return the kb submodule path, or print an error and raise SystemExit(1)."""
+    """Return the kb directory, or print an error and raise SystemExit(1)."""
     kb_dir = get_kb_dir(root)
     if kb_dir is None:
         console.error(
-            "No kb submodule found. "
-            "Run 'rcorn init' to set up the kb."
+            f"No kb found at {KB_DIR_NAME}/.\n"
+            "  If this repo already uses Reinicorn (teammate clone): "
+            "run 'rcorn kb sync' to clone it.\n"
+            "  If Reinicorn was never set up here: run 'rcorn init'."
         )
         raise SystemExit(1)
     return kb_dir
 
 
-def ensure_kb_on_main(kb_dir: Path) -> None:
-    """Ensure the kb submodule is on the main branch.
+def checkout_kb_main(kb_dir: Path) -> bool:
+    """Fetch origin/main (best effort) and put kb HEAD on the main branch.
 
-    Handles both detached HEAD and accidental feature-branch checkouts.
+    The fetch comes first so "main" can mean origin/main rather than a
+    possibly-stale local ref; offline is survivable (local commits publish
+    later), so a failed fetch warns and continues. A failed checkout is
+    reported and returns False — committing into a detached HEAD makes
+    work look saved when it is not.
     """
+    fta = file_transport_args(cwd=kb_dir)
+    fetch = run_git(*fta, "fetch", "origin", "main", check=False, cwd=kb_dir)
+    if fetch.returncode != 0:
+        console.warn(
+            "Could not fetch kb origin/main — continuing with the local ref."
+        )
+
     r = run_git("symbolic-ref", "--short", "HEAD", check=False, cwd=kb_dir)
     if r.returncode != 0 or r.stdout.strip() != "main":
-        run_git("checkout", "main", check=False, cwd=kb_dir)
+        co = run_git("checkout", "main", check=False, cwd=kb_dir)
+        if co.returncode != 0:
+            report_failure("put the kb on its main branch", co, warn=True)
+            return False
+    return True
 
 
-def stage_kb_pointer(root: Path, kb_dir: Path) -> None:
-    """Stage the kb submodule pointer in the parent repo index.
+def ensure_kb_on_main(kb_dir: Path) -> bool:
+    """Put the kb on an up-to-date main. Returns False when it cannot.
 
-    Derives the relative path from root so it works even if .gitmodules
-    uses a custom path (e.g. tools/kb instead of kb).
+    "Up to date" means: HEAD is main, and local main is not behind a
+    fetched origin/main (fast-forwarded here; ahead-only is fine — those
+    are unpublished doc commits). Never moves the working tree backwards
+    and never discards uncommitted kb work.
     """
-    try:
-        rel = kb_dir.relative_to(root)
-    except ValueError:
-        return
-    run_git("add", str(rel), check=False, cwd=root)
+    if not checkout_kb_main(kb_dir):
+        return False
+    # Only meaningful when the fetch above succeeded; --ff-only on an
+    # already-ahead main is a no-op ("Already up to date").
+    has_remote_ref = run_git(
+        "rev-parse", "--verify", "-q", "origin/main", check=False, cwd=kb_dir,
+    )
+    if has_remote_ref.returncode != 0:
+        return True  # nothing fetched to compare against
+    ff = run_git("merge", "--ff-only", "origin/main", check=False, cwd=kb_dir)
+    if ff.returncode != 0:
+        # A ff-only merge can fail on genuine divergence, but also on local
+        # *uncommitted* edits that conflict with what origin/main advanced —
+        # the ordinary publish-time state, since this runs before commit_kb
+        # sweeps the working tree. Let git's own words distinguish the two
+        # instead of guessing "diverged" for both.
+        report_failure("fast-forward kb main to origin/main", ff)
+        console.next_step("rcorn kb sync")
+        return False
+    return True
 
 
 def commit_kb(
@@ -121,7 +120,7 @@ def commit_kb(
     kb_dir: Path | None = None,
     paths: Sequence[Path] | None = None,
 ) -> bool:
-    """Auto-commit changes inside the kb submodule.
+    """Auto-commit changes inside the kb clone.
 
     By default sweeps up every change in the kb working tree (publish and
     review rely on this). Per-artifact create commands pass ``paths`` — the
@@ -129,14 +128,22 @@ def commit_kb(
     unrelated changes into their commit (issue #35).
 
     Returns True if a commit was made, False if nothing to commit
-    or no kb submodule is configured.
+    or no kb clone is configured.
     Pass kb_dir to skip the get_kb_dir() lookup when already resolved.
     """
     resolved = kb_dir if kb_dir is not None else get_kb_dir(root)
     if resolved is None or not resolved.is_dir():
         return False
 
-    ensure_kb_on_main(resolved)
+    if not ensure_kb_on_main(resolved):
+        console.error(
+            "Refusing to commit kb changes: the kb is not on an up-to-date "
+            "main (see above).\n"
+            f"  Where: {resolved}\n"
+            "  Your edits are still in the kb working tree — nothing is lost.\n"
+            "  How to fix: resolve the state above, then rerun this command."
+        )
+        return False
 
     # Pathspecs relative to the kb dir; `add -A -- <spec>` stages deletions
     # too, which plan-complete's directory move needs.
@@ -152,7 +159,6 @@ def commit_kb(
     # landing in this commit.
     r = run_git("commit", "-q", "-m", message, "--", *specs, check=False, cwd=resolved)
     if r.returncode == 0:
-        stage_kb_pointer(root, resolved)
         return True
     # Distinct from the "nothing staged" return above: there WAS work and it
     # did not get saved. Returning False silently made that look identical to
@@ -277,21 +283,6 @@ def branch_changed_files(branch: str, root: Path | None = None) -> set[str]:
     return {line for line in r.stdout.splitlines() if line}
 
 
-def kb_gitlink(root: Path, rev: str) -> str | None:
-    """The kb commit pinned by ``rev``'s tree, or None when it pins none.
-
-    ``<rev>:kb`` resolves the gitlink recorded in that revision — the kb
-    content a checkout of ``rev`` actually sees, regardless of what happens
-    to be staged or checked out right now. Pre-push checks anchor on this:
-    what ships with a pushed branch is its pinned kb commit, not the desk
-    state of the kb worktree.
-    """
-    r = run_git("rev-parse", f"{rev}:{KB_DIR_NAME}", check=False, cwd=root)
-    if r.returncode != 0:
-        return None
-    return r.stdout.strip() or None
-
-
 def branch_dir_name(branch: str) -> str:
     """Directory name a branch's exec-plan docs live under."""
     return sanitize_branch(branch)
@@ -350,7 +341,7 @@ def overlapping_branches(
     by branch name; only branches with a non-empty overlap are included.
 
     Returns None when there is no basis for comparison (no repo root, no kb
-    submodule, no other active branches, or the current branch has no
+    clone, no other active branches, or the current branch has no
     changed files vs main) — distinct from an empty list, which means the
     comparison actually ran and found no overlap.
     """

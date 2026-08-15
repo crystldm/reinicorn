@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from reinicorn.commands.internal.post_checkout import _kb_reference_args
+from reinicorn.commands.internal.post_checkout import _clone_reference_args
 from reinicorn.git import run_git
 
 
@@ -18,60 +18,55 @@ def _add_worktree(parent: Path, name: str) -> Path:
     return wt
 
 
-def test_kb_reference_args_without_shared_module(tmp_path: Path):
-    """No <common>/modules/kb (fresh clone) → plain init, no extra args."""
+def test_clone_reference_args_without_main_checkout_kb(tmp_path: Path):
+    """No kb/ at the main checkout root (fresh clone) → plain clone, no extra args."""
     repo = tmp_path / "plain"
     repo.mkdir()
     run_git("init", "-q", str(repo))
-    assert _kb_reference_args(repo) == []
+    assert _clone_reference_args(repo) == []
 
 
-def test_kb_reference_args_ignores_broken_module(tmp_path: Path):
-    """A module dir without objects/ must fall back to plain init."""
-    repo = tmp_path / "broken"
+def test_clone_reference_args_ignores_non_git_kb_dir(tmp_path: Path):
+    """A kb/ directory without .git (stale leftover) must not be borrowed from."""
+    repo = tmp_path / "stale"
     repo.mkdir()
     run_git("init", "-q", str(repo))
-    (repo / ".git" / "modules" / "kb").mkdir(parents=True)
-    assert _kb_reference_args(repo) == []
+    (repo / "kb").mkdir()
+    assert _clone_reference_args(repo) == []
 
 
-def test_kb_reference_args_at_main_checkout_root(submodule_repo: Path):
-    """Relative --git-common-dir output (.git) joins correctly against root."""
-    expected = (submodule_repo / ".git" / "modules" / "kb").resolve()
-    assert _kb_reference_args(submodule_repo) == ["--reference", str(expected)]
-
-
-def test_kb_reference_args_in_worktree(submodule_repo: Path):
-    """A linked worktree borrows from the main checkout's module clone."""
-    wt = _add_worktree(submodule_repo, "wt-ref")
-    expected = (submodule_repo / ".git" / "modules" / "kb").resolve()
-    assert _kb_reference_args(wt) == ["--reference", str(expected)]
+def test_clone_reference_args_in_worktree(kb_clone_repo: Path):
+    """A linked worktree borrows objects from the main checkout's kb clone."""
+    wt = _add_worktree(kb_clone_repo, "wt-ref")
+    expected = kb_clone_repo / "kb"
+    assert _clone_reference_args(wt) == [
+        "--reference-if-able", str(expected), "--dissociate",
+    ]
 
 
 def test_post_checkout_inits_worktree_kb_with_reference(
-    submodule_repo: Path, monkeypatch,
+    kb_clone_repo: Path, monkeypatch,
 ):
-    """cmd_post_checkout in a fresh worktree initializes kb via alternates."""
+    """cmd_post_checkout in a fresh worktree clones kb, borrowing objects from
+    the main checkout's kb via --reference-if-able/--dissociate."""
     from reinicorn.commands.internal.post_checkout import cmd_post_checkout
 
-    # git 2.38+ blocks local file transport; worktrees share the repo config
-    run_git("config", "protocol.file.allow", "always", cwd=submodule_repo)
-    wt = _add_worktree(submodule_repo, "wt-init")
+    wt = _add_worktree(kb_clone_repo, "wt-init")
     assert not (wt / "kb" / ".git").exists()
 
     monkeypatch.chdir(wt)
     with patch(
         "reinicorn.commands.internal.post_checkout.hook_check", return_value=True,
-    ):
+    ), patch(
+        "reinicorn.commands.internal.post_checkout.run_git", wraps=run_git,
+    ) as spy:
         assert cmd_post_checkout(["", "", "1"]) == 0
 
     assert (wt / "kb" / ".git").exists()
-    alternates = (
-        submodule_repo / ".git" / "worktrees" / "wt-init" / "modules" / "kb"
-        / "objects" / "info" / "alternates"
-    )
-    assert alternates.is_file(), "kb clone should borrow objects via --reference"
-    assert "modules/kb/objects" in alternates.read_text()
+    clone_call = next(c for c in spy.call_args_list if "clone" in c.args)
+    assert "--reference-if-able" in clone_call.args
+    assert str(kb_clone_repo / "kb") in clone_call.args
+    assert "--dissociate" in clone_call.args
 
 
 def test_hooks_install_targets_common_dir(tmp_path: Path, monkeypatch):

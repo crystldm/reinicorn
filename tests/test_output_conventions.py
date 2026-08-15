@@ -29,15 +29,40 @@ def test_next_step_shape(capsys):
     assert err == ""
 
 
-def test_no_direct_stderr_prints_in_commands():
-    """Agent-facing modules must use console.* channels, not raw stderr prints."""
+def test_stderr_confinement_is_ruff_enforced():
+    """The stderr channel rule is ruff-native; this pins the config.
+
+    `sys.stderr` outside console.py is banned via TID251 (per the ruff-first
+    philosophy in test_source_of_truth.py — stronger than the string scan
+    this test replaced: whole src tree, and it catches `from sys import
+    stderr` too). A config edit could silently drop the ban; this pin makes
+    that a test failure instead.
+    """
+    import tomllib
     from pathlib import Path
 
-    import reinicorn.commands as commands
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    lint = tomllib.loads(pyproject.read_text())["tool"]["ruff"]["lint"]
 
-    offenders = []
-    for py in Path(commands.__path__[0]).rglob("*.py"):
-        text = py.read_text()
-        if "file=sys.stderr" in text:
-            offenders.append(py.name)
-    assert offenders == [], f"raw stderr prints in: {offenders}"
+    assert "sys.stderr" in lint["flake8-tidy-imports"]["banned-api"], (
+        "the sys.stderr TID251 ban is gone — stderr writes outside "
+        "console.py are no longer linted"
+    )
+    exempt = [
+        path for path, rules in lint["per-file-ignores"].items()
+        if "TID251" in rules and path.startswith("src/")
+    ]
+    assert sorted(exempt) == [
+        "src/reinicorn/console.py",
+        "src/reinicorn/kb.py",
+    ], (
+        "unexpected TID251 exemption in src/ — a new entry would also lift "
+        f"the stderr ban for that module (found: {exempt})"
+    )
+    # kb.py's exemption exists for sanitize_branch, but TID251 is per-rule:
+    # it lifts the stderr ban there too. Ruff can't see that, so pin it here.
+    kb_src = (pyproject.parent / "src" / "reinicorn" / "kb.py").read_text()
+    assert "sys.stderr" not in kb_src and "from sys import stderr" not in kb_src, (
+        "kb.py writes to stderr directly — its TID251 exemption is for "
+        "sanitize_branch only; route output through console.py"
+    )

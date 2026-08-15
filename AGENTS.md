@@ -16,7 +16,7 @@ plans, and quality controls in a shared Git-backed knowledge base.
 ## Knowledge base
 
 Read and follow `kb/reinicorn/README.md` before planning or changing code. Use
-`rcorn` for every KB operation; never manage the KB submodule with raw Git.
+`rcorn` for every KB operation; never manage the KB checkout with raw Git.
 This rule applies to agents and contributors operating *on* the KB —
 `src/reinicorn/` is the implementation of that interface, and its internal
 `run_git` calls are expected.

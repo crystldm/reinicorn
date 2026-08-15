@@ -10,9 +10,10 @@ REINICORN_KB_SCOPE=reinicorn
 # from branch names (e.g., feature/PROJ-1234-description -> PROJ-1234).
 REINICORN_TICKET_PATTERN="[A-Z]+-[0-9]+"
 
-# Kb submodule remote URL (for attach workflow).
-# Set this when using the submodule layout so Reinicorn sync/publish know
-# where to push and pull.
+# Kb remote URL. The kb is an ordinary clone at kb/ (gitignored);
+# sync/publish and the bootstrap clone read this to know where to push
+# and pull. An existing kb clone's own origin takes precedence, so a
+# local protocol override (e.g. SSH) never needs to be committed here.
 REINICORN_KB_REMOTE="https://github.com/crystldm/reinicorn-kb.git"
 
 # Stale docs threshold in days. Documents not modified within this window

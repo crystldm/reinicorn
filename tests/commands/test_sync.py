@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 from reinicorn.commands.sync import cmd_sync
 from reinicorn.git import run_git
+
+
+def test_sync_clones_when_kb_absent(kb_clone_repo: Path) -> None:
+    """A teammate clone (config present, kb/ missing) gets a kb from one command."""
+    shutil.rmtree(kb_clone_repo / "kb")
+    with patch("reinicorn.commands.sync.repo_root", return_value=kb_clone_repo), \
+         patch("reinicorn.commands.sync.current_branch", return_value="main"):
+        assert cmd_sync() == 0
+    assert (kb_clone_repo / "kb" / ".git").exists()
 
 
 def test_sync_stays_on_main_branch(submodule_repo: Path) -> None:
@@ -78,19 +88,6 @@ def test_sync_uses_merge_not_rebase(submodule_repo: Path, tmp_path: Path) -> Non
 
     # The local commit should be an ancestor of HEAD (not orphaned)
     r = run_git("merge-base", "--is-ancestor", local_sha, "HEAD", cwd=kb, check=False)
-    assert r.returncode == 0
-
-
-def test_sync_stages_parent_pointer(submodule_repo: Path) -> None:
-    """After sync, the parent submodule pointer should be staged."""
-    with patch("reinicorn.commands.sync.repo_root", return_value=submodule_repo), \
-         patch("reinicorn.commands.sync.current_branch", return_value="feature/x"):
-        result = cmd_sync()
-
-    assert result == 0
-    r = run_git("diff", "--cached", "--name-only", cwd=submodule_repo)
-    # May or may not be staged depending on whether HEAD changed,
-    # but at minimum it should not error
     assert r.returncode == 0
 
 

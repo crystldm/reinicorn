@@ -2,7 +2,7 @@
 # lint-shellcheck — Lint rule: scripts/shellcheck
 #
 # Runs shellcheck on all .sh files in the project, excluding vendored paths
-# (.git/, kb/ submodule, .reinicorn/hooks/ copies, .venv/).
+# (.git/, kb/ clone, .reinicorn/hooks/ copies, .venv/).
 #
 # Exit 0 if all scripts pass. Exit 1 if any issues found.
 

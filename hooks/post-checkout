@@ -3,7 +3,7 @@
 # post-checkout — Reinicorn git hook
 #
 # Runs after `git checkout` and `git worktree add`. Responsibilities:
-#   1. Ensure kb submodule exists (fresh clone / new worktree)
+#   1. Ensure kb clone exists (fresh clone / new worktree)
 #   2. On new branch checkout, suggest `rcorn plan create`
 #
 # Delegates all logic to `rcorn _post-checkout` (Python).

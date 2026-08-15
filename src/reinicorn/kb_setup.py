@@ -1,8 +1,8 @@
-"""Submodule setup with empty-remote detection and cleanup.
+"""Kb clone setup with empty-remote detection and cleanup.
 
 Handles the common failure modes from init/attach:
 - Empty/bare remotes (no commits) — detect and seed automatically
-- Failed submodule add leaves stale state — clean up properly
+- Failed clone leaves stale state — clean up properly
 - Opaque git errors — surface stderr in error messages
 """
 
@@ -14,13 +14,13 @@ from pathlib import Path
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.git import explain_failure, run_git, scratch_clone
+from reinicorn.git import GitError, explain_failure, run_git, scratch_clone
 from reinicorn.kb_seed import generate_seed_tree
 from reinicorn.validation import validate_git_url
 
 
-class SubmoduleError(Exception):
-    """Raised when submodule setup fails.
+class KbSetupError(Exception):
+    """Raised when kb clone setup fails.
 
     The message carries the whole diagnosis, git's own output included — built
     by `git.explain_failure`, never assembled here. Nothing outside git.py
@@ -44,6 +44,9 @@ def seed_remote(url: str, repo_slug: str) -> None:
         tmp_path = scratch_clone(
             url, Path(tmp) / "kb-seed", transport=file_allow, ident="init",
         )
+        # Seed on main regardless of the user's init.defaultBranch — sync,
+        # publish, and the clone message all assume origin/main.
+        run_git("symbolic-ref", "HEAD", "refs/heads/main", cwd=tmp_path)
         generate_seed_tree(tmp_path, repo_slug)
         run_git("add", "-A", cwd=tmp_path)
         run_git("commit", "-q", "-m", "chore: initialize reinicorn kb", cwd=tmp_path)
@@ -52,10 +55,12 @@ def seed_remote(url: str, repo_slug: str) -> None:
     console.success(f"Seeded remote with kb template for '{repo_slug}'")
 
 
-def cleanup_failed_submodule(target_dir: Path) -> None:
-    """Remove stale state from a failed submodule add.
+def cleanup_failed_kb(target_dir: Path) -> None:
+    """Remove stale state from a failed kb clone attempt.
 
-    Cleans both kb/ directory and .git/modules/kb.
+    Cleans both kb/ directory and .git/modules/kb — the latter can be left
+    behind by a migration or an old submodule-era checkout, and a fresh clone
+    must not trip on it.
     """
     kb = target_dir / KB_DIR_NAME
     if kb.exists():
@@ -70,12 +75,24 @@ def cleanup_failed_submodule(target_dir: Path) -> None:
             check=False, cwd=target_dir)
 
 
-def setup_submodule(
+def ensure_kb_gitignored(root: Path) -> bool:
+    """Add `kb/` to the repo .gitignore. Returns True when it was added."""
+    gitignore = root / ".gitignore"
+    entry = f"{KB_DIR_NAME}/"
+    existing = gitignore.read_text() if gitignore.is_file() else ""
+    if entry in existing.splitlines():
+        return False
+    text = existing if existing.endswith("\n") or not existing else existing + "\n"
+    gitignore.write_text(text + entry + "\n")
+    return True
+
+
+def setup_kb_clone(
     target_dir: Path,
     url: str,
     repo_slug: str | None = None,
 ) -> bool:
-    """Add kb as a git submodule with proper error handling.
+    """Clone kb as a plain, gitignored git clone with proper error handling.
 
     - Detects and seeds empty remotes
     - Cleans up stale state from prior failed attempts
@@ -83,7 +100,7 @@ def setup_submodule(
     """
     url_error = validate_git_url(url)
     if url_error is not None:
-        raise SubmoduleError(
+        raise KbSetupError(
             f"Refusing to use kb URL '{url}'.\n"
             f"  {url_error}\n"
             f"  How to fix: use an https://, ssh://, git@host:path, or local URL."
@@ -92,46 +109,37 @@ def setup_submodule(
     kb_dir = target_dir / KB_DIR_NAME
 
     # Clean up any stale state from prior failed attempts
-    if kb_dir.is_dir() and not (target_dir / ".gitmodules").is_file():
+    if kb_dir.is_dir() and not (kb_dir / ".git").exists():
         console.info("Cleaning up stale state from a previous failed setup...")
-        cleanup_failed_submodule(target_dir)
+        cleanup_failed_kb(target_dir)
 
     # Check if remote is empty and seed if needed
     if is_remote_empty(url):
         if repo_slug is None:
             from reinicorn.git import repo_slug as get_slug
             repo_slug = get_slug()
-        seed_remote(url, repo_slug)
+        try:
+            seed_remote(url, repo_slug)
+        except GitError as e:
+            # Callers catch KbSetupError, not GitError — an unconverted
+            # seeding failure surfaces as a raw traceback.
+            raise KbSetupError("\n".join(explain_failure(
+                "seed the empty kb remote", e,
+                detail=[f"URL: {url}"],
+            ))) from e
 
-    # Add submodule
     file_allow = ("-c", "protocol.file.allow=always") if url.startswith("/") else ()
-    r = run_git(
-        *file_allow,
-        "submodule", "add", url, KB_DIR_NAME,
-        check=False, cwd=target_dir,
-    )
-
+    r = run_git(*file_allow, "clone", url, str(kb_dir), check=False)
     if r.returncode != 0:
-        # Check if already registered
-        gitmodules = target_dir / ".gitmodules"
-        if gitmodules.is_file() and KB_DIR_NAME in gitmodules.read_text():
-            console.warn("Kb submodule already registered — updating")
-            run_git(*file_allow, "submodule", "update", "--init", KB_DIR_NAME, cwd=target_dir)
-        else:
-            cleanup_failed_submodule(target_dir)
-            raise SubmoduleError("\n".join(explain_failure(
-                "add the kb submodule", r,
-                detail=[
-                    f"URL: {url}",
-                    "How to fix: Check the URL is correct and you have access.",
-                ],
-            )))
+        cleanup_failed_kb(target_dir)
+        raise KbSetupError("\n".join(explain_failure(
+            "clone the kb", r,
+            detail=[
+                f"URL: {url}",
+                "How to fix: Check the URL is correct and you have access.",
+            ],
+        )))
 
-    # Configure submodule
-    run_git("config", "-f", ".gitmodules", f"submodule.{KB_DIR_NAME}.branch", "main",
-            check=False, cwd=target_dir)
-    run_git("config", "-f", ".gitmodules", f"submodule.{KB_DIR_NAME}.ignore", "all",
-            check=False, cwd=target_dir)
-
-    console.success("Kb added as submodule tracking main branch (ignore=all)")
+    ensure_kb_gitignored(target_dir)
+    console.success("Kb cloned (tracking main)")
     return True

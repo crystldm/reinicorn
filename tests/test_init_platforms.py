@@ -25,30 +25,14 @@ def _init_repo(path: Path) -> None:
 def test_init_path_classifies_platform_handling_paths(tmp_path: Path):
     assert _init_path(tmp_path) == "full"
 
-    (tmp_path / ".gitmodules").write_text(
-        '[submodule "kb"]\n'
-        "\tpath = kb\n"
-        "\turl = https://example.com/kb.git\n"
-    )
+    kb_dir = tmp_path / "kb"
+    _init_repo(kb_dir)
     assert _init_path(tmp_path) == "assets_only"
 
     manifest = tmp_path / ".reinicorn" / "manifest.json"
     manifest.parent.mkdir()
     manifest.write_text("{}")
     assert _init_path(tmp_path) == "hooks_only"
-
-
-def test_init_path_ignores_kb_substrings_outside_submodule_path(tmp_path: Path):
-    (tmp_path / ".gitmodules").write_text(
-        '[submodule "docs"]\n'
-        "\tpath = docs\n"
-        "\turl = https://example.com/kb.git\n"
-    )
-    manifest = tmp_path / ".reinicorn" / "manifest.json"
-    manifest.parent.mkdir()
-    manifest.write_text("{}")
-
-    assert _init_path(tmp_path) == "full"
 
 
 def test_init_generates_claude_md(tmp_path: Path):
@@ -234,13 +218,8 @@ def test_init_platforms_raw_ignored_on_hooks_only_teammate_clone(
     """Hooks-only path must not hard-fail on --platforms (even unknown keys)."""
     repo = tmp_path / "teammate-repo"
     _init_repo(repo)
-    (repo / ".gitmodules").write_text(
-        '[submodule "kb"]\n'
-        "\tpath = kb\n"
-        "\turl = https://example.com/kb.git\n"
-    )
     kb_dir = repo / "kb"
-    kb_dir.mkdir()
+    _init_repo(kb_dir)
     (kb_dir / "README.md").write_text("# Existing kb\n")
     manifest = repo / ".reinicorn" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
