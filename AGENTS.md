@@ -7,7 +7,11 @@ plans, and quality controls in a shared Git-backed knowledge base.
 ## Build and test
 
 - Python 3.12+; dependencies and environments are managed with uv.
-- Run the CLI with `rcorn`; use `uv run rcorn` to exercise in-repo changes.
+- Run the CLI with the installed `rcorn`, never `uv run rcorn` — git hooks and
+  daily usage call the global binary, and working through `uv run` masks a
+  stale install. The one exception: explicitly testing in-repo changes before
+  installation, stated as such. After merging CLI changes, reinstall with
+  `uv tool install --force .` so the installed binary matches main.
 - Run tests with `uv run pytest tests/ -v`.
 - Run lint with `uv run ruff check src/reinicorn tests`.
 - Run type checking with `uv run pyright src/reinicorn`.
