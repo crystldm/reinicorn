@@ -243,7 +243,9 @@ _DISPATCH = {
     ("debt", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
         "debt", include_drafts=getattr(a, "include_drafts", False)
     ),
-    ("idea", "create"): lambda a: _load("idea", "cmd_idea")(" ".join(a.text)),
+    ("idea", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
+        "idea", " ".join(a.text)
+    ),
     ("idea", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
         "idea", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
     ),
