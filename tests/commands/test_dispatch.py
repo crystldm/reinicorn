@@ -98,3 +98,26 @@ def test_every_parser_verb_has_a_dispatch_entry():
         pairs = [(noun, None)] if verbs is None else [(noun, v) for v in verbs]
         missing.extend(p for p in pairs if p not in _DISPATCH)
     assert not missing, f"parser verbs without _DISPATCH entries: {missing}"
+
+
+@pytest.mark.parametrize("noun,argv_tail,expected_args", [
+    ("spec", ["create", "My", "Title"], ("spec", "My Title")),
+    ("prd", ["create", "My", "Title"], ("prd", "My Title")),
+    ("debt", ["create", "My", "Title"], ("debt", "My Title")),
+    ("idea", ["create", "some", "idea", "text"], ("idea", "some idea text")),
+    ("principle", ["add", "My", "Rule"], ("principle", "My Rule")),
+])
+def test_create_dispatches_to_cmd_doc_create(noun, argv_tail, expected_args):
+    with patch(
+        "reinicorn.commands.doc_create.cmd_doc_create", return_value=0
+    ) as mock_create:
+        assert main([noun, *argv_tail]) == 0
+    mock_create.assert_called_once_with(*expected_args)
+
+
+def test_retro_create_dispatches_without_title():
+    with patch(
+        "reinicorn.commands.doc_create.cmd_doc_create", return_value=0
+    ) as mock_create:
+        assert main(["retro", "create"]) == 0
+    mock_create.assert_called_once_with("retro")
