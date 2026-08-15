@@ -265,18 +265,43 @@ def test_cmd_retro_create_heading_contains_branch(kb_repo: Path):
     assert "# Retro: feature/x" in content
 
 
-def test_create_typed_unknown_type_returns_error():
-    """_create_typed must guard against unknown doc types."""
-    from reinicorn.commands.doc_create import _create_typed
-    result = _create_typed("nonexistent", "some title")
-    assert result == 1
+def test_doc_create_unknown_type_returns_error():
+    """cmd_doc_create must guard against unknown doc types."""
+    from reinicorn.commands.doc_create import cmd_doc_create
+    assert cmd_doc_create("nonexistent", "some title") == 1
 
 
-def test_create_typed_empty_title_rejected_for_non_retro():
-    """_create_typed must require a title for every type except retro."""
-    from reinicorn.commands.doc_create import _create_typed
-    assert _create_typed("spec", "") == 1
-    assert _create_typed("spec", "   ") == 1
+def test_doc_create_empty_title_rejected_for_title_types():
+    from reinicorn.commands.doc_create import cmd_doc_create
+    assert cmd_doc_create("spec", "") == 1
+    assert cmd_doc_create("spec", "   ") == 1
+
+
+def test_debt_create_carries_static_extra_meta(kb_repo: Path):
+    """Debt's severity/category/remediation now come from REGISTRY.extra_meta."""
+    from reinicorn.commands.doc_create import cmd_doc_create
+    p1, p2, p3, p4 = _create_env(kb_repo)
+    with p1, p2, p3, p4:
+        assert cmd_doc_create("debt", "Old coupling") == 0
+    doc = kb_repo / "kb" / "testproject" / "tech-debt" / "old-coupling.md"
+    text = doc.read_text()
+    assert fm.get(text, "severity") == "medium"
+    assert fm.get(text, "category") == "_domain_"
+    assert fm.get(text, "remediation") == "planned"
+
+
+def test_principle_add_appends_numbered_item(kb_repo: Path):
+    """Second add appends item 2 to the singleton file, no new file."""
+    from reinicorn.commands.doc_create import cmd_doc_create
+    p1, p2, p3, p4 = _create_env(kb_repo)
+    with p1, p2, p3, p4:
+        assert cmd_doc_create("principle", "First rule") == 0
+        assert cmd_doc_create("principle", "Second rule") == 0
+    doc = kb_repo / "kb" / "testproject" / "golden-principles.md"
+    content = doc.read_text()
+    assert "1. **First rule**" in content
+    assert "2. **Second rule**" in content
+    assert fm.get(content, "status") == "active"
 
 
 def test_create_suggests_publish(kb_repo, monkeypatch, capsys):

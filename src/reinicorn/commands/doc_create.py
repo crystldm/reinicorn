@@ -8,7 +8,13 @@ from pathlib import Path
 
 from reinicorn import console, frontmatter
 from reinicorn.config import KB_DIR_NAME, kb_scope
-from reinicorn.doc_types import REGISTRY, drafts_dir, get_doc_dir, get_protected_map
+from reinicorn.doc_types import (
+    REGISTRY,
+    DocType,
+    drafts_dir,
+    get_doc_dir,
+    get_protected_map,
+)
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.kb import (
     branch_dir_name,
@@ -87,111 +93,107 @@ def _slug_target(doc_type: str, repo_dir: Path, slug: str) -> Path:
     return target
 
 
-def _create_spec(repo_dir: Path, title: str, author: str) -> Path:
-    slug = _slugify(title)
-    target = _slug_target("spec", repo_dir, slug)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        _provenance(title, author, doc_type="spec")
-        + "\n## Problem\n\n_Describe the problem._\n"
-        "\n## Design Goals\n\n_What must be true when this is done._\n"
-        "\n## Design\n\n_How it works._\n"
-        "\n## Non-Goals\n\n_What this explicitly does not cover._\n"
-    )
-    return target
+def render_doc(
+    dt: DocType, title: str, author: str, *,
+    extra: dict[str, object] | None = None,
+    body_params: dict[str, str] | None = None,
+) -> str:
+    """Frontmatter + H1 + the type's template body — the one rendering path
+    every doc-type creation goes through (registry-driven-doc-types stage 1)."""
+    sections = "".join(f"\n## {s}\n\n- \n" for s in dt.required_sections)
+    params: dict[str, str] = {
+        "title": title, "author": author,
+        "date": date.today().isoformat(), "sections": sections,
+    }
+    params.update(body_params or {})
+    merged: dict[str, object] = dict(dt.extra_meta)
+    merged.update(extra or {})
+    return _provenance(
+        title, author, status=dt.create_status, doc_type=dt.key, extra=merged,
+    ) + dt.template_body.format(**params)
 
 
-def _create_prd(repo_dir: Path, title: str, author: str) -> Path:
-    slug = _slugify(title)
-    target = _slug_target("prd", repo_dir, slug)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        _provenance(title, author, doc_type="prd")
-        + "\n## Overview\n\n_One-paragraph summary._\n"
-        "\n## User Stories\n\n- As a [role], I want [goal] so that [benefit].\n"
-        "\n## Acceptance Criteria\n\n- [ ] _Criterion 1_\n"
-        "\n## Out of Scope\n\n_What this PRD explicitly does not cover._\n"
-        "\n## Open Questions\n\n_Unresolved decisions._\n"
-    )
-    return target
+def _branch_target(dt: DocType, repo_dir: Path, branch: str) -> Path:
+    """Branch-addressed target. Retro rides with an active plan when one
+    exists (spec non-goal: this coupling stays code; identity check against
+    the registry row keeps type knowledge out of string comparisons)."""
+    if dt is REGISTRY["retro"]:
+        active_dir = branch_doc_path("plan", repo_dir, branch).parent
+        if active_dir.is_dir():
+            return active_dir / Path(dt.filename).name
+    return branch_doc_path(dt.key, repo_dir, branch)
 
 
-def _create_debt(repo_dir: Path, title: str, author: str) -> Path:
-    slug = _slugify(title)
-    target = _slug_target("debt", repo_dir, slug)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        _provenance(title, author, doc_type="debt", extra={
-            "severity": "medium", "category": "_domain_",
-            "remediation": "planned",
-        })
-        + "\n## Impact\n\n_What this debt causes._\n"
-        "\n## Remediation Plan\n\n_How to fix it._\n"
-    )
-    return target
-
-
-def _create_retro(repo_dir: Path, title: str, author: str) -> Path:
-    branch = current_branch() or "unknown"
-    # Prefer the active plan dir (retro travels to completed/ at archive time);
-    # fall back to the completed path when there is no active plan.
-    active_dir = branch_doc_path("plan", repo_dir, branch).parent
-    if active_dir.is_dir():
-        target = active_dir / Path(REGISTRY["retro"].filename).name
-    else:
-        target = branch_doc_path("retro", repo_dir, branch)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    heading = title.strip() if title.strip() else f"Retro: {branch}"
-    sections = "".join(
-        f"\n## {s}\n\n- \n" for s in REGISTRY["retro"].required_sections
-    )
-    target.write_text(_provenance(
-        heading, author, doc_type="retro",
-        extra={"branch": branch, "slug": branch_dir_name(branch)},
-    ) + sections)
-    return target
-
-
-def _create_principle(repo_dir: Path, title: str, _author: str) -> Path:
-    target = repo_dir / REGISTRY["principle"].filename
+def _append_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
+    """create_mode="append": add one templated item to the singleton file."""
+    target = repo_dir / dt.filename
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_provenance(
-            "Golden Principles", _author or "unknown",
-            status="active", doc_type="principle",
+            "Golden Principles", author or "unknown",
+            status=dt.create_status, doc_type=dt.key,
             extra={"slug": target.stem},
         ) + "\n")
-
     content = target.read_text()
-    existing = re.findall(r'^\d+\.', content, re.MULTILINE)
-    num = len(existing) + 1
-
+    num = len(re.findall(r"^\d+\.", content, re.MULTILINE)) + 1
     target.write_text(
-        content.rstrip()
-        + f"\n\n{num}. **{title}**\n"
-        f"   - _Rule description_\n"
-        f"   - Prevents: _What this rule prevents_\n"
+        content.rstrip() + dt.template_body.format(num=num, title=title)
     )
     return target
 
 
-_CREATORS = {
-    "spec": _create_spec,
-    "prd": _create_prd,
-    "debt": _create_debt,
-    "retro": _create_retro,
-    "principle": _create_principle,
-}
+def _create_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
+    """Create (or append) one doc from its registry row."""
+    if dt.create_mode == "append":
+        return _append_doc(dt, repo_dir, title, author)
+    if dt.addressing == "branch":
+        branch = current_branch() or "unknown"
+        target = _branch_target(dt, repo_dir, branch)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        heading = title.strip() or f"{dt.key.capitalize()}: {branch}"
+        target.write_text(render_doc(
+            dt, heading, author,
+            extra={"branch": branch, "slug": branch_dir_name(branch)},
+        ))
+        return target
+    if dt.title_source == "free_text":
+        username = re.sub(r"[^a-z0-9-]", "", author.lower().replace(" ", "-"))
+        slug = _slugify(title)
+        target = get_doc_dir(dt.key, repo_dir) / dt.filename.format(
+            slug=slug, username=username,
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            # Derived slugs collide silently (the user never chose one), so
+            # suffix instead of erroring like title-addressed creates do.
+            target = target.with_stem(f"{slug}-2")
+        heading = title.split("\n")[0][:80]
+        target.write_text(render_doc(
+            dt, heading, author,
+            extra={"slug": target.stem}, body_params={"text": title},
+        ))
+        return target
+    slug = _slugify(title)
+    target = _slug_target(dt.key, repo_dir, slug)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_doc(dt, title, author))
+    return target
 
 
-def _create_typed(doc_type: str, title: str) -> int:
-    """Internal helper used by per-type create entry points."""
-    if doc_type not in _CREATORS:
+def cmd_doc_create(doc_type: str, title: str = "") -> int:
+    """Create a kb doc of any registry type — the one generic entry point."""
+    dt = REGISTRY.get(doc_type)
+    if dt is None:
         console.error(f"Unknown doc type '{doc_type}'.")
         return 1
 
-    if REGISTRY[doc_type].title_source == "title" and not title.strip():
+    if dt.title_source == "title" and not title.strip():
         console.error("Title is required.")
+        return 1
+    if dt.title_source == "free_text" and not title.strip():
+        console.error(
+            f'Usage: rcorn {dt.key} {dt.create_verb} "your {dt.key} here"'
+        )
         return 1
 
     root = repo_root()
@@ -199,49 +201,50 @@ def _create_typed(doc_type: str, title: str) -> int:
         return 1
     kb_dir = require_kb_dir(root)
 
-    slug = kb_scope(root)
-    repo_dir = kb_dir / slug
+    repo_dir = kb_dir / kb_scope(root)
     repo_dir.mkdir(parents=True, exist_ok=True)
 
     author = _get_author()
-    creator = _CREATORS[doc_type]
     try:
-        filepath = creator(repo_dir, title, author)
+        filepath = _create_doc(dt, repo_dir, title, author)
     except FileExistsError as e:
         console.error(str(e))
         return 1
 
     console.success(f"Created: {filepath}")
-    # Branch-addressed docs (retros) derive their identity from the branch
-    # (encoded in the path), not the title, so the parent dir name is the slug.
-    branch_addressed = "{branch}" in REGISTRY[doc_type].filename
-    slug = filepath.parent.name if branch_addressed else _slugify(title)
-    if REGISTRY[doc_type].gated:
+    # Branch-addressed docs derive identity from the branch (encoded in the
+    # path); free-text docs from the deduped filename; the rest from the title.
+    if dt.addressing == "branch":
+        slug = filepath.parent.name
+    elif dt.title_source == "free_text":
+        slug = filepath.stem
+    else:
+        slug = _slugify(title)
+    if dt.gated:
         console.next_step(f"rcorn review start {slug}")
-    commit_kb(root, f"doc({doc_type}): {slug}", paths=[filepath])
+    commit_kb(root, f"doc({dt.key}): {slug}", paths=[filepath])
     console.next_step("rcorn kb publish")
     return 0
 
 
 def cmd_spec_create(title: str) -> int:
-    return _create_typed("spec", title)
+    return cmd_doc_create("spec", title)
 
 
 def cmd_prd_create(title: str) -> int:
-    return _create_typed("prd", title)
+    return cmd_doc_create("prd", title)
 
 
 def cmd_debt_create(title: str) -> int:
-    return _create_typed("debt", title)
+    return cmd_doc_create("debt", title)
 
 
 def cmd_retro_create() -> int:
-    """Create a retro for the current branch (heading derived from branch)."""
-    return _create_typed("retro", "")
+    return cmd_doc_create("retro", "")
 
 
 def cmd_principle_add(title: str) -> int:
-    return _create_typed("principle", title)
+    return cmd_doc_create("principle", title)
 
 
 def cmd_doc_check_path(file_path: str) -> int:
