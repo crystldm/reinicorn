@@ -37,7 +37,7 @@ def _slugify(text: str) -> str:
 
 def _provenance(
     title: str, author: str, status: str = "draft",
-    doc_type: str = "spec", *, extra: dict[str, object] | None = None,
+    *, doc_type: str, extra: dict[str, object] | None = None,
 ) -> str:
     """Frontmatter block plus the `# title` H1 that opens every doc body.
 
@@ -185,6 +185,14 @@ def cmd_doc_create(doc_type: str, title: str = "") -> int:
     dt = REGISTRY.get(doc_type)
     if dt is None:
         console.error(f"Unknown doc type '{doc_type}'.")
+        return 1
+
+    if dt is REGISTRY["plan"]:
+        console.error(
+            f"Use '{dt.create_hint}' instead — plan creation in "
+            "commands/plan.py runs lifecycle logic (templates, ticket, "
+            "overlap check) that this generic path would skip."
+        )
         return 1
 
     if dt.title_source == "title" and not title.strip():

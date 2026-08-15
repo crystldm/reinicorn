@@ -28,9 +28,9 @@ class DocType:
     protected: bool  # Whether direct kb edits are blocked
     create_hint: str  # Exact CLI command that creates docs of this type
     help_text: str  # CLI group help (hand-written in cli.py until stage 2)
-    # Creation body appended after the frontmatter + H1. Placeholders:
-    # {title} {author} {date} {sections} {text} {num} — formatted with a
-    # superset of params, so a body only names the ones it needs.
+    # Creation body appended after the frontmatter + H1. File-mode bodies may
+    # name {title} {author} {date} {sections} {text}; append-mode bodies
+    # (create_mode="append") are formatted with {num} and {title} only.
     template_body: str
     addressing: Literal["slug", "branch", "singleton"]
     title_source: Literal["title", "free_text", "none"] = "title"

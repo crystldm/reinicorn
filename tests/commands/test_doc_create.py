@@ -349,3 +349,18 @@ def test_phantom_type_creates_with_no_other_change(kb_repo: Path):
     assert fm.get(text, "type") == "phantom"
     assert "## Body" in text
     assert "Filled by Test User on" in text
+
+
+def test_doc_create_refuses_plan_type(kb_repo: Path, capsys):
+    """Plan creation has lifecycle logic in cmd_plan_create; the generic
+    path must refuse it rather than silently overwrite an active plan."""
+    from reinicorn.commands.doc_create import cmd_doc_create
+    p1, p2, p3, p4 = _create_env(kb_repo)
+    with p1, p2, p3, p4:
+        assert cmd_doc_create("plan", "sneaky") == 1
+    assert not list(
+        (kb_repo / "kb" / "testproject" / "exec-plans" / "active").rglob("plan.md")
+    )
+    out = capsys.readouterr().out
+    assert "error:" in out
+    assert "rcorn plan create" in out

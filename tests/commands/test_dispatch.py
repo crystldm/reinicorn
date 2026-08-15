@@ -121,3 +121,13 @@ def test_retro_create_dispatches_without_title():
     ) as mock_create:
         assert main(["retro", "create"]) == 0
     mock_create.assert_called_once_with("retro")
+
+
+def test_plan_create_dispatches_to_cmd_plan_create():
+    """Plan create must keep routing to the lifecycle-aware entry point,
+    not the generic cmd_doc_create."""
+    with patch(
+        "reinicorn.commands.plan.cmd_plan_create", return_value=0
+    ) as mock_create:
+        assert main(["plan", "create"]) == 0
+    mock_create.assert_called_once_with()
