@@ -7,6 +7,7 @@ import importlib
 import sys
 
 from reinicorn import __version__
+from reinicorn.doc_types import REGISTRY, Addressing, TitleSource
 from reinicorn.identity import CLI_NAME, PRODUCT_NAME
 
 
@@ -20,85 +21,73 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    # ── Doc-type groups ────────────────────────────────────
-    def _doc_group_with_create_title(name: str, help_text: str):
-        g = sub.add_parser(name, help=help_text)
-        gs = g.add_subparsers(dest=f"{name}_command")
-        gs.required = True
-        cp = gs.add_parser("create", help=f"Create a {name} doc")
-        cp.add_argument("title", nargs="+", help="Document title")
-        sp = gs.add_parser("show", help=f"Show a {name} doc (truncated; --full for all)")
-        sp.add_argument("slug", help="Doc slug (see 'list')")
-        sp.add_argument("--full", action="store_true", help="Print the whole doc")
-        sp.add_argument(
-            "--include-drafts", action="store_true",
-            help="Include drafts/ (unapproved) docs",
-        )
-        lp = gs.add_parser("list", help=f"List {name} docs")
-        lp.add_argument(
-            "--include-drafts", action="store_true",
-            help="Include drafts/ (unapproved) docs",
-        )
-        return g
+    # ── Doc-type groups (generated from the registry; spec:
+    # registry-driven-doc-types stage 2) ─────────────────────
+    def _add_doc_type_groups(sub) -> None:
+        for dt in REGISTRY.values():
+            g = sub.add_parser(dt.key, help=dt.help_text)
+            gs = g.add_subparsers(dest=f"{dt.key}_command")
+            gs.required = True
+            if dt.title_source is TitleSource.TITLE:
+                cp = gs.add_parser(
+                    dt.create_verb,
+                    help=(f"Append a {dt.key}" if dt.create_verb == "add"
+                          else f"Create a {dt.key} doc"),
+                )
+                cp.add_argument("title", nargs="+", help="Document title")
+            elif dt.title_source is TitleSource.FREE_TEXT:
+                cp = gs.add_parser(
+                    dt.create_verb, help=f"Capture free-form {dt.key} text"
+                )
+                cp.add_argument("text", nargs="+", help=f"{dt.key} text")
+            else:
+                gs.add_parser(
+                    dt.create_verb,
+                    help=f"Create the {dt.key} for the current branch",
+                )
+            if dt.addressing is Addressing.SLUG:
+                sp = gs.add_parser(
+                    "show",
+                    help=f"Show a {dt.key} doc (truncated; --full for all)",
+                )
+                sp.add_argument("slug", help="Doc slug (see 'list')")
+                sp.add_argument("--full", action="store_true", help="Print the whole doc")
+                sp.add_argument(
+                    "--include-drafts", action="store_true",
+                    help="Include drafts/ (unapproved) docs",
+                )
+                lp = gs.add_parser("list", help=f"List {dt.key} docs")
+                lp.add_argument(
+                    "--include-drafts", action="store_true",
+                    help="Include drafts/ (unapproved) docs",
+                )
+            elif dt.addressing is Addressing.BRANCH:
+                sp = gs.add_parser(
+                    "show", help=f"Show the {dt.key} doc (truncated; --full for all)"
+                )
+                sp.add_argument(
+                    "branch", nargs="?", default=None,
+                    help="Branch name (default: current)",
+                )
+                sp.add_argument("--full", action="store_true", help="Print the whole doc")
+            # Addressing.SINGLETON: create verb only (principle today).
 
-    _doc_group_with_create_title("spec", "Spec doc operations (the implementation contract)")
-    _doc_group_with_create_title("prd", "Product requirements doc operations")
-    _doc_group_with_create_title("debt", "Tech debt doc operations")
+    _add_doc_type_groups(sub)
 
-    # idea: takes free-form text, not a title
-    idea_p = sub.add_parser("idea", help="Idea capture")
-    idea_sub = idea_p.add_subparsers(dest="idea_command")
-    idea_sub.required = True
-    idea_create_p = idea_sub.add_parser("create", help="Capture an idea")
-    idea_create_p.add_argument("text", nargs="+", help="Idea text")
-    idea_show_p = idea_sub.add_parser("show", help="Show an idea doc (truncated; --full for all)")
-    idea_show_p.add_argument("slug", help="Doc slug (see 'list')")
-    idea_show_p.add_argument("--full", action="store_true", help="Print the whole doc")
-    idea_show_p.add_argument(
-        "--include-drafts", action="store_true",
-        help="Include drafts/ (unapproved) docs",
-    )
-    idea_list_p = idea_sub.add_parser("list", help="List idea docs")
-    idea_list_p.add_argument(
-        "--include-drafts", action="store_true",
-        help="Include drafts/ (unapproved) docs",
-    )
-
-    # plan: branch-derived; status/complete verbs
-    plan_p = sub.add_parser("plan", help="Execution plan operations")
-    plan_sub = plan_p.add_subparsers(dest="plan_command")
-    plan_sub.required = True
-    plan_sub.add_parser("create", help="Create execution plan for current branch")
+    # Plan lifecycle verbs stay hand-wired (spec non-goal: plan lifecycle
+    # stays code). Fetch the generated group and append them.
+    plan_sub = None
+    for action in sub.choices["plan"]._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            plan_sub = action
+            break
+    if plan_sub is None:
+        raise RuntimeError("Could not find plan subparser in generated plan parser group")
     plan_sub.add_parser("status", help="Show plan status for current branch")
     plan_complete_p = plan_sub.add_parser("complete", help="Archive plan to completed/")
     plan_complete_p.add_argument(
         "branch", nargs="?", default=None, help="Branch name (default: current)"
     )
-    plan_show_p = plan_sub.add_parser("show", help="Show the plan doc (truncated; --full for all)")
-    plan_show_p.add_argument(
-        "branch", nargs="?", default=None, help="Branch name (default: current)"
-    )
-    plan_show_p.add_argument("--full", action="store_true", help="Print the whole doc")
-
-    # retro: branch-derived; no title
-    retro_p = sub.add_parser("retro", help="Retrospective operations")
-    retro_sub = retro_p.add_subparsers(dest="retro_command")
-    retro_sub.required = True
-    retro_sub.add_parser("create", help="Create retro for current branch")
-    retro_show_p = retro_sub.add_parser(
-        "show", help="Show the retro doc (truncated; --full for all)"
-    )
-    retro_show_p.add_argument(
-        "branch", nargs="?", default=None, help="Branch name (default: current)"
-    )
-    retro_show_p.add_argument("--full", action="store_true", help="Print the whole doc")
-
-    # principle: 'add' verb
-    principle_p = sub.add_parser("principle", help="Golden principle operations")
-    principle_sub = principle_p.add_subparsers(dest="principle_command")
-    principle_sub.required = True
-    principle_add_p = principle_sub.add_parser("add", help="Append a principle")
-    principle_add_p.add_argument("title", nargs="+", help="Principle title")
 
     # ── Review group ────────────────────────────────────────
     review_p = sub.add_parser(
