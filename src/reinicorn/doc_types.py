@@ -11,11 +11,34 @@ in the kb), but that is out of scope for now.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from typing import Literal
+
+
+class Addressing(Enum):
+    """How a doc of this type is identified and pathed."""
+
+    SLUG = "slug"
+    BRANCH = "branch"
+    SINGLETON = "singleton"
+
+
+class TitleSource(Enum):
+    """Where a new doc's title comes from at creation time."""
+
+    TITLE = "title"
+    FREE_TEXT = "free_text"
+    NONE = "none"
+
+
+class CreateMode(Enum):
+    """Whether creation writes a new file or appends to the singleton."""
+
+    FILE = "file"
+    APPEND = "append"
 
 
 @dataclass(frozen=True)
@@ -30,12 +53,12 @@ class DocType:
     help_text: str  # CLI group help (hand-written in cli.py until stage 2)
     # Creation body appended after the frontmatter + H1. File-mode bodies may
     # name {title} {author} {date} {sections} {text}; append-mode bodies
-    # (create_mode="append") are formatted with {num} and {title} only.
+    # (CreateMode.APPEND) are formatted with {num} and {title} only.
     template_body: str
-    addressing: Literal["slug", "branch", "singleton"]
-    title_source: Literal["title", "free_text", "none"] = "title"
+    addressing: Addressing
+    title_source: TitleSource = TitleSource.TITLE
     create_verb: str = "create"
-    create_mode: Literal["file", "append"] = "file"
+    create_mode: CreateMode = CreateMode.FILE
     create_status: str = "draft"  # frontmatter `status:` a new doc opens with
     # Static per-type frontmatter, as (key, value) pairs (frozen-friendly).
     extra_meta: tuple[tuple[str, str], ...] = ()
@@ -59,7 +82,7 @@ REGISTRY: dict[str, DocType] = {
             "\n## Design\n\n_How it works._\n"
             "\n## Non-Goals\n\n_What this explicitly does not cover._\n"
         ),
-        addressing="slug",
+        addressing=Addressing.SLUG,
         readme_label="Approved specs",
         index_file="index.md",
         required_sections=("Problem", "Design Goals", "Design", "Non-Goals"),
@@ -73,8 +96,8 @@ REGISTRY: dict[str, DocType] = {
         create_hint="rcorn plan create",
         help_text="Execution plan operations",
         template_body="",  # fallback plan.md is frontmatter + H1 only
-        addressing="branch",
-        title_source="none",
+        addressing=Addressing.BRANCH,
+        title_source=TitleSource.NONE,
         create_status="planning",
         readme_label="Active plans",
         required_sections=("Goal", "Acceptance Criteria", "Tasks"),
@@ -93,7 +116,7 @@ REGISTRY: dict[str, DocType] = {
             "\n## Out of Scope\n\n_What this PRD explicitly does not cover._\n"
             "\n## Open Questions\n\n_Unresolved decisions._\n"
         ),
-        addressing="slug",
+        addressing=Addressing.SLUG,
         readme_label="Product requirements",
         index_file="index.md",
         required_sections=(
@@ -115,7 +138,7 @@ REGISTRY: dict[str, DocType] = {
             "\n## Impact\n\n_What this debt causes._\n"
             "\n## Remediation Plan\n\n_How to fix it._\n"
         ),
-        addressing="slug",
+        addressing=Addressing.SLUG,
         extra_meta=(
             ("severity", "medium"),
             ("category", "_domain_"),
@@ -136,8 +159,8 @@ REGISTRY: dict[str, DocType] = {
             "\n## Description\n\n{text}\n"
             "\n## Notes\n\n_No additional notes yet._\n"
         ),
-        addressing="slug",
-        title_source="free_text",
+        addressing=Addressing.SLUG,
+        title_source=TitleSource.FREE_TEXT,
         create_status="new",
     ),
     "retro": DocType(
@@ -148,8 +171,8 @@ REGISTRY: dict[str, DocType] = {
         create_hint="rcorn retro create",
         help_text="Retrospective operations",
         template_body="{sections}",
-        addressing="branch",
-        title_source="none",
+        addressing=Addressing.BRANCH,
+        title_source=TitleSource.NONE,
         required_sections=(
             "What Went Well",
             "What Could Be Improved",
@@ -169,9 +192,9 @@ REGISTRY: dict[str, DocType] = {
             "   - _Rule description_\n"
             "   - Prevents: _What this rule prevents_\n"
         ),
-        addressing="singleton",
+        addressing=Addressing.SINGLETON,
         create_verb="add",
-        create_mode="append",
+        create_mode=CreateMode.APPEND,
         create_status="active",
         readme_label="Golden principles",
     ),
@@ -185,10 +208,10 @@ def _validate_registry() -> None:
     invalid row can never load (spec: registry-driven-doc-types).
     """
     for dt in REGISTRY.values():
-        if dt.gated and dt.addressing != "slug":
+        if dt.gated and dt.addressing is not Addressing.SLUG:
             raise ValueError(
                 f"doc_types.REGISTRY['{dt.key}']: gated=True requires "
-                f"addressing='slug', got '{dt.addressing}' — the review lane "
+                f"Addressing.SLUG, got {dt.addressing} — the review lane "
                 "derives candidate paths from slugs (review.make_target). "
                 "Fix the row in src/reinicorn/doc_types.py."
             )

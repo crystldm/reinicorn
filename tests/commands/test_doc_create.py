@@ -332,13 +332,13 @@ def test_phantom_type_creates_with_no_other_change(kb_repo: Path):
     """Spec's executable design goal, stage-1 slice: a synthetic registry row
     gets working creation from the row alone."""
     from reinicorn.commands.doc_create import cmd_doc_create
-    from reinicorn.doc_types import REGISTRY, DocType
+    from reinicorn.doc_types import REGISTRY, Addressing, DocType
     phantom = DocType(
         key="phantom", dir_path="phantoms", filename="{slug}.md",
         protected=True, create_hint='rcorn phantom create "<title>"',
         help_text="Phantom doc operations",
         template_body="\n## Body\n\n_Filled by {author} on {date}._\n",
-        addressing="slug",
+        addressing=Addressing.SLUG,
     )
     p1, p2, p3, p4 = _create_env(kb_repo)
     with patch.dict(REGISTRY, {"phantom": phantom}), p1, p2, p3, p4:

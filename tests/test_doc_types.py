@@ -7,7 +7,10 @@ from pathlib import Path
 from reinicorn.doc_types import (
     DRAFTS_DIR_NAME,
     REGISTRY,
+    Addressing,
+    CreateMode,
     DocType,
+    TitleSource,
     by_dir,
     drafts_dir,
     gated_types,
@@ -112,27 +115,27 @@ def test_drafts_dir_under_type_dir():
 
 
 def test_addressing_values():
-    assert REGISTRY["spec"].addressing == "slug"
-    assert REGISTRY["prd"].addressing == "slug"
-    assert REGISTRY["debt"].addressing == "slug"
-    assert REGISTRY["idea"].addressing == "slug"
-    assert REGISTRY["plan"].addressing == "branch"
-    assert REGISTRY["retro"].addressing == "branch"
-    assert REGISTRY["principle"].addressing == "singleton"
+    assert REGISTRY["spec"].addressing is Addressing.SLUG
+    assert REGISTRY["prd"].addressing is Addressing.SLUG
+    assert REGISTRY["debt"].addressing is Addressing.SLUG
+    assert REGISTRY["idea"].addressing is Addressing.SLUG
+    assert REGISTRY["plan"].addressing is Addressing.BRANCH
+    assert REGISTRY["retro"].addressing is Addressing.BRANCH
+    assert REGISTRY["principle"].addressing is Addressing.SINGLETON
 
 
 def test_title_source_values():
-    assert REGISTRY["idea"].title_source == "free_text"
-    assert REGISTRY["plan"].title_source == "none"
-    assert REGISTRY["retro"].title_source == "none"
+    assert REGISTRY["idea"].title_source is TitleSource.FREE_TEXT
+    assert REGISTRY["plan"].title_source is TitleSource.NONE
+    assert REGISTRY["retro"].title_source is TitleSource.NONE
     for key in ("spec", "prd", "debt", "principle"):
-        assert REGISTRY[key].title_source == "title"
+        assert REGISTRY[key].title_source is TitleSource.TITLE
 
 
 def test_principle_append_mode():
     p = REGISTRY["principle"]
     assert p.create_verb == "add"
-    assert p.create_mode == "append"
+    assert p.create_mode is CreateMode.APPEND
     assert p.create_status == "active"
 
 
@@ -171,7 +174,7 @@ def test_registry_invariant_required_fields_nonempty():
 
 def test_gated_implies_slug_addressing():
     for dt in gated_types():
-        assert dt.addressing == "slug"
+        assert dt.addressing is Addressing.SLUG
 
 
 def test_registry_rejects_gated_non_slug_row():
@@ -184,7 +187,7 @@ def test_registry_rejects_gated_non_slug_row():
         key="phantom", dir_path="phantoms", filename="active/{branch}/doc.md",
         protected=True, create_hint="rcorn phantom create",
         help_text="Phantom ops", template_body="",
-        addressing="branch", gated=True,
+        addressing=Addressing.BRANCH, gated=True,
     )
     with patch.dict(REGISTRY, {"phantom": bad}), pytest.raises(ValueError, match="phantom"):
         _validate_registry()

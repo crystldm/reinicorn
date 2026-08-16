@@ -10,7 +10,10 @@ from reinicorn import console, frontmatter
 from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.doc_types import (
     REGISTRY,
+    Addressing,
+    CreateMode,
     DocType,
+    TitleSource,
     drafts_dir,
     get_doc_dir,
     get_protected_map,
@@ -33,6 +36,12 @@ def _get_author() -> str:
 
 def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower())[:60].rstrip("-")
+
+
+def _username_segment(author: str) -> str:
+    """Path-safe form of the git author name, for filename patterns that
+    take a {username} segment (idea's "{username}/{slug}.md")."""
+    return re.sub(r"[^a-z0-9-]", "", author.lower().replace(" ", "-"))
 
 
 def _provenance(
@@ -125,7 +134,7 @@ def _branch_target(dt: DocType, repo_dir: Path, branch: str) -> Path:
 
 
 def _append_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
-    """create_mode="append": add one templated item to the singleton file."""
+    """CreateMode.APPEND: add one templated item to the singleton file."""
     target = repo_dir / dt.filename
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -144,9 +153,9 @@ def _append_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
 
 def _create_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
     """Create (or append) one doc from its registry row."""
-    if dt.create_mode == "append":
+    if dt.create_mode is CreateMode.APPEND:
         return _append_doc(dt, repo_dir, title, author)
-    if dt.addressing == "branch":
+    if dt.addressing is Addressing.BRANCH:
         branch = current_branch() or "unknown"
         target = _branch_target(dt, repo_dir, branch)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -156,11 +165,10 @@ def _create_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
             extra={"branch": branch, "slug": branch_dir_name(branch)},
         ))
         return target
-    if dt.title_source == "free_text":
-        username = re.sub(r"[^a-z0-9-]", "", author.lower().replace(" ", "-"))
+    if dt.title_source is TitleSource.FREE_TEXT:
         slug = _slugify(title)
         target = get_doc_dir(dt.key, repo_dir) / dt.filename.format(
-            slug=slug, username=username,
+            slug=slug, username=_username_segment(author),
         )
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
@@ -195,10 +203,10 @@ def cmd_doc_create(doc_type: str, title: str = "") -> int:
         )
         return 1
 
-    if dt.title_source == "title" and not title.strip():
+    if dt.title_source is TitleSource.TITLE and not title.strip():
         console.error("Title is required.")
         return 1
-    if dt.title_source == "free_text" and not title.strip():
+    if dt.title_source is TitleSource.FREE_TEXT and not title.strip():
         console.error(
             f'Usage: rcorn {dt.key} {dt.create_verb} "your {dt.key} here"'
         )
@@ -222,9 +230,9 @@ def cmd_doc_create(doc_type: str, title: str = "") -> int:
     console.success(f"Created: {filepath}")
     # Branch-addressed docs derive identity from the branch (encoded in the
     # path); free-text docs from the deduped filename; the rest from the title.
-    if dt.addressing == "branch":
+    if dt.addressing is Addressing.BRANCH:
         slug = filepath.parent.name
-    elif dt.title_source == "free_text":
+    elif dt.title_source is TitleSource.FREE_TEXT:
         slug = filepath.stem
     else:
         slug = _slugify(title)
