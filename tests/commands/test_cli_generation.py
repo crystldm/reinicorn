@@ -32,3 +32,23 @@ def test_phantom_row_gets_parser_surface():
 def test_phantom_row_absent_without_patch():
     with pytest.raises(SystemExit):
         _build_parser().parse_args(["phantom", "list"])
+
+
+def test_phantom_row_gets_dispatch_rows():
+    from reinicorn.cli import _doc_dispatch_rows
+    with patch.dict(REGISTRY, {"phantom": PHANTOM}):
+        rows = _doc_dispatch_rows()
+    for verb in ("create", "show", "list"):
+        assert ("phantom", verb) in rows
+
+
+def test_phantom_create_end_to_end(kb_repo):
+    """Parser + generated row + generic creator: the registry row alone
+    yields a working `phantom create` (spec's executable design goal)."""
+    from reinicorn.cli import _doc_dispatch_rows
+    from tests.commands.test_doc_create import _create_env
+    p1, p2, p3, p4 = _create_env(kb_repo)
+    with patch.dict(REGISTRY, {"phantom": PHANTOM}), p1, p2, p3, p4:
+        args = _build_parser().parse_args(["phantom", "create", "A", "Test", "Doc"])
+        assert _doc_dispatch_rows()[("phantom", "create")](args) == 0
+    assert (kb_repo / "kb" / "testproject" / "phantoms" / "a-test-doc.md").is_file()

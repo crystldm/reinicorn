@@ -207,59 +207,59 @@ def _load(module: str, func: str):
     return getattr(importlib.import_module(f"reinicorn.commands.{module}"), func)
 
 
+def _doc_dispatch_rows() -> dict:
+    """Generated (noun, verb) rows for every registry doc type (spec:
+    registry-driven-doc-types stage 2). Hand-wired rows merged into
+    _DISPATCH after this override plan's create/status/complete."""
+    rows: dict = {}
+    for dt in REGISTRY.values():
+        key = dt.key
+        if dt.title_source is TitleSource.TITLE:
+            rows[(key, dt.create_verb)] = (
+                lambda a, k=key: _load("doc_create", "cmd_doc_create")(
+                    k, " ".join(a.title)
+                )
+            )
+        elif dt.title_source is TitleSource.FREE_TEXT:
+            rows[(key, dt.create_verb)] = (
+                lambda a, k=key: _load("doc_create", "cmd_doc_create")(
+                    k, " ".join(a.text)
+                )
+            )
+        else:
+            rows[(key, dt.create_verb)] = (
+                lambda _, k=key: _load("doc_create", "cmd_doc_create")(k)
+            )
+        if dt.addressing is Addressing.SLUG:
+            rows[(key, "show")] = (
+                lambda a, k=key: _load("doc_show", "cmd_doc_show")(
+                    k, a.slug, full=a.full, include_drafts=a.include_drafts
+                )
+            )
+            rows[(key, "list")] = (
+                lambda a, k=key: _load("doc_show", "cmd_doc_list")(
+                    k, include_drafts=a.include_drafts
+                )
+            )
+        elif dt.addressing is Addressing.BRANCH:
+            rows[(key, "show")] = (
+                lambda a, k=key: _load("doc_show", "cmd_branch_show")(
+                    k, a.branch, full=a.full
+                )
+            )
+    return rows
+
+
 # Maps (noun, verb) -> handler taking the parsed args Namespace and returning an
 # exit code. Top-level nouns with no sub-verb use a None verb. Each handler lazily
 # imports its command so importing this module stays cheap.
 _DISPATCH = {
-    ("spec", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
-        "spec", " ".join(a.title)
-    ),
-    ("spec", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "spec", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("spec", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "spec", include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("prd", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
-        "prd", " ".join(a.title)
-    ),
-    ("prd", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "prd", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("prd", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "prd", include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("debt", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
-        "debt", " ".join(a.title)
-    ),
-    ("debt", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "debt", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("debt", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "debt", include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("idea", "create"): lambda a: _load("doc_create", "cmd_doc_create")(
-        "idea", " ".join(a.text)
-    ),
-    ("idea", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "idea", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("idea", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "idea", include_drafts=getattr(a, "include_drafts", False)
-    ),
+    **_doc_dispatch_rows(),
+    # Plan lifecycle verbs stay hand-wired; create overrides the generated
+    # row (cmd_doc_create refuses "plan" — lifecycle logic lives in plan.py).
     ("plan", "create"): lambda _: _load("plan", "cmd_plan_create")(),
     ("plan", "status"): lambda _: _load("plan", "cmd_plan_status")(),
     ("plan", "complete"): lambda a: _load("plan", "cmd_plan_complete")(a.branch),
-    ("plan", "show"): lambda a: _load("doc_show", "cmd_branch_show")(
-        "plan", a.branch, full=a.full
-    ),
-    ("retro", "create"): lambda _: _load("doc_create", "cmd_doc_create")("retro"),
-    ("retro", "show"): lambda a: _load("doc_show", "cmd_branch_show")(
-        "retro", a.branch, full=a.full
-    ),
-    ("principle", "add"): lambda a: _load("doc_create", "cmd_doc_create")(
-        "principle", " ".join(a.title)
-    ),
     ("review", "start"): lambda a: _load("review", "cmd_review_start")(
         a.slug, a.reviewers, type_key=a.type_key
     ),
