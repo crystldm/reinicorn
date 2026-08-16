@@ -261,9 +261,13 @@ _DISPATCH = {
     ("plan", "create"): lambda _: _load("plan", "cmd_plan_create")(),
     ("plan", "status"): lambda _: _load("plan", "cmd_plan_status")(),
     ("plan", "complete"): lambda a: _load("plan", "cmd_plan_complete")(a.branch),
-    ("plan", "show"): lambda a: _load("doc_show", "cmd_plan_show")(a.branch, full=a.full),
+    ("plan", "show"): lambda a: _load("doc_show", "cmd_branch_show")(
+        "plan", a.branch, full=a.full
+    ),
     ("retro", "create"): lambda _: _load("doc_create", "cmd_doc_create")("retro"),
-    ("retro", "show"): lambda a: _load("doc_show", "cmd_retro_show")(a.branch, full=a.full),
+    ("retro", "show"): lambda a: _load("doc_show", "cmd_branch_show")(
+        "retro", a.branch, full=a.full
+    ),
     ("principle", "add"): lambda a: _load("doc_create", "cmd_doc_create")(
         "principle", " ".join(a.title)
     ),

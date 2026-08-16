@@ -7,10 +7,9 @@ import pytest
 from reinicorn.commands.doc_show import (
     PREVIEW_CHARS,
     _doc_files,
+    cmd_branch_show,
     cmd_doc_list,
     cmd_doc_show,
-    cmd_plan_show,
-    cmd_retro_show,
 )
 from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
 from tests.conftest import doc_text
@@ -92,14 +91,14 @@ def test_plan_show_defaults_to_current_branch(kb_repo, monkeypatch, capsys):
     plan_dir = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "main"
     plan_dir.mkdir(parents=True, exist_ok=True)
     (plan_dir / "plan.md").write_text("# Execution Plan: main\n\n## Goal\nShip.\n")
-    assert cmd_plan_show() == 0
+    assert cmd_branch_show("plan") == 0
     out = capsys.readouterr().out
     assert "# Execution Plan: main" in out
 
 
 def test_plan_show_missing_current_branch_suggests_create(kb_repo, monkeypatch, capsys):
     monkeypatch.chdir(kb_repo)
-    assert cmd_plan_show() == 1
+    assert cmd_branch_show("plan") == 1
     out = capsys.readouterr().out
     assert "error: no plan for branch 'main'" in out
     assert "next: rcorn plan create" in out
@@ -112,7 +111,7 @@ def test_plan_show_missing_other_branch_lists_branches(kb_repo, monkeypatch, cap
     plan_dir = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-y"
     plan_dir.mkdir(parents=True, exist_ok=True)
     (plan_dir / "plan.md").write_text("# Execution Plan: feature-y\n")
-    assert cmd_plan_show("no-such-branch") == 1
+    assert cmd_branch_show("plan", "no-such-branch") == 1
     out = capsys.readouterr().out
     assert "error: no plan for branch 'no-such-branch'" in out
     assert "rcorn plan create" not in out
@@ -123,7 +122,7 @@ def test_plan_show_missing_other_branch_no_plans_is_definitive(
     kb_repo, monkeypatch, capsys,
 ):
     monkeypatch.chdir(kb_repo)
-    assert cmd_plan_show("no-such-branch") == 1
+    assert cmd_branch_show("plan", "no-such-branch") == 1
     out = capsys.readouterr().out
     assert "rcorn plan create" not in out
     assert "plans: 0 found" in out
@@ -160,7 +159,7 @@ def test_retro_show_defaults_to_current_branch(kb_repo, monkeypatch, capsys):
     retro_dir = kb_repo / "kb" / "testproject" / "exec-plans" / "completed" / "main"
     retro_dir.mkdir(parents=True, exist_ok=True)
     (retro_dir / "retro.md").write_text("# Retro: main\n\n## What Went Well\n- TDD\n")
-    assert cmd_retro_show() == 0
+    assert cmd_branch_show("retro") == 0
     out = capsys.readouterr().out
     assert "# Retro: main" in out
 
@@ -175,7 +174,7 @@ def test_retro_show_prefers_active_dir(kb_repo, monkeypatch, capsys):
     completed_dir = exec_plans / "completed" / "main"
     completed_dir.mkdir(parents=True, exist_ok=True)
     (completed_dir / "retro.md").write_text("# Retro: completed main\n\n## Well\n- Old\n")
-    assert cmd_retro_show() == 0
+    assert cmd_branch_show("retro") == 0
     out = capsys.readouterr().out
     assert "# Retro: active main" in out
     assert "completed main" not in out
@@ -183,7 +182,7 @@ def test_retro_show_prefers_active_dir(kb_repo, monkeypatch, capsys):
 
 def test_retro_show_missing_current_branch_suggests_create(kb_repo, monkeypatch, capsys):
     monkeypatch.chdir(kb_repo)
-    assert cmd_retro_show() == 1
+    assert cmd_branch_show("retro") == 1
     out = capsys.readouterr().out
     assert "error: no retro for branch 'main'" in out
     assert "next: rcorn retro create" in out
@@ -200,7 +199,7 @@ def test_retro_show_missing_other_branch_lists_branches(kb_repo, monkeypatch, ca
     active = exec_plans / "active" / "feature-z"
     active.mkdir(parents=True, exist_ok=True)
     (active / "retro.md").write_text("# Retro: feature-z\n")
-    assert cmd_retro_show("ghost") == 1
+    assert cmd_branch_show("retro", "ghost") == 1
     out = capsys.readouterr().out
     assert "error: no retro for branch 'ghost'" in out
     assert "rcorn retro create" not in out
@@ -212,7 +211,7 @@ def test_retro_show_missing_other_branch_no_retros_is_definitive(
     kb_repo, monkeypatch, capsys,
 ):
     monkeypatch.chdir(kb_repo)
-    assert cmd_retro_show("ghost") == 1
+    assert cmd_branch_show("retro", "ghost") == 1
     out = capsys.readouterr().out
     assert "rcorn retro create" not in out
     assert "retros: 0 found" in out

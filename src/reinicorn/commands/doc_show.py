@@ -156,11 +156,15 @@ def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
     return 0
 
 
-def cmd_plan_show(branch: str | None = None, full: bool = False) -> int:
-    return _branch_doc_show("plan", branch, full)
-
-
-def cmd_retro_show(branch: str | None = None, full: bool = False) -> int:
+def cmd_branch_show(
+    doc_type: str, branch: str | None = None, full: bool = False,
+) -> int:
+    """Show a branch-addressed doc. Retro checks the active plan dir first
+    (retro rides with an active plan until archive; identity check against
+    the registry row keeps type knowledge out of string comparisons)."""
+    dt = REGISTRY[doc_type]
+    if dt is not REGISTRY["retro"]:
+        return _branch_doc_show(doc_type, branch, full)
     repo_dir = _repo_dir()
     if repo_dir is None:
         return 1
@@ -169,17 +173,17 @@ def cmd_retro_show(branch: str | None = None, full: bool = False) -> int:
         console.error("no branch given and none checked out")
         return 1
     active = branch_doc_path("plan", repo_dir, branch).parent / "retro.md"
-    target = active if active.is_file() else branch_doc_path("retro", repo_dir, branch)
+    target = active if active.is_file() else branch_doc_path(doc_type, repo_dir, branch)
     if not target.is_file():
-        exec_plans = repo_dir / REGISTRY["retro"].dir_path
+        exec_plans = repo_dir / dt.dir_path
         active_pattern = str(
             PurePosixPath(_branch_doc_pattern("plan")).with_name("retro.md")
         )
         branches = {
             f.parent.name
-            for pattern in (_branch_doc_pattern("retro"), active_pattern)
+            for pattern in (_branch_doc_pattern(doc_type), active_pattern)
             for f in exec_plans.glob(pattern)
         }
-        return _missing_branch_doc("retro", branch, branches)
-    _print_doc(target, "retro", branch_dir_name(branch), full)
+        return _missing_branch_doc(doc_type, branch, branches)
+    _print_doc(target, doc_type, branch_dir_name(branch), full)
     return 0

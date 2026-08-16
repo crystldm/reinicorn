@@ -65,16 +65,16 @@ def test_list_dispatches_include_drafts_flag(noun):
     mock_list.assert_called_once_with(noun, include_drafts=True)
 
 
-def test_plan_show_dispatches_to_cmd_plan_show():
-    with patch("reinicorn.commands.doc_show.cmd_plan_show", return_value=0) as mock_show:
-        assert main(["plan", "show", "some-branch"]) == 0
-    mock_show.assert_called_once_with("some-branch", full=False)
-
-
-def test_retro_show_dispatches_to_cmd_retro_show():
-    with patch("reinicorn.commands.doc_show.cmd_retro_show", return_value=0) as mock_show:
-        assert main(["retro", "show"]) == 0
-    mock_show.assert_called_once_with(None, full=False)
+@pytest.mark.parametrize("noun,argv_tail,expected_branch", [
+    ("plan", ["show", "some-branch"], "some-branch"),
+    ("retro", ["show"], None),
+])
+def test_branch_show_dispatches_to_cmd_branch_show(noun, argv_tail, expected_branch):
+    with patch(
+        "reinicorn.commands.doc_show.cmd_branch_show", return_value=0
+    ) as mock_show:
+        assert main([noun, *argv_tail]) == 0
+    mock_show.assert_called_once_with(noun, expected_branch, full=False)
 
 
 def _subparser_choices(parser: argparse.ArgumentParser):
