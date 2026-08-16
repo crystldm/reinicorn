@@ -7,7 +7,7 @@ import importlib
 import sys
 
 from reinicorn import __version__
-from reinicorn.doc_types import REGISTRY, Addressing, TitleSource
+from reinicorn.doc_types import REGISTRY, Addressing, CreateMode, TitleSource
 from reinicorn.identity import CLI_NAME, PRODUCT_NAME
 
 
@@ -31,7 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
             if dt.title_source is TitleSource.TITLE:
                 cp = gs.add_parser(
                     dt.create_verb,
-                    help=(f"Append a {dt.key}" if dt.create_verb == "add"
+                    help=(f"Append a {dt.key}" if dt.create_mode is CreateMode.APPEND
                           else f"Create a {dt.key} doc"),
                 )
                 cp.add_argument("title", nargs="+", help="Document title")
