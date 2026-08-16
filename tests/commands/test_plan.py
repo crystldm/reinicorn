@@ -180,6 +180,22 @@ def test_plan_create_forces_plan_type(kb_repo: Path, capsys):
     assert meta["type"] == "plan"
 
 
+def test_plan_create_carries_provenance_fields(kb_repo: Path, capsys):
+    """All plan-creation paths emit origin/human_validated (stage-1
+    normalization: the fallback routes through the shared renderer, and the
+    three-states-agree invariant pulls the template path along)."""
+    tmpl_dir = kb_repo / "kb" / "testproject" / "exec-plans" / "_template"
+    shutil.rmtree(tmpl_dir)
+    fallback = _create_plan(kb_repo, "feature/prov-fallback")
+    assert fallback["origin"] == fm.ORIGIN_AI
+    assert fallback["human_validated"] is False
+
+    generate_seed_tree(kb_repo / "kb", "testproject")
+    seeded = _create_plan(kb_repo, "feature/prov-seeded")
+    assert seeded["origin"] == fm.ORIGIN_AI
+    assert seeded["human_validated"] is False
+
+
 def test_spec_placeholder_is_what_the_gate_treats_as_undeclared():
     """Generator and gate share one placeholder definition (issue #41)."""
     assert SPEC_PLACEHOLDER_RE.match(SPEC_PLACEHOLDER)

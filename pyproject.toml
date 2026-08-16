@@ -166,3 +166,6 @@ ignore = [
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 include = ["src"]
+# Golden principle 15 (no stringly-typed code): an Enum field compared
+# against a string literal is always-False; this makes pyright report it.
+reportUnnecessaryComparison = "error"
