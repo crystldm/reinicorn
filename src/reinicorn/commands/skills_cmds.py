@@ -16,6 +16,7 @@ from reinicorn.skillset.installer import install_adapter, update_adapter
 from reinicorn.skillset.lockfile import read_lock
 from reinicorn.skillset.wiring import wiring_doc_path
 
+# Must stay in sync with adapter.py's _COMMIT_RE pattern.
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -161,6 +162,13 @@ def cmd_skills_update(ref: str | None = None, force: bool = False) -> int:
         if ref is not None:
             adapter = replace(
                 adapter, source=replace(adapter.source, commit=ref, annotation="")
+            )
+        else:
+            # Without --ref, re-apply the lock's pinned commit, clearing the
+            # annotation if the resolved adapter's commit differs from the lock's pin.
+            annotation = adapter.source.annotation if adapter.source.commit == lock.commit else ""
+            adapter = replace(
+                adapter, source=replace(adapter.source, commit=lock.commit, annotation=annotation)
             )
         preserved = update_adapter(adapter, root, force=force)
     except AdapterError as e:

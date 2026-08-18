@@ -217,6 +217,44 @@ def test_update_no_ref_reapplies_pinned_commit(
     assert [c["commit"] for c in fetch_calls] == [COMMIT_A, COMMIT_A]
 
 
+def test_update_no_ref_with_drifted_commit_restores_lock_pin(
+    tmp_path: Path, project: Path, fetch_calls, monkeypatch, capsys
+) -> None:
+    """When adapter.yaml commit differs from lock, no --ref re-applies the lock's pin."""
+    # Install with COMMIT_A
+    adapter_dir = make_adapter_dir(tmp_path, "demo", DEMO_YAML)
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project):
+        assert cmd_skills_install(str(adapter_dir)) == 0
+
+    # Drift the adapter.yaml to declare COMMIT_B
+    drifted_yaml = f"""\
+name: demo
+source:
+  repo: acme/skills
+  commit: {COMMIT_B}
+  annotation: v2.0.0
+skills:
+  skills/alpha: alpha
+wiring:
+  spec: [alpha]
+"""
+    (adapter_dir / "adapter.yaml").write_text(drifted_yaml)
+
+    # Update without ref; verify the lock's commit is re-applied
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project), \
+         patch("reinicorn.commands.skills_cmds.update_adapter") as mock_update:
+        mock_update.return_value = []
+        monkeypatch.chdir(tmp_path)
+        result = cmd_skills_update()
+
+    assert result == 0
+    # Verify update_adapter was called with the lock's commit (COMMIT_A), not the drifted one
+    assert mock_update.call_count == 1
+    adapter_arg = mock_update.call_args[0][0]
+    assert adapter_arg.source.commit == COMMIT_A
+    assert adapter_arg.source.annotation == ""  # annotation cleared since it's a different commit
+
+
 def test_update_with_ref_rebuilds_adapter_and_moves_the_pin(
     tmp_path: Path, project: Path, fetch_calls, monkeypatch, capsys
 ) -> None:
