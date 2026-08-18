@@ -227,16 +227,41 @@ def _parse_skills(value: Any, name: str, adapter_dir: Path) -> dict[str, str]:
         )
 
     for upstream, installed in value.items():
-        if (
-            not isinstance(upstream, str)
-            or not isinstance(installed, str)
-            or not installed
-        ):
+        # Check upstream key (gap 2: emptiness).
+        if not isinstance(upstream, str):
             raise AdapterError(
                 f"Adapter '{name}' at {adapter_dir}: invalid 'skills' entry "
                 f"{upstream!r}: {installed!r}.\n"
                 f"  How to fix: use 'skills: {{<upstream-path>: <installed-name>}}' "
                 f"with non-empty string keys and values."
+            )
+        if not upstream:
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: 'skills' key is empty.\n"
+                f"  How to fix: use 'skills: {{<upstream-path>: <installed-name>}}' "
+                f"with non-empty upstream paths."
+            )
+
+        # Check installed value (gap 1b: single component, no escape).
+        if not isinstance(installed, str) or not installed:
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: invalid 'skills' entry "
+                f"{upstream!r}: {installed!r}.\n"
+                f"  How to fix: use 'skills: {{<upstream-path>: <installed-name>}}' "
+                f"with non-empty string keys and values."
+            )
+        if Path(installed).is_absolute():
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: 'skills' value {installed!r} "
+                f"is an absolute path.\n"
+                f"  How to fix: use a single skill name component, not an absolute path."
+            )
+        if "/" in installed or ".." in Path(installed).parts:
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: 'skills' value {installed!r} "
+                f"must be a single non-empty path component.\n"
+                f"  How to fix: use just the skill name, no '/' or '..' separators "
+                f"(e.g., 'alpha', not 'nested/alpha' or '../escape')."
             )
 
     return dict(value)
@@ -330,6 +355,19 @@ def _parse_installed_path_mapping(
                 f"  How to fix: use a string installed-relative path and a string "
                 f"adapter-relative file."
             )
+        # Validate that installed-relative destination paths are safe (no escape).
+        if Path(installed_path).is_absolute():
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: '{field}' key '{installed_path}' "
+                f"is an absolute path.\n"
+                f"  How to fix: use an installed-relative path with no leading '/'."
+            )
+        if ".." in Path(installed_path).parts:
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: '{field}' key '{installed_path}' "
+                f"escapes the installed directory.\n"
+                f"  How to fix: use an installed-relative path with no '..' components."
+            )
         _require_adapter_file(rel, field, name, adapter_dir)
 
     return dict(value)
@@ -349,11 +387,21 @@ def _parse_wiring(value: Any, name: str, adapter_dir: Path) -> dict[str, WiringE
     result: dict[str, WiringEntry] = {}
     for doc_type, entry in value.items():
         skills, optional = _parse_wiring_entry(entry, doc_type, name, adapter_dir)
-        if not skills or not all(isinstance(s, str) for s in skills):
+        # Gap 3: split error message for empty list vs non-string elements.
+        if not skills:
             raise AdapterError(
                 f"Adapter '{name}' at {adapter_dir}: 'wiring.{doc_type}.skills' "
-                f"must be a non-empty list of skill names.\n"
+                f"must be a non-empty list.\n"
                 f"  How to fix: list at least one skill under 'wiring.{doc_type}'."
+            )
+        # Check for non-string elements.
+        non_strings = [s for s in skills if not isinstance(s, str)]
+        if non_strings:
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: 'wiring.{doc_type}.skills' "
+                f"entries must be strings, got {non_strings!r}.\n"
+                f"  How to fix: ensure all entries under 'wiring.{doc_type}' are "
+                f"skill name strings."
             )
         result[doc_type] = WiringEntry(skills=tuple(skills), optional=optional)
 
