@@ -45,6 +45,7 @@ only-include = [
     "hooks",
     "editor-hooks",
     "linters",
+    "adapters",
     "upgrades",
     "platform-instructions",
     "workflows",

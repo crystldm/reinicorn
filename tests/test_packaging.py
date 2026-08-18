@@ -39,6 +39,7 @@ REQUIRED_PREFIXES = (
     "hooks/",
     "editor-hooks/",
     "linters/",
+    "adapters/",
     "templates/AGENTS.md",
 )
 
