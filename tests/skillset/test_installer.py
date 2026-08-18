@@ -87,6 +87,21 @@ skills:
   skills/alpha: using-reinicorn
 """
 
+# Declares the reinicorn-generated wiring doc as one of its own files.
+CLAIMS_WIRING_DOC_YAML = f"""\
+name: demo
+source:
+  repo: acme/skills
+  commit: {COMMIT_A}
+  annotation: v1.0.0
+skills:
+  skills/alpha: alpha
+files:
+  using-reinicorn/references/skillset-wiring.md: files/ATTRIBUTION.md
+wiring:
+  spec: [alpha]
+"""
+
 OTHER_ADAPTER_YAML = f"""\
 name: other
 source:
@@ -239,6 +254,26 @@ def test_maintain_link_leaves_real_directory_in_place(tmp_path: Path, capsys) ->
     assert (real / "mine.md").read_text() == "hand-written\n"
     out = capsys.readouterr().out
     assert ".claude/skills already exists as a real directory — left in place." in out
+
+
+def test_maintain_link_skips_when_the_skills_dir_is_missing(
+    tmp_path: Path, capsys
+) -> None:
+    """A configured-but-absent skills dir must not yield a dangling link."""
+    repo_root = tmp_path / "project"
+    repo_root.mkdir(parents=True)
+    (repo_root / CONFIG_FILE_NAME).write_text(
+        "REINICORN_SKILLS_DIR=custom/skills\nREINICORN_SKILLS_LINK=.claude/skills\n"
+    )
+
+    installer.maintain_link(repo_root)
+
+    link = repo_root / ".claude" / "skills"
+    assert not link.is_symlink()
+    assert not link.exists()
+    out = capsys.readouterr().out
+    assert "custom/skills" in out
+    assert "REINICORN_SKILLS_DIR" in out
 
 
 def test_maintain_link_leaves_existing_symlink_alone(tmp_path: Path) -> None:
@@ -419,6 +454,22 @@ def test_collision_with_unmanaged_file_raises_and_writes_nothing(
     assert snapshot(project) == before
 
 
+def test_adapter_claiming_the_wiring_doc_raises_and_writes_nothing(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]]
+) -> None:
+    """Reinicorn rewrites the wiring doc itself — an adapter may not own it."""
+    before = snapshot(project)
+    adapter = make_adapter(tmp_path / "adapter", CLAIMS_WIRING_DOC_YAML, EXTRA_FILES)
+
+    with pytest.raises(AdapterError, match=re.escape(WIRING_DOC_REL)) as excinfo:
+        installer.install_adapter(adapter, project, cache_dir=tmp_path / "cache")
+
+    message = str(excinfo.value)
+    assert "wiring doc" in message
+    assert "How to fix" in message
+    assert snapshot(project) == before
+
+
 # --- rollback --------------------------------------------------------------
 
 
@@ -475,6 +526,56 @@ def test_failed_update_restores_the_previous_install_exactly(
         installer.update_adapter(adapter_v2, project, cache_dir=tmp_path / "cache")
 
     assert snapshot(project) == before
+
+
+def test_failed_rollback_preserves_backups_outside_the_work_dir(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restore that itself fails must not take the only copy down with it."""
+    install_base(project, tmp_path)
+    skills = project / ".agents" / "skills"
+    victim = skills / "alpha" / "SKILL.md"
+    control = skills / "beta" / "SKILL.md"
+    victim.write_text("victim edit\n")
+    control.write_text("control edit\n")
+
+    real_copy = installer._copy_path
+
+    def flaky_copy(source: Path, dest: Path) -> None:
+        # Only the restore leg writes back to a project path; the backup leg
+        # writes into the transaction's backup dir.
+        if dest == victim:
+            raise OSError("read-only file system")
+        real_copy(source, dest)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(installer, "_copy_path", flaky_copy)
+    monkeypatch.setattr(installer, "write_lock", boom)
+    adapter_v2 = make_adapter(tmp_path / "v2", DROPS_SCRATCH_YAML, EXTRA_FILES)
+
+    with pytest.raises(AdapterError) as excinfo:
+        installer.update_adapter(
+            adapter_v2, project, force=True, cache_dir=tmp_path / "cache"
+        )
+
+    message = str(excinfo.value)
+    assert "the project is unchanged" not in message
+    assert str(victim) in message
+    # Every other tracked path was still restored.
+    assert control.read_text() == "control edit\n"
+
+    match = re.search(r"backup: (\S+)", message)
+    assert match is not None, message
+    backup = Path(match.group(1))
+    assert backup.is_file()
+    assert backup.read_text() == "victim edit\n"
+    # Durable: outside the install work dir, and named in the message.
+    assert backup.parent.name.startswith("reinicorn-skillset-backup-")
+    assert str(backup.parent) in message
+    shutil.rmtree(backup.parent, ignore_errors=True)
 
 
 def test_failed_install_removes_the_fetched_temp_tree(
@@ -578,7 +679,7 @@ def test_update_aborts_on_a_locally_modified_file_without_force(
     with pytest.raises(AdapterError, match=re.escape("alpha/SKILL.md")) as excinfo:
         installer.update_adapter(adapter_v2, project, cache_dir=tmp_path / "cache")
 
-    assert "--force" in str(excinfo.value)
+    assert "rcorn skills update --force" in str(excinfo.value)
     assert snapshot(project) == before
 
 

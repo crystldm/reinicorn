@@ -35,6 +35,9 @@ def maintain_link(repo_root: Path) -> None:
     by both. A pre-existing REAL link directory is left untouched (never
     delete user content) — warn instead; a platform without symlinks gets a
     copy plus a warning; `REINICORN_SKILLS_LINK=none` disables the link.
+
+    Every early return here is mirrored by `_commit`'s link-tracking
+    predicate — keep the two in lockstep (see the comment there).
     """
     link_rel = skills_link(repo_root)
     if link_rel is None:
@@ -43,7 +46,6 @@ def maintain_link(repo_root: Path) -> None:
     skills_rel = skills_dir(repo_root)
     link = repo_root / link_rel
     skills = repo_root / skills_rel
-    link.parent.mkdir(parents=True, exist_ok=True)
 
     if link.is_symlink():
         return  # already linked
@@ -55,7 +57,20 @@ def maintain_link(repo_root: Path) -> None:
             f"  directory and re-run 'rcorn update' to switch to the symlink."
         )
         return
+    if not skills.is_dir():
+        # Linking to a missing target would leave a dangling symlink (and the
+        # copy fallback would fail outright).
+        console.warn(
+            f"Skills directory {skills_rel.as_posix()}/ does not exist — "
+            f"skipped the\n"
+            f"  {link_rel.as_posix()} link.\n"
+            f"  How to fix: create {skills_rel.as_posix()}/ (or point "
+            f"REINICORN_SKILLS_DIR at the\n"
+            f"  directory that holds your skills), then re-run 'rcorn init'."
+        )
+        return
 
+    link.parent.mkdir(parents=True, exist_ok=True)
     # Relative so the link survives the repo being moved or cloned elsewhere.
     rel_target = os.path.relpath(skills, link.parent)
     try:
@@ -200,7 +215,7 @@ def _commit(
     backup_root: Path,
 ) -> None:
     """Write skills, removals, wiring doc, lockfile, and link — or roll back."""
-    transaction = _Transaction(backup_root)
+    transaction = _Transaction(backup_root, adapter.name)
     try:
         backup_root.mkdir(parents=True)
         for rel in sorted(hashes):
@@ -242,6 +257,11 @@ def _commit(
             # Only the create/copy path mutates anything: an existing symlink
             # or real directory is left alone, so there is nothing to back up
             # (and no reason to copy a user's whole directory aside).
+            # This predicate mirrors `maintain_link`'s early returns — if a
+            # new early return is added there, add it here too, or the link
+            # maintain_link writes escapes the transaction and survives a
+            # rollback. (Tracking a path maintain_link then skips is safe: an
+            # absent path rolls back to absent.)
             if not link.is_symlink() and not link.is_dir():
                 transaction.track(link)
                 transaction.ensure_parents(link)
@@ -269,8 +289,9 @@ class _Transaction:
     commit created.
     """
 
-    def __init__(self, backup_root: Path) -> None:
+    def __init__(self, backup_root: Path, adapter_name: str) -> None:
         self._backup_root = backup_root
+        self._adapter_name = adapter_name
         self._backups: dict[Path, Path | None] = {}
         self._created_dirs: list[Path] = []
 
@@ -297,19 +318,61 @@ class _Transaction:
             self._created_dirs.append(directory)
 
     def rollback(self) -> None:
-        """Restore every tracked path and drop the directories we created."""
+        """Restore every tracked path and drop the directories we created.
+
+        Whatever broke the commit (ENOSPC, EACCES) tends to break the restore
+        too, so a failing path never aborts the rest: each one is restored
+        under its own guard. If any failed, the backups are moved somewhere
+        durable — the caller deletes the work dir right after us — and
+        `AdapterError` names the paths, their backups, and the manual repair.
+        """
+        failed: list[tuple[Path, Path | None]] = []
         for target, backup in self._backups.items():
-            _remove(target)
-            if backup is None:
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            _copy_path(backup, target)
+            try:
+                _remove(target)
+                if backup is not None:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    _copy_path(backup, target)
+            except OSError:
+                failed.append((target, backup))
         deepest_first = sorted(
             self._created_dirs, key=lambda path: len(path.parts), reverse=True
         )
         for directory in deepest_first:
             with suppress(OSError):  # non-empty: something else lives there now
                 directory.rmdir()
+        if failed:
+            raise self._rollback_failed_error(failed)
+
+    def _rollback_failed_error(
+        self, failed: list[tuple[Path, Path | None]]
+    ) -> AdapterError:
+        """Preserve the backups of the unrestored paths and describe the repair."""
+        durable = Path(tempfile.mkdtemp(prefix="reinicorn-skillset-backup-"))
+        listing = ""
+        for target, backup in failed:
+            listing += f"    {target}\n"
+            if backup is None:
+                listing += "      backup: none — the path did not exist before\n"
+                continue
+            kept = durable / backup.name
+            try:
+                shutil.move(str(backup), str(kept))
+            except OSError:  # cannot preserve it — say where it briefly was
+                listing += f"      backup: LOST (could not preserve {backup})\n"
+                continue
+            listing += f"      backup: {kept}\n"
+        return AdapterError(
+            f"Adapter '{self._adapter_name}': the rollback of a failed write "
+            f"could not restore {len(failed)} path(s):\n"
+            f"{listing}"
+            f"  Every other path was rolled back, but those are still missing "
+            f"or hold partial install output.\n"
+            f"  Their original contents are preserved in {durable} — "
+            f"Reinicorn will never delete it.\n"
+            f"  How to fix: copy each backup above back over its path, then "
+            f"remove {durable}."
+        )
 
 
 def _check_collisions(
@@ -326,7 +389,29 @@ def _check_collisions(
     directories the adapter claims and the individual staged files are
     checked, so an unmanaged directory of the same name is caught even when
     none of its files happen to share a staged name.
+
+    The reinicorn-generated wiring doc is rejected outright: `_commit`
+    rewrites it after the lock has recorded the adapter's own hash for it,
+    which would leave the install permanently stuck reporting local edits.
     """
+    doc = wiring_doc_path(repo_root)
+    doc_rel = (
+        doc.relative_to(skills_root).as_posix()
+        if doc.is_relative_to(skills_root)
+        else None
+    )
+    if doc_rel is not None and doc_rel in hashes:
+        raise AdapterError(
+            f"Adapter '{adapter.name}': install path '{doc_rel}' is the wiring "
+            f"doc Reinicorn generates itself.\n"
+            f"  Reinicorn rewrites that file on every install and update, so "
+            f"an adapter-supplied copy would be overwritten immediately and "
+            f"then flagged as a local edit forever. Nothing was installed.\n"
+            f"  How to fix: remove '{doc_rel}' from the adapter's 'skills' / "
+            f"'files' / 'overrides' mapping — the adapter's 'wiring' block "
+            f"already controls what that doc says."
+        )
+
     manifest_files = _manifest_files(repo_root)
     for installed_name in sorted(set(adapter.skills.values())):
         directory = skills_root / installed_name
@@ -415,7 +500,8 @@ def _check_local_edits(
         f"{listing}"
         f"  Nothing was installed.\n"
         f"  How to fix: fold those edits into the adapter (patch/append/"
-        f"override) and re-run, or re-run with --force to discard them."
+        f"override) and re-run, or run 'rcorn skills update --force' to "
+        f"discard them."
     )
 
 
