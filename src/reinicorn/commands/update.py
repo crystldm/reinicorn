@@ -8,6 +8,7 @@ from pathlib import Path
 from reinicorn import __version__, console
 from reinicorn.assets import get_asset_path
 from reinicorn.commands.hooks_install import cmd_hooks_install
+from reinicorn.config import skills_dir
 from reinicorn.git import run_git
 from reinicorn.manifest import (
     read_manifest,
@@ -15,6 +16,7 @@ from reinicorn.manifest import (
     write_manifest,
     write_manifest_data,
 )
+from reinicorn.skillset.lockfile import read_lock
 
 
 def _get_package_version() -> str:
@@ -113,6 +115,16 @@ def cmd_update(*, diff_target: str | None = None) -> int:
     counts = {"updated": 0, "added": 0, "skipped": 0}
 
     package_files = _collect_package_files(asset_root)
+
+    # Adapter-installed files (recorded in the skillset lock) are owned by
+    # `rcorn skills`, not `rcorn update` — never sync, warn, or count them.
+    lock = read_lock(repo_root)
+    if lock is not None:
+        skl_dir = skills_dir(repo_root)
+        lock_owned = {(skl_dir / rel).as_posix() for rel in lock.files}
+        package_files = {
+            rel: src for rel, src in package_files.items() if rel not in lock_owned
+        }
 
     for rel_path, src_path in sorted(package_files.items()):
         dest = repo_root / rel_path

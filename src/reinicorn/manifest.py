@@ -8,7 +8,9 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from reinicorn.config import skills_dir
 from reinicorn.identity import MANIFEST_FILE_NAME, STATE_DIR_NAME
+from reinicorn.skillset.lockfile import read_lock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -33,18 +35,43 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _lock_owned_paths(repo_root: Path) -> set[str]:
+    """Repo-root-relative paths owned by an installed skill-set adapter.
+
+    Adapter-installed files (tracked in `.reinicorn/skillset-lock.json`,
+    skills-dir-relative) are `rcorn skills`-managed, not `rcorn
+    update`-managed — they must never appear in the asset manifest. Reads
+    the lock lazily and tolerates its absence: no lock means no adapter is
+    installed, so nothing is excluded.
+    """
+    lock = read_lock(repo_root)
+    if lock is None:
+        return set()
+    skl_dir = skills_dir(repo_root)
+    return {(skl_dir / rel).as_posix() for rel in lock.files}
+
+
 def _collect_files(repo_root: Path) -> dict[str, dict[str, str]]:
-    """Collect checksums for all managed asset files."""
+    """Collect checksums for all managed asset files.
+
+    Skips any path owned by an installed skill-set adapter (see
+    `_lock_owned_paths`) — those files are not Reinicorn-managed assets.
+    """
+    lock_owned = _lock_owned_paths(repo_root)
     files: dict[str, dict[str, str]] = {}
     for asset in MANAGED_ASSETS:
         asset_path = repo_root / asset
         if asset_path.is_file():
-            rel = str(asset_path.relative_to(repo_root))
+            rel = asset_path.relative_to(repo_root).as_posix()
+            if rel in lock_owned:
+                continue
             files[rel] = {"sha256": sha256_file(asset_path)}
         elif asset_path.is_dir():
             for f in sorted(asset_path.rglob("*")):
                 if f.is_file():
-                    rel = str(f.relative_to(repo_root))
+                    rel = f.relative_to(repo_root).as_posix()
+                    if rel in lock_owned:
+                        continue
                     files[rel] = {"sha256": sha256_file(f)}
     return files
 

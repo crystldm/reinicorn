@@ -1,8 +1,9 @@
 """Ensure third-party licensing ships with the package.
 
-Several skills are forked from the upstream Superpowers plugin (MIT, Jesse
-Vincent). The MIT permission and disclaimer text must travel with the
-distributed skills, and the attribution must point at the real upstream repo.
+The bundled `superpowers` skill-set adapter installs skills forked from the
+upstream Superpowers plugin (MIT, Jesse Vincent). The MIT permission and
+disclaimer text must travel with the adapter, and the attribution must point
+at the real upstream repo.
 """
 
 from __future__ import annotations
@@ -40,9 +41,9 @@ def wheel_attribution_text(tmp_path_factory: pytest.TempPathFactory) -> str:
     with zipfile.ZipFile(wheels[0]) as wheel:
         matches = [
             n for n in wheel.namelist()
-            if n.endswith("_data/skills/ATTRIBUTION.md")
+            if n.endswith("_data/adapters/superpowers/files/ATTRIBUTION.md")
         ]
-        assert matches, "ATTRIBUTION.md is not bundled in the wheel"
+        assert matches, "superpowers adapter's ATTRIBUTION.md is not bundled in the wheel"
         return wheel.read(matches[0]).decode()
 
 

@@ -51,6 +51,55 @@ def test_write_manifest_creates_file(tmp_path: Path):
     assert "AGENTS.md" not in data["files"]
 
 
+def test_write_manifest_excludes_lock_owned_files(tmp_path: Path):
+    """Files whose skills-dir-relative path is recorded in the skillset
+    lock are adapter-managed (owned by `rcorn skills`, not `rcorn update`)
+    and must not appear in the manifest, while a native (non-lock-owned)
+    file in the same skills dir still does."""
+    from reinicorn.skillset.lockfile import SkillsetLock, write_lock
+
+    repo = tmp_path / "repo"
+    skills = repo / ".agents" / "skills"
+    adapter_skill = skills / "brainstorming"
+    adapter_skill.mkdir(parents=True)
+    (adapter_skill / "SKILL.md").write_text("# adapter-installed\n")
+    native_skill = skills / "using-reinicorn"
+    native_skill.mkdir(parents=True)
+    (native_skill / "SKILL.md").write_text("# native\n")
+
+    write_lock(
+        repo,
+        SkillsetLock(
+            adapter="superpowers",
+            repo="obra/superpowers",
+            commit="a" * 40,
+            archive_sha256="b" * 64,
+            files={"brainstorming/SKILL.md": "irrelevant-hash"},
+            wiring={},
+        ),
+    )
+
+    write_manifest(repo, version="0.1.0")
+
+    data = json.loads((repo / ".reinicorn" / "manifest.json").read_text())
+    assert ".agents/skills/brainstorming/SKILL.md" not in data["files"]
+    assert ".agents/skills/using-reinicorn/SKILL.md" in data["files"]
+
+
+def test_write_manifest_with_no_lock_excludes_nothing(tmp_path: Path):
+    """No lockfile present (no adapter installed) means no exclusions —
+    lock-owned skipping must tolerate the lock's absence."""
+    repo = tmp_path / "repo"
+    skills = repo / ".agents" / "skills" / "brainstorming"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("# some skill\n")
+
+    write_manifest(repo, version="0.1.0")
+
+    data = json.loads((repo / ".reinicorn" / "manifest.json").read_text())
+    assert ".agents/skills/brainstorming/SKILL.md" in data["files"]
+
+
 def test_read_manifest_returns_data(tmp_path: Path):
     """read_manifest returns parsed manifest data."""
     repo = tmp_path / "repo"

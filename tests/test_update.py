@@ -80,6 +80,50 @@ def test_collect_package_files_excludes_agents_template(tmp_path: Path) -> None:
     assert all("AGENTS.md" not in path for path in package_files)
 
 
+def test_update_skips_lock_owned_package_files(tmp_path: Path, capsys) -> None:
+    """An adapter-installed skill file (recorded in the skillset lock) is
+    not `rcorn update`-managed: the sync loop must not copy over it, and
+    must not report it via the 'locally modified' skip path (that path
+    would misleadingly imply Reinicorn owns and is protecting the file)."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset.lockfile import SkillsetLock, write_lock
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    adapter_skill = repo / ".agents" / "skills" / "installed-by-adapter"
+    adapter_skill.mkdir(parents=True)
+    dest_file = adapter_skill / "SKILL.md"
+    dest_file.write_text("# adapter-installed content\n")
+    before = dest_file.read_bytes()
+
+    write_lock(
+        repo,
+        SkillsetLock(
+            adapter="superpowers",
+            repo="obra/superpowers",
+            commit="a" * 40,
+            archive_sha256="b" * 64,
+            files={"installed-by-adapter/SKILL.md": "irrelevant-hash"},
+            wiring={},
+        ),
+    )
+
+    assets = _setup_package_assets(tmp_path)
+    pkg_skill = assets / "skills" / "installed-by-adapter"
+    pkg_skill.mkdir(parents=True)
+    (pkg_skill / "SKILL.md").write_text("# package version\n")
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert dest_file.read_bytes() == before
+    out = capsys.readouterr().out
+    assert "installed-by-adapter" not in out
+    assert "Skipped: 0 files (locally modified)" in out
+
+
 def test_update_asset_discovery_does_not_probe_agents() -> None:
     from reinicorn.commands.update import _get_asset_sources
 
