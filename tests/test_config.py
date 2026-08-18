@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from reinicorn.config import config_get, config_set, kb_scope
+from reinicorn.config import config_get, config_set, kb_scope, skills_dir, skills_link
 
 
 def test_reads_value(tmp_path: Path):
@@ -102,3 +102,26 @@ def test_config_set_replaces_existing_key_and_preserves_unrelated_content(
     # Unrelated lines (comment, blank lines, other key, indented comment) untouched.
     assert lines[0] == "# Repository settings"
     assert lines[2:] == ["", "OTHER=value", "  # Keep this comment", ""]
+
+
+def test_skills_dir_defaults_to_agents_skills(tmp_path: Path) -> None:
+    assert skills_dir(tmp_path) == Path(".agents/skills")
+
+
+def test_skills_dir_honors_configured_value(tmp_path: Path) -> None:
+    (tmp_path / ".reinicorn-config").write_text("REINICORN_SKILLS_DIR=tools/skills\n")
+    assert skills_dir(tmp_path) == Path("tools/skills")
+
+
+def test_skills_link_defaults_to_claude_skills(tmp_path: Path) -> None:
+    assert skills_link(tmp_path) == Path(".claude/skills")
+
+
+def test_skills_link_honors_configured_value(tmp_path: Path) -> None:
+    (tmp_path / ".reinicorn-config").write_text("REINICORN_SKILLS_LINK=tools/link\n")
+    assert skills_link(tmp_path) == Path("tools/link")
+
+
+def test_skills_link_none_disables_compat_link(tmp_path: Path) -> None:
+    (tmp_path / ".reinicorn-config").write_text("REINICORN_SKILLS_LINK=none\n")
+    assert skills_link(tmp_path) is None
