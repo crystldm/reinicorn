@@ -534,38 +534,16 @@ def _copy_skills(_r_root: Path, target_dir: Path) -> None:
 
 
 def _link_claude_skills(target_dir: Path) -> None:
-    """Make .claude/skills a symlink to ../.agents/skills (copy fallback).
+    """Maintain the .claude/skills compatibility link (see skillset.installer).
 
-    Claude Code only reads .claude/skills; Codex/Cursor/Copilot read
-    .agents/skills natively. A pre-existing REAL .claude/skills dir is
-    left untouched (never delete user content) — warn instead.
+    The link is shared infrastructure — `rcorn skills install/update` has to
+    maintain the same link — so the behavior lives in
+    `reinicorn.skillset.installer.maintain_link`, which also honors the
+    configured skills dir/link paths.
     """
-    from pathlib import Path
+    from reinicorn.skillset.installer import maintain_link
 
-    claude_dir = target_dir / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-    link = claude_dir / "skills"
-    rel_target = Path("..") / ".agents" / "skills"
-
-    if link.is_symlink():
-        return  # already linked
-    if link.is_dir():
-        console.warn(
-            ".claude/skills already exists as a real directory — left in place.\n"
-            "  Canonical skills now live in .agents/skills/. Remove the old\n"
-            "  directory and re-run 'rcorn update' to switch to the symlink."
-        )
-        return
-    try:
-        link.symlink_to(rel_target, target_is_directory=True)
-        console.success("Linked .claude/skills -> .agents/skills")
-    except OSError:
-        shutil.copytree(target_dir / SKILLS_ASSET, link, dirs_exist_ok=True)
-        console.warn(
-            "Symlinks unavailable (Windows without developer mode?) — copied\n"
-            "  skills to .claude/skills instead. This copy is NOT auto-synced;\n"
-            "  re-run 'rcorn init' after each 'rcorn update' to refresh it."
-        )
+    maintain_link(target_dir)
 
 
 _CHECK_AGENTS_SCRIPT = """\

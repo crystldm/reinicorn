@@ -63,10 +63,19 @@ def render_wiring(wiring: dict[str, WiringEntry] | None) -> tuple[str, list[str]
     return _HEADER + "\n".join(rows) + "\n", skipped
 
 
+def wiring_doc_path(repo_root: Path) -> Path:
+    """`<skills_dir>/using-reinicorn/references/skillset-wiring.md` for *repo_root*.
+
+    Public so a transactional caller can back the doc up before it is
+    rewritten — the path is defined here, once.
+    """
+    return (repo_root / skills_dir(repo_root)).joinpath(*_WIRING_DOC_PARTS)
+
+
 def write_wiring(repo_root: Path, wiring: dict[str, WiringEntry] | None) -> Path:
     """Render and write `<skills_dir>/using-reinicorn/references/skillset-wiring.md`."""
     markdown, _skipped = render_wiring(wiring)
-    out_path = (repo_root / skills_dir(repo_root)).joinpath(*_WIRING_DOC_PARTS)
+    out_path = wiring_doc_path(repo_root)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(markdown)
     return out_path
