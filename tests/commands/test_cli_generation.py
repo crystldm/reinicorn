@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from reinicorn.cli import _build_parser
-from reinicorn.doc_types import REGISTRY, Addressing, DocType
+from reinicorn.doc_types import REGISTRY, Addressing, DocType, TitleSource
 
 PHANTOM = DocType(
     key="phantom", dir_path="phantoms", filename="{slug}.md",
@@ -52,3 +52,24 @@ def test_phantom_create_end_to_end(kb_repo):
         args = _build_parser().parse_args(["phantom", "create", "A", "Test", "Doc"])
         assert _doc_dispatch_rows()[("phantom", "create")](args) == 0
     assert (kb_repo / "kb" / "testproject" / "phantoms" / "a-test-doc.md").is_file()
+
+
+PHANTOM_BRANCH = DocType(
+    key="ghost", dir_path="ghosts", filename="active/{branch}/ghost.md",
+    protected=True, create_hint="rcorn ghost create",
+    help_text="Ghost doc operations", template_body="",
+    addressing=Addressing.BRANCH, title_source=TitleSource.NONE,
+)
+
+
+def test_branch_phantom_row_gets_branch_surface():
+    """The BRANCH generation path is generic, not a plan/retro special case."""
+    from reinicorn.cli import _doc_dispatch_rows
+    with patch.dict(REGISTRY, {"ghost": PHANTOM_BRANCH}):
+        args = _build_parser().parse_args(["ghost", "show"])
+        assert args.branch is None and args.full is False
+        args = _build_parser().parse_args(["ghost", "create"])
+        rows = _doc_dispatch_rows()
+    for verb in ("create", "show"):
+        assert ("ghost", verb) in rows
+    assert ("ghost", "list") not in rows

@@ -23,11 +23,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── Doc-type groups (generated from the registry; spec:
     # registry-driven-doc-types stage 2) ─────────────────────
-    def _add_doc_type_groups(sub) -> None:
+    def _add_doc_type_groups(sub) -> dict:
+        """Returns {key: subparsers action} so bespoke verbs (plan's
+        lifecycle) can attach without reflecting over argparse internals."""
+        groups: dict = {}
         for dt in REGISTRY.values():
             g = sub.add_parser(dt.key, help=dt.help_text)
             gs = g.add_subparsers(dest=f"{dt.key}_command")
             gs.required = True
+            groups[dt.key] = gs
             if dt.title_source is TitleSource.TITLE:
                 cp = gs.add_parser(
                     dt.create_verb,
@@ -71,18 +75,13 @@ def _build_parser() -> argparse.ArgumentParser:
                 )
                 sp.add_argument("--full", action="store_true", help="Print the whole doc")
             # Addressing.SINGLETON: create verb only (principle today).
+        return groups
 
-    _add_doc_type_groups(sub)
+    doc_groups = _add_doc_type_groups(sub)
 
     # Plan lifecycle verbs stay hand-wired (spec non-goal: plan lifecycle
     # stays code). Fetch the generated group and append them.
-    plan_sub = None
-    for action in sub.choices["plan"]._actions:
-        if isinstance(action, argparse._SubParsersAction):
-            plan_sub = action
-            break
-    if plan_sub is None:
-        raise RuntimeError("Could not find plan subparser in generated plan parser group")
+    plan_sub = doc_groups["plan"]
     plan_sub.add_parser("status", help="Show plan status for current branch")
     plan_complete_p = plan_sub.add_parser("complete", help="Archive plan to completed/")
     plan_complete_p.add_argument(

@@ -175,14 +175,17 @@ def cmd_branch_show(
     active = branch_doc_path("plan", repo_dir, branch).parent / "retro.md"
     target = active if active.is_file() else branch_doc_path(doc_type, repo_dir, branch)
     if not target.is_file():
-        exec_plans = repo_dir / dt.dir_path
         active_pattern = str(
             PurePosixPath(_branch_doc_pattern("plan")).with_name("retro.md")
         )
+        # Each pattern globs under its own type's dir so the lookup can't
+        # silently break if plan and retro ever stop sharing a dir_path.
+        globs = (
+            (repo_dir / dt.dir_path, _branch_doc_pattern(doc_type)),
+            (repo_dir / REGISTRY["plan"].dir_path, active_pattern),
+        )
         branches = {
-            f.parent.name
-            for pattern in (_branch_doc_pattern(doc_type), active_pattern)
-            for f in exec_plans.glob(pattern)
+            f.parent.name for root, pattern in globs for f in root.glob(pattern)
         }
         return _missing_branch_doc(doc_type, branch, branches)
     _print_doc(target, doc_type, branch_dir_name(branch), full)
