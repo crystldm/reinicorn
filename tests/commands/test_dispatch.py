@@ -131,3 +131,44 @@ def test_plan_create_dispatches_to_cmd_plan_create():
     ) as mock_create:
         assert main(["plan", "create"]) == 0
     mock_create.assert_called_once_with()
+
+
+def test_skills_install_dispatches_to_cmd_skills_install():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_install", return_value=0
+    ) as mock_install:
+        assert main(["skills", "install", "demo"]) == 0
+    mock_install.assert_called_once_with("demo")
+
+
+def test_skills_status_dispatches_to_cmd_skills_status():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_status", return_value=0
+    ) as mock_status:
+        assert main(["skills", "status"]) == 0
+    mock_status.assert_called_once_with()
+
+
+def test_skills_update_dispatches_to_cmd_skills_update():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_update", return_value=0
+    ) as mock_update:
+        assert main(["skills", "update"]) == 0
+    mock_update.assert_called_once_with(ref=None, force=False)
+
+
+def test_skills_update_dispatches_ref_and_force_flags():
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_update", return_value=0
+    ) as mock_update:
+        assert main(["skills", "update", "--ref", sha, "--force"]) == 0
+    mock_update.assert_called_once_with(ref=sha, force=True)
+
+
+def test_skills_list_dispatches_to_cmd_skills_list():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_list", return_value=0
+    ) as mock_list:
+        assert main(["skills", "list"]) == 0
+    mock_list.assert_called_once_with()
