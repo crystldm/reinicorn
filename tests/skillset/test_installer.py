@@ -578,6 +578,68 @@ def test_failed_rollback_preserves_backups_outside_the_work_dir(
     shutil.rmtree(backup.parent, ignore_errors=True)
 
 
+def test_failed_relocation_preserves_backups_in_the_work_dir(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If preserving the backups durably itself fails (mkdtemp: disk full),
+    the backups must not be lost — they must survive under work/backup,
+    which the installer must then refuse to delete."""
+    install_base(project, tmp_path)
+    skills = project / ".agents" / "skills"
+    victim = skills / "alpha" / "SKILL.md"
+    control = skills / "beta" / "SKILL.md"
+    victim.write_text("victim edit\n")
+    control.write_text("control edit\n")
+
+    real_copy = installer._copy_path
+    real_mkdtemp = tempfile.mkdtemp
+
+    def flaky_copy(source: Path, dest: Path) -> None:
+        # Only the restore leg writes back to a project path; the backup leg
+        # writes into the transaction's backup dir.
+        if dest == victim:
+            raise OSError("read-only file system")
+        real_copy(source, dest)
+
+    def flaky_mkdtemp(*args: object, **kwargs: object) -> str:
+        prefix = kwargs.get("prefix", "")
+        if isinstance(prefix, str) and prefix.startswith(
+            "reinicorn-skillset-backup-"
+        ):
+            raise OSError("disk full")
+        return real_mkdtemp(*args, **kwargs)  # type: ignore[arg-type]
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(installer, "_copy_path", flaky_copy)
+    monkeypatch.setattr(installer, "write_lock", boom)
+    monkeypatch.setattr(installer.tempfile, "mkdtemp", flaky_mkdtemp)
+    adapter_v2 = make_adapter(tmp_path / "v2", DROPS_SCRATCH_YAML, EXTRA_FILES)
+
+    with pytest.raises(AdapterError) as excinfo:
+        installer.update_adapter(
+            adapter_v2, project, force=True, cache_dir=tmp_path / "cache"
+        )
+
+    message = str(excinfo.value)
+    assert str(victim) in message
+    # Every other tracked path was still restored despite the relocation failure.
+    assert control.read_text() == "control edit\n"
+
+    match = re.search(r"backup: (\S+)", message)
+    assert match is not None, message
+    backup = Path(match.group(1))
+    # Points at work/backup (never relocated) — and it must still be on disk,
+    # with the original bytes, after the call returns.
+    assert backup.parent.name == "backup"
+    assert str(backup.parent) in message
+    assert backup.is_file()
+    assert backup.read_text() == "victim edit\n"
+    shutil.rmtree(backup.parent.parent, ignore_errors=True)
+
+
 def test_failed_install_removes_the_fetched_temp_tree(
     project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,

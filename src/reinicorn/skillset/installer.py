@@ -174,6 +174,7 @@ def _install_or_update(
     )
 
     work = Path(tempfile.mkdtemp(prefix="reinicorn-skillset-install-"))
+    transaction = _Transaction(work / "backup", adapter.name)
     try:
         tree, digest = fetch_source(
             adapter.source, cache, expected_digest=expected_digest
@@ -196,10 +197,14 @@ def _install_or_update(
             hashes=hashes,
             removals=removals,
             digest=digest,
-            backup_root=work / "backup",
+            transaction=transaction,
         )
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        # A failed rollback whose durable relocation itself failed preserves
+        # its backups under work/backup and asks us to leave work alone —
+        # deleting it here would destroy the only surviving copy of the data.
+        if not transaction.preserve_work:
+            shutil.rmtree(work, ignore_errors=True)
     return preserved
 
 
@@ -212,12 +217,11 @@ def _commit(
     hashes: dict[str, str],
     removals: list[str],
     digest: str,
-    backup_root: Path,
+    transaction: _Transaction,
 ) -> None:
     """Write skills, removals, wiring doc, lockfile, and link — or roll back."""
-    transaction = _Transaction(backup_root, adapter.name)
     try:
-        backup_root.mkdir(parents=True)
+        transaction.backup_root.mkdir(parents=True)
         for rel in sorted(hashes):
             target = skills_root / rel
             transaction.track(target)
@@ -267,7 +271,7 @@ def _commit(
                 transaction.ensure_parents(link)
         maintain_link(repo_root)
     except OSError as exc:
-        transaction.rollback()
+        transaction.rollback(cause=exc)
         raise AdapterError(
             f"Adapter '{adapter.name}': failed while writing into {repo_root} "
             f"({exc}).\n"
@@ -275,8 +279,8 @@ def _commit(
             f"  How to fix: check the permissions and free space on "
             f"{repo_root}, then re-run."
         ) from exc
-    except BaseException:
-        transaction.rollback()
+    except BaseException as exc:
+        transaction.rollback(cause=exc)
         raise
 
 
@@ -290,10 +294,14 @@ class _Transaction:
     """
 
     def __init__(self, backup_root: Path, adapter_name: str) -> None:
-        self._backup_root = backup_root
+        self.backup_root = backup_root
         self._adapter_name = adapter_name
         self._backups: dict[Path, Path | None] = {}
         self._created_dirs: list[Path] = []
+        # Set when a rollback failure can't even relocate its backups
+        # durably: the caller must then leave the work dir (and this
+        # transaction's backup_root within it) on disk rather than delete it.
+        self.preserve_work = False
 
     def track(self, target: Path) -> None:
         """Snapshot *target*'s current state, once, before it is written."""
@@ -302,7 +310,7 @@ class _Transaction:
         if not target.is_symlink() and not target.exists():
             self._backups[target] = None
             return
-        backup = self._backup_root / f"{len(self._backups):06d}"
+        backup = self.backup_root / f"{len(self._backups):06d}"
         _copy_path(target, backup)
         self._backups[target] = backup
 
@@ -317,7 +325,7 @@ class _Transaction:
             directory.mkdir()
             self._created_dirs.append(directory)
 
-    def rollback(self) -> None:
+    def rollback(self, *, cause: BaseException | None = None) -> None:
         """Restore every tracked path and drop the directories we created.
 
         Whatever broke the commit (ENOSPC, EACCES) tends to break the restore
@@ -325,6 +333,8 @@ class _Transaction:
         under its own guard. If any failed, the backups are moved somewhere
         durable — the caller deletes the work dir right after us — and
         `AdapterError` names the paths, their backups, and the manual repair.
+        *cause* is the exception that triggered this rollback, if any; a
+        rollback-failure error is chained to it via `__cause__`.
         """
         failed: list[tuple[Path, Path | None]] = []
         for target, backup in self._backups.items():
@@ -342,13 +352,41 @@ class _Transaction:
             with suppress(OSError):  # non-empty: something else lives there now
                 directory.rmdir()
         if failed:
-            raise self._rollback_failed_error(failed)
+            raise self._rollback_failed_error(failed) from cause
 
     def _rollback_failed_error(
         self, failed: list[tuple[Path, Path | None]]
     ) -> AdapterError:
         """Preserve the backups of the unrestored paths and describe the repair."""
-        durable = Path(tempfile.mkdtemp(prefix="reinicorn-skillset-backup-"))
+        try:
+            durable = Path(tempfile.mkdtemp(prefix="reinicorn-skillset-backup-"))
+        except OSError:
+            # Can't even make the durable relocation dir (disk full, EACCES —
+            # the same condition that likely caused the failure). Don't touch
+            # the backups at all: leave them where `track` already put them,
+            # under this transaction's own backup_root, and tell the caller
+            # (via preserve_work) not to delete that directory.
+            self.preserve_work = True
+            listing = ""
+            for target, backup in failed:
+                listing += f"    {target}\n"
+                if backup is None:
+                    listing += "      backup: none — the path did not exist before\n"
+                    continue
+                listing += f"      backup: {backup}\n"
+            return AdapterError(
+                f"Adapter '{self._adapter_name}': the rollback of a failed "
+                f"write could not restore {len(failed)} path(s), and its "
+                f"backups could not be relocated to a durable location "
+                f"either:\n"
+                f"{listing}"
+                f"  Every other path was rolled back, but those are still "
+                f"missing or hold partial install output.\n"
+                f"  Their original contents are preserved in "
+                f"{self.backup_root} — Reinicorn will not delete it.\n"
+                f"  How to fix: copy each backup above back over its path, "
+                f"then remove {self.backup_root}."
+            )
         listing = ""
         for target, backup in failed:
             listing += f"    {target}\n"
