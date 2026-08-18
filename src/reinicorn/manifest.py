@@ -51,26 +51,43 @@ def _lock_owned_paths(repo_root: Path) -> set[str]:
     return {(skl_dir / rel).as_posix() for rel in lock.files}
 
 
+def _generated_paths(repo_root: Path) -> set[str]:
+    """Repo-root-relative paths of files Reinicorn generates itself.
+
+    The skillset wiring doc lives under `.agents/skills` (a MANAGED_ASSETS
+    dir) but is rendered locally by `rcorn update`/`rcorn skills` from the
+    doc-type registry — it is marked generated in the asset manifest, not
+    shipped by the package. It is also not lock-owned (`using-reinicorn`
+    is native, not adapter-installed), so `_lock_owned_paths` alone
+    wouldn't exclude it. Lazily imported to avoid a needless import-time
+    dependency on the skillset package for callers that never touch it.
+    """
+    from reinicorn.skillset.wiring import wiring_doc_path
+
+    return {wiring_doc_path(repo_root).relative_to(repo_root).as_posix()}
+
+
 def _collect_files(repo_root: Path) -> dict[str, dict[str, str]]:
     """Collect checksums for all managed asset files.
 
     Skips any path owned by an installed skill-set adapter (see
-    `_lock_owned_paths`) — those files are not Reinicorn-managed assets.
+    `_lock_owned_paths`) and any Reinicorn-generated path (see
+    `_generated_paths`) — neither is a Reinicorn-managed *shipped* asset.
     """
-    lock_owned = _lock_owned_paths(repo_root)
+    excluded = _lock_owned_paths(repo_root) | _generated_paths(repo_root)
     files: dict[str, dict[str, str]] = {}
     for asset in MANAGED_ASSETS:
         asset_path = repo_root / asset
         if asset_path.is_file():
             rel = asset_path.relative_to(repo_root).as_posix()
-            if rel in lock_owned:
+            if rel in excluded:
                 continue
             files[rel] = {"sha256": sha256_file(asset_path)}
         elif asset_path.is_dir():
             for f in sorted(asset_path.rglob("*")):
                 if f.is_file():
                     rel = f.relative_to(repo_root).as_posix()
-                    if rel in lock_owned:
+                    if rel in excluded:
                         continue
                     files[rel] = {"sha256": sha256_file(f)}
     return files

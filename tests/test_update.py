@@ -266,6 +266,38 @@ def test_update_warns_about_removed_upstream(tmp_path: Path, capsys):
     assert ".agents/skills/removed/SKILL.md" in captured.out
 
 
+def test_update_does_not_warn_about_removed_wiring_doc(tmp_path: Path, capsys):
+    """The generated skillset wiring doc is never shipped in the package
+    (it's rendered locally by `rcorn update`/`rcorn skills`) — it must
+    never trigger the generic 'Removed upstream' warning."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset.wiring import wiring_doc_path
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    wiring_path = wiring_doc_path(repo)
+    wiring_path.parent.mkdir(parents=True, exist_ok=True)
+    wiring_path.write_text("# Skillset Wiring\n")
+    write_manifest(repo, version="0.1.0")
+    # Package assets that (correctly) do not include the generated doc.
+    assets = tmp_path / "assets"
+    skills = assets / "skills" / "brainstorming"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("# Brainstorming v2\n")
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("builtins.input", return_value="n"):
+        rc = cmd_update()
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert (
+        "Removed upstream: .agents/skills/using-reinicorn/references/skillset-wiring.md"
+        not in captured.out
+    )
+
+
 def test_update_cli_dispatch(tmp_path: Path):
     """reins update dispatches to cmd_update."""
     from reinicorn.cli import main
