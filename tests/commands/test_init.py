@@ -289,6 +289,88 @@ def test_init_copies_lint_config(existing_repo: Path, seeded_bare: Path, tmp_pat
     assert (existing_repo / "linters" / ".lint-config.json").is_file()
 
 
+def _wiring_doc_path(repo: Path) -> Path:
+    return repo / ".agents/skills/using-reinicorn/references/skillset-wiring.md"
+
+
+def _setup_init_r_root(tmp_path: Path) -> Path:
+    r_root = tmp_path / "r_root"
+    r_root.mkdir()
+    (r_root / "templates").mkdir()
+    (r_root / "templates" / "AGENTS.md").write_text("# {repo}\n")
+    skills = r_root / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "test-skill.md").write_text("# Test Skill\n")
+    return r_root
+
+
+def test_init_regenerates_wiring_doc_without_lock(kb_repo: Path, tmp_path: Path) -> None:
+    """No skillset lock installed → init still leaves the wiring doc present,
+    rendered registry-only (em dash in every skills cell)."""
+    r_root = _setup_init_r_root(tmp_path)
+
+    with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
+         patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
+         patch("reinicorn.commands.init.repo_slug", return_value="testproject"), \
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]), \
+         patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
+         patch("reinicorn.commands.init.setup_kb_clone"):
+        def _resolve(name: str) -> Path | None:
+            p = r_root / name
+            return p if p.exists() else None
+        mock_asset.side_effect = _resolve
+
+        result = cmd_init(cwd=kb_repo)
+
+    assert result == 0
+    doc = _wiring_doc_path(kb_repo)
+    assert doc.is_file()
+    content = doc.read_text()
+    rows = [line for line in content.splitlines() if line.startswith("| ")][1:]
+    assert rows
+    assert all(row.endswith("| — |") for row in rows)
+
+
+def test_init_regenerates_wiring_doc_with_lock(kb_repo: Path, tmp_path: Path) -> None:
+    """A pre-existing skillset lock's wiring populates the doc's skills
+    column after init lays down assets."""
+    from reinicorn.skillset.adapter import WiringEntry
+    from reinicorn.skillset.lockfile import SkillsetLock, write_lock
+
+    r_root = _setup_init_r_root(tmp_path)
+    write_lock(
+        kb_repo,
+        SkillsetLock(
+            adapter="superpowers",
+            repo="obra/superpowers",
+            commit="a" * 40,
+            archive_sha256="b" * 64,
+            files={},
+            wiring={"spec": WiringEntry(skills=("alpha",))},
+        ),
+    )
+
+    with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
+         patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
+         patch("reinicorn.commands.init.repo_slug", return_value="testproject"), \
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]), \
+         patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
+         patch("reinicorn.commands.init.setup_kb_clone"):
+        def _resolve(name: str) -> Path | None:
+            p = r_root / name
+            return p if p.exists() else None
+        mock_asset.side_effect = _resolve
+
+        result = cmd_init(cwd=kb_repo)
+
+    assert result == 0
+    content = _wiring_doc_path(kb_repo).read_text()
+    spec_row = next(
+        line for line in content.splitlines() if line.startswith("| spec |")
+    )
+    assert "alpha" in spec_row
+
+
 def test_cli_init_dispatches_with_flags():
     """reins init --kb-url should pass the flag through to cmd_init."""
     from reinicorn.cli import main

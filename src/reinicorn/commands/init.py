@@ -300,6 +300,7 @@ def _setup_assets(
     selected = prompt_platforms() if platforms is None else platforms
     install_platform_instructions(cwd, slug, selected)
     _copy_skills(r_root, cwd)
+    _regenerate_wiring_doc(cwd)
     _install_session_hook(cwd)
     _copy_lint_config(cwd)
     _write_init_manifest(cwd)
@@ -531,6 +532,29 @@ def _copy_skills(_r_root: Path, target_dir: Path) -> None:
     print()
 
     _check_skill_collisions(all_skills)
+
+
+def _regenerate_wiring_doc(target_dir: Path) -> None:
+    """Regenerate the skillset wiring doc so it always exists after init.
+
+    Rendered from the lock's wiring when an adapter is installed,
+    registry-only otherwise — mirrors `rcorn update`'s regeneration so
+    `using-reinicorn`'s pointer to this doc never dangles. A write failure
+    (e.g. an unwritable skills dir) must not crash init; warn and move on.
+    """
+    from reinicorn.skillset.lockfile import read_lock
+    from reinicorn.skillset.wiring import wiring_doc_path, write_wiring
+
+    try:
+        lock = read_lock(target_dir)
+        write_wiring(target_dir, lock.wiring if lock is not None else None)
+    except Exception as exc:
+        console.warn(
+            f"Could not generate the skillset wiring doc: {exc}\n"
+            f"  Where: {wiring_doc_path(target_dir)}\n"
+            f"  How to fix: check write permissions under .agents/skills, "
+            f"then rerun 'rcorn init'."
+        )
 
 
 def _link_claude_skills(target_dir: Path) -> None:

@@ -685,3 +685,124 @@ def test_update_migration_failure_leaves_forks_and_does_not_record_declined(
     assert config_get(SKILLSET_MIGRATION_KEY, root=repo) != "declined"
     captured = capsys.readouterr()
     assert "offline: could not fetch obra/superpowers" in captured.out
+
+
+def _wiring_doc_path(repo: Path) -> Path:
+    return repo / ".agents/skills/using-reinicorn/references/skillset-wiring.md"
+
+
+def test_update_regenerates_wiring_doc_without_lock(tmp_path: Path) -> None:
+    """No skillset lock installed → the doc still exists after update, with
+    every row's skills cell rendered registry-only (em dash)."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    assets = _setup_package_assets(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update()
+
+    assert rc == 0
+    doc = _wiring_doc_path(repo)
+    assert doc.is_file()
+    content = doc.read_text()
+    rows = [line for line in content.splitlines() if line.startswith("| ")][1:]
+    assert rows  # sanity: header row is skipped, data rows remain
+    assert all(row.endswith("| — |") for row in rows)
+
+
+def test_update_regenerates_wiring_doc_with_lock(tmp_path: Path) -> None:
+    """A skillset lock's wiring populates the doc's skills column."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset.adapter import WiringEntry
+    from reinicorn.skillset.lockfile import SkillsetLock, write_lock
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    assets = _setup_package_assets(tmp_path)
+    write_lock(
+        repo,
+        SkillsetLock(
+            adapter="superpowers",
+            repo="obra/superpowers",
+            commit="a" * 40,
+            archive_sha256="b" * 64,
+            files={},
+            wiring={"spec": WiringEntry(skills=("alpha",))},
+        ),
+    )
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update()
+
+    assert rc == 0
+    content = _wiring_doc_path(repo).read_text()
+    spec_row = next(
+        line for line in content.splitlines() if line.startswith("| spec |")
+    )
+    assert "alpha" in spec_row
+
+
+def test_update_regenerates_wiring_doc_when_already_up_to_date(
+    tmp_path: Path,
+) -> None:
+    """The 'Already up to date' early return is a successful exit path too —
+    a fresh or migrated checkout must still get the doc."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_package_assets(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.1.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert _wiring_doc_path(repo).is_file()
+
+
+def test_update_diff_mode_does_not_write_wiring_doc(tmp_path: Path) -> None:
+    """--diff is read-only: it must not regenerate the wiring doc."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    assets = _setup_package_assets(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update(diff_target="brainstorming/SKILL.md")
+
+    assert rc == 0
+    assert not _wiring_doc_path(repo).exists()
+
+
+def test_update_wiring_write_failure_warns_and_continues(
+    tmp_path: Path, capsys
+) -> None:
+    """A wiring-doc write failure (e.g. unwritable dir) must not crash
+    update — warn and let the rest of the sync proceed normally."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    assets = _setup_package_assets(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch(
+             "reinicorn.commands.update.write_wiring",
+             side_effect=OSError("disk full"),
+         ):
+        rc = cmd_update()
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "wiring" in captured.out.lower()
+    assert "disk full" in captured.out
+    # The rest of the sync still ran normally.
+    assert (repo / ".agents/skills/brainstorming/SKILL.md").read_text() == "# Brainstorming v2\n"

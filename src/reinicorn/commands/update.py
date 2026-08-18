@@ -20,6 +20,7 @@ from reinicorn.manifest import (
 from reinicorn.skillset.adapter import AdapterError, load_adapter
 from reinicorn.skillset.installer import install_adapter
 from reinicorn.skillset.lockfile import read_lock
+from reinicorn.skillset.wiring import wiring_doc_path, write_wiring
 
 _SUPERPOWERS_ADAPTER = "superpowers"
 
@@ -181,6 +182,27 @@ def _maybe_migrate_legacy_forks(
     )
 
 
+def _regenerate_wiring_doc(repo_root: Path) -> None:
+    """Regenerate the skillset wiring doc so it always exists after update.
+
+    Rendered from the lock's wiring when an adapter is installed,
+    registry-only otherwise — binding rule: `using-reinicorn`'s pointer to
+    this doc must never dangle. A write failure (e.g. an unwritable skills
+    dir) must not crash `rcorn update`; warn and move on, the doc will
+    regenerate on the next successful run.
+    """
+    try:
+        lock = read_lock(repo_root)
+        write_wiring(repo_root, lock.wiring if lock is not None else None)
+    except Exception as exc:
+        console.warn(
+            f"Could not regenerate the skillset wiring doc: {exc}\n"
+            f"  Where: {wiring_doc_path(repo_root)}\n"
+            f"  How to fix: check write permissions under "
+            f"{skills_dir(repo_root)}, then rerun 'rcorn update'."
+        )
+
+
 def cmd_update(*, diff_target: str | None = None) -> int:
     """Sync repo assets with installed package version."""
     pkg_version = _get_package_version()
@@ -220,6 +242,13 @@ def cmd_update(*, diff_target: str | None = None) -> int:
     # keyed on the manifest and lockfile, not on whether there's anything
     # else to sync).
     _maybe_migrate_legacy_forks(repo_root, manifest, manifest_files)
+
+    # Runs unconditionally, before the version-equality branch below, so
+    # both exit paths — "Already up to date" and a full sync — regenerate
+    # the doc. It must reflect any lock change the migration above just
+    # made, hence placed after it rather than once at the top of the
+    # function.
+    _regenerate_wiring_doc(repo_root)
 
     manifest_version = manifest["reinicorn_version"]
     if manifest_version == pkg_version:
