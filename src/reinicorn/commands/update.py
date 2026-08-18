@@ -8,15 +8,28 @@ from pathlib import Path
 from reinicorn import __version__, console
 from reinicorn.assets import get_asset_path
 from reinicorn.commands.hooks_install import cmd_hooks_install
-from reinicorn.config import skills_dir
+from reinicorn.config import config_get, config_set, skills_dir
 from reinicorn.git import run_git
+from reinicorn.identity import SKILLSET_MIGRATION_KEY
 from reinicorn.manifest import (
     read_manifest,
     sha256_file,
     write_manifest,
     write_manifest_data,
 )
+from reinicorn.skillset.adapter import AdapterError, load_adapter
+from reinicorn.skillset.installer import install_adapter
 from reinicorn.skillset.lockfile import read_lock
+
+_SUPERPOWERS_ADAPTER = "superpowers"
+
+_MIGRATION_PROMPT = (
+    "Legacy superpowers skill forks detected (shipped by an older Reinicorn).\n"
+    "These are now provided by the 'superpowers' skill-set adapter instead.\n"
+    "Migrate now? Installs the adapter (network required) and removes the old\n"
+    "copies; locally modified files are kept. Answer 'n' to keep the old forks\n"
+    "and never ask again (rcorn skills install superpowers migrates later). [y/N] "
+)
 
 
 def _get_package_version() -> str:
@@ -55,6 +68,119 @@ def _get_asset_sources() -> Path | None:
     return None
 
 
+def _native_skill_names(asset_root: Path) -> set[str]:
+    """Top-level directory names of the currently bundled native skills.
+
+    Mirrors the probe order `_collect_package_files` uses to find the
+    skills asset dir, so 'native' always means 'still shipped by this
+    package' — never a second, hand-maintained list to fall out of sync.
+    """
+    for candidate in ("skills", ".agents/skills", ".claude/skills"):
+        src = asset_root / candidate
+        if src.is_dir():
+            return {p.name for p in src.iterdir() if p.is_dir()}
+    return set()
+
+
+def _legacy_fork_files(
+    repo_root: Path, manifest_files: dict, native_skills: set[str]
+) -> dict[str, dict]:
+    """Manifest entries under the skills dir whose top-level dir isn't native.
+
+    These are the vendored superpowers forks a pre-adapter Reinicorn shipped:
+    still tracked in the manifest, no longer part of the package.
+    """
+    prefix = f"{skills_dir(repo_root).as_posix()}/"
+    return {
+        rel: meta
+        for rel, meta in manifest_files.items()
+        if rel.startswith(prefix)
+        and rel[len(prefix):].split("/", 1)[0] not in native_skills
+    }
+
+
+def _prune_empty_dirs(start: Path, stop: Path) -> None:
+    """Remove *start* and its now-empty ancestors, never reaching *stop*."""
+    current = start
+    while current != stop and stop in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            return  # not empty (or gone) — stop climbing
+        current = current.parent
+
+
+def _maybe_migrate_legacy_forks(
+    repo_root: Path, manifest: dict, manifest_files: dict
+) -> None:
+    """Detect legacy superpowers forks and offer the one-time adapter migration.
+
+    Spec: `rcorn update` on a legacy project detects the old vendored forks
+    via the asset manifest and offers to replace them with the bundled
+    'superpowers' skill-set adapter — behavior-preserving by default,
+    explicit opt-out to go adapter-less; locally modified forks are flagged
+    and never silently deleted.
+    """
+    if read_lock(repo_root) is not None:
+        return  # already migrated (a lock means an adapter is installed)
+    if config_get(SKILLSET_MIGRATION_KEY, root=repo_root) == "declined":
+        return  # durable opt-out from a previous run
+
+    asset_root = _get_asset_sources()
+    if asset_root is None:
+        return  # can't tell what's native here; the rest of update reports this
+
+    legacy = _legacy_fork_files(
+        repo_root, manifest_files, _native_skill_names(asset_root)
+    )
+    if not legacy:
+        return
+
+    answer = input(_MIGRATION_PROMPT).strip().lower()
+    if answer != "y":
+        config_set(SKILLSET_MIGRATION_KEY, "declined", repo_root)
+        return
+
+    adapter_dir = get_asset_path(f"adapters/{_SUPERPOWERS_ADAPTER}")
+    if adapter_dir is None:
+        console.error(
+            f"Cannot locate the bundled '{_SUPERPOWERS_ADAPTER}' adapter.\n"
+            f"  Is reinicorn installed correctly? Try: uv pip install -e ."
+        )
+        return
+
+    try:
+        adapter = load_adapter(adapter_dir)
+        install_adapter(adapter, repo_root)
+    except AdapterError as exc:
+        console.error(str(exc))
+        console.warn(
+            "Legacy fork migration failed — the old copies were left in place.\n"
+            "  Nothing was recorded, so 'rcorn update' will offer to migrate "
+            "again next time."
+        )
+        return
+
+    skl_root = repo_root / skills_dir(repo_root)
+    for rel, meta in legacy.items():
+        target = repo_root / rel
+        if target.is_file() and sha256_file(target) == meta["sha256"]:
+            target.unlink()
+            _prune_empty_dirs(target.parent, skl_root)
+        else:
+            console.warn(f"{rel} is locally modified — kept (not migrated).")
+
+    # Drop the migrated entries so the "Removed upstream" warning loop
+    # further down doesn't re-flag them (manifest_files is the same dict as
+    # manifest["files"], so this mutation is visible to that loop too).
+    for rel in legacy:
+        manifest_files.pop(rel, None)
+    write_manifest_data(repo_root, manifest)
+    console.success(
+        f"Migrated legacy superpowers forks to the '{_SUPERPOWERS_ADAPTER}' adapter."
+    )
+
+
 def cmd_update(*, diff_target: str | None = None) -> int:
     """Sync repo assets with installed package version."""
     pkg_version = _get_package_version()
@@ -88,6 +214,12 @@ def cmd_update(*, diff_target: str | None = None) -> int:
         # left without spec §10's pre-commit hook until the next full init.
         if cmd_hooks_install() != 0:
             console.warn("Hook installation had issues — review output above.")
+
+    # Placed before the version-equality early return below: a same-version
+    # repo must still get the one-time migration offer (spec: detection is
+    # keyed on the manifest and lockfile, not on whether there's anything
+    # else to sync).
+    _maybe_migrate_legacy_forks(repo_root, manifest, manifest_files)
 
     manifest_version = manifest["reinicorn_version"]
     if manifest_version == pkg_version:

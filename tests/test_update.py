@@ -32,6 +32,21 @@ def _setup_package_assets(tmp_path: Path) -> Path:
     return assets
 
 
+def _setup_native_only_assets(tmp_path: Path) -> Path:
+    """Package assets that no longer ship the 'brainstorming' fork.
+
+    Mirrors the post-fork-removal package: only a native skill is bundled,
+    so a manifest entry under .agents/skills/brainstorming/ is a legacy
+    vendored fork, not a currently-shipped asset.
+    """
+    assets = tmp_path / "assets"
+    native = assets / "skills" / "using-reinicorn"
+    native.mkdir(parents=True)
+    (native / "SKILL.md").write_text("# Using Reinicorn\n")
+    (assets / "AGENTS.md").write_text("# Agents v2\n")
+    return assets
+
+
 def test_update_overwrites_unchanged_files(tmp_path: Path):
     """Files matching manifest checksum are overwritten with new version."""
     from reinicorn.commands.update import cmd_update
@@ -171,9 +186,15 @@ def test_update_already_up_to_date(tmp_path: Path):
     from reinicorn.commands.update import cmd_update
 
     repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    # The legacy-fork migration check runs unconditionally before the
+    # version-equality early return, so it needs an asset root — one that
+    # still ships 'brainstorming' so this fixture's fork isn't flagged as
+    # legacy and the migration prompt (unmocked input here) never fires.
+    assets = _setup_package_assets(tmp_path)
 
     with patch("reinicorn.commands.update._get_package_version", return_value="0.1.0"), \
-         patch("reinicorn.commands.update._get_repo_root", return_value=repo):
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
         rc = cmd_update()
 
     assert rc == 0
@@ -198,9 +219,14 @@ def test_update_sanitizes_legacy_agents_ownership_when_already_current(
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     expected = deepcopy(manifest)
     del expected["files"]["AGENTS.md"]
+    # Ships 'brainstorming' so the fork-migration check (which also runs in
+    # this same-version path) doesn't treat this fixture's fork as legacy
+    # and trip the unrelated input() assertion below.
+    assets = _setup_package_assets(tmp_path)
 
     with patch("reinicorn.commands.update._get_package_version", return_value="0.1.0"), \
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
          patch("builtins.input", side_effect=AssertionError("AGENTS must not prompt")):
         assert cmd_update() == 0
 
@@ -225,9 +251,13 @@ def test_update_warns_about_removed_upstream(tmp_path: Path, capsys):
     skills.mkdir(parents=True)
     (skills / "SKILL.md").write_text("# Brainstorming v2\n")
 
+    # 'removed' also matches the legacy-fork-migration shape (an
+    # unrecognized skills-dir entry with no lock); decline it so this
+    # unrelated "removed upstream" scenario proceeds undisturbed.
     with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
-         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("builtins.input", return_value="n"):
         rc = cmd_update()
 
     assert rc == 0
@@ -241,9 +271,13 @@ def test_update_cli_dispatch(tmp_path: Path):
     from reinicorn.cli import main
 
     repo = _setup_repo_with_manifest(tmp_path)
+    # Same reasoning as test_update_already_up_to_date: the fork-migration
+    # check runs even on the same-version path and needs an asset root.
+    assets = _setup_package_assets(tmp_path)
 
     with patch("reinicorn.commands.update._get_package_version", return_value="0.1.0"), \
-         patch("reinicorn.commands.update._get_repo_root", return_value=repo):
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
         rc = main(["update"])
 
     assert rc == 0
@@ -440,3 +474,214 @@ def test_get_asset_sources_wheel_layout_returns_data_root(tmp_path: Path):
     assert ".agents/skills/brainstorming/SKILL.md" in files
     assert ".claude/hooks/pre-push" in files
     assert ".reinicorn/hooks/block-raw-kb-git.sh" in files
+
+
+# --- Legacy superpowers fork migration -------------------------------------
+
+_MIGRATION_PROMPT_TEXT = (
+    "Legacy superpowers skill forks detected (shipped by an older Reinicorn).\n"
+    "These are now provided by the 'superpowers' skill-set adapter instead.\n"
+    "Migrate now? Installs the adapter (network required) and removes the old\n"
+    "copies; locally modified files are kept. Answer 'n' to keep the old forks\n"
+    "and never ask again (rcorn skills install superpowers migrates later). [y/N] "
+)
+
+
+def test_update_migrates_legacy_forks_on_yes(tmp_path: Path) -> None:
+    """A legacy fork tracked in the manifest (no skillset lock, and no longer
+    shipped by the package) prompts for migration with the exact spec text;
+    answering 'y' installs the bundled adapter and deletes the hash-clean
+    fork file from disk, and it is never re-added from package assets."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("reinicorn.commands.update.install_adapter") as mock_install, \
+         patch("builtins.input", return_value="y") as mock_input:
+        rc = cmd_update()
+
+    assert rc == 0
+    assert mock_input.call_args.args[0] == _MIGRATION_PROMPT_TEXT
+    assert mock_install.call_count == 1
+    adapter_arg, repo_arg = mock_install.call_args.args
+    assert adapter_arg.name == "superpowers"
+    assert repo_arg == repo
+    assert not fork_file.is_file()
+    assert not fork_file.parent.exists()  # emptied dir pruned
+
+    manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
+    assert ".agents/skills/brainstorming/SKILL.md" not in manifest["files"]
+
+
+def test_update_migration_preserves_locally_modified_fork(
+    tmp_path: Path, capsys
+) -> None:
+    """A legacy fork file whose content diverges from the manifest hash is
+    kept on disk and warned about, never deleted, even though migration
+    otherwise proceeds (adapter install still runs)."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    fork_file.write_text("# Locally modified\n")
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("reinicorn.commands.update.install_adapter") as mock_install, \
+         patch("builtins.input", return_value="y"):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert mock_install.call_count == 1
+    assert fork_file.is_file()
+    assert fork_file.read_text() == "# Locally modified\n"
+    captured = capsys.readouterr()
+    assert ".agents/skills/brainstorming/SKILL.md" in captured.out
+    # The migration's own drift warning fires, but the generic "Removed
+    # upstream" loop must not double-flag the same path (the pop-and-
+    # rewrite in _maybe_migrate_legacy_forks is what prevents that).
+    assert "Removed upstream: .agents/skills/brainstorming/SKILL.md" not in captured.out
+
+    # The target package version differs from the manifest's, so update's
+    # ordinary sync flow runs to completion afterwards and its own final
+    # write_manifest() recomputes from disk — re-discovering the preserved
+    # file (it was never deleted) and tracking its current, drifted hash.
+    from reinicorn.manifest import sha256_file
+
+    manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
+    assert (
+        manifest["files"][".agents/skills/brainstorming/SKILL.md"]["sha256"]
+        == sha256_file(fork_file)
+    )
+
+
+def test_update_migration_skipped_when_lock_present(tmp_path: Path) -> None:
+    """A repo that already has a skillset lock is already migrated — the
+    fork-migration prompt must never fire."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset.lockfile import SkillsetLock, write_lock
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    write_lock(
+        repo,
+        SkillsetLock(
+            adapter="superpowers",
+            repo="obra/superpowers",
+            commit="a" * 40,
+            archive_sha256="b" * 64,
+            files={},
+            wiring={},
+        ),
+    )
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("builtins.input", side_effect=AssertionError("must not prompt")):
+        rc = cmd_update()
+
+    assert rc == 0
+
+
+def test_update_migration_decline_records_opt_out(tmp_path: Path) -> None:
+    """Answering 'n' keeps the forks in place and durably records the
+    opt-out via config_set; a later run then skips the prompt entirely."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.config import config_get
+    from reinicorn.identity import SKILLSET_MIGRATION_KEY
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    before = fork_file.read_bytes()
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("reinicorn.commands.update.install_adapter") as mock_install, \
+         patch("builtins.input", return_value="n"):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert mock_install.call_count == 0
+    assert fork_file.read_bytes() == before
+    assert config_get(SKILLSET_MIGRATION_KEY, root=repo) == "declined"
+
+    # A later run (even a different target version) must not prompt again.
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.3.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("reinicorn.commands.update.install_adapter") as mock_install_2, \
+         patch("builtins.input", side_effect=AssertionError("must not prompt again")):
+        rc2 = cmd_update()
+
+    assert rc2 == 0
+    assert mock_install_2.call_count == 0
+    assert fork_file.read_bytes() == before
+
+
+def test_update_migration_runs_on_same_version(tmp_path: Path) -> None:
+    """Migration must run even when the manifest version already equals the
+    package version — the 'nothing to sync' early return must not skip the
+    one-time legacy-fork offer."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.1.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("reinicorn.commands.update.install_adapter") as mock_install, \
+         patch("builtins.input", return_value="y"):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert mock_install.call_count == 1
+    assert not fork_file.is_file()
+
+    manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
+    assert ".agents/skills/brainstorming/SKILL.md" not in manifest["files"]
+
+
+def test_update_migration_failure_leaves_forks_and_does_not_record_declined(
+    tmp_path: Path, capsys
+) -> None:
+    """A failed adapter install (e.g. offline) leaves the old forks in
+    place, does not record the opt-out (so a later run re-offers), and lets
+    the rest of `rcorn update` continue normally rather than aborting."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.config import config_get
+    from reinicorn.identity import SKILLSET_MIGRATION_KEY
+    from reinicorn.skillset.adapter import AdapterError
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    before = fork_file.read_bytes()
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch(
+             "reinicorn.commands.update.install_adapter",
+             side_effect=AdapterError("offline: could not fetch obra/superpowers"),
+         ), \
+         patch("builtins.input", return_value="y"):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert fork_file.is_file()
+    assert fork_file.read_bytes() == before
+    assert config_get(SKILLSET_MIGRATION_KEY, root=repo) != "declined"
+    captured = capsys.readouterr()
+    assert "offline: could not fetch obra/superpowers" in captured.out
