@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import tarfile
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -138,3 +139,90 @@ def test_default_cache_dir_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fetch.default_cache_dir() == (
         Path.home() / ".cache" / "reinicorn" / "skillsets"
     )
+
+
+def test_extraction_failure_removes_temp_dir_corrupt_tarball(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A corrupt tarball extraction failure should not leave behind a temp dir."""
+    # Create a corrupt (truncated) tarball
+    tar_path = tmp_path / "corrupt.tar.gz"
+    tar_path.write_bytes(b"PK\x03\x04")  # Incomplete gzip/tar data
+
+    monkeypatch.setattr(fetch, "tarball_url", lambda _source: f"file://{tar_path}")
+    source = make_source()
+    cache_dir = tmp_path / "cache"
+
+    # Snapshot temp dirs before extraction attempt
+    temp_root = Path(tempfile.gettempdir())
+    dirs_before = {
+        d.name for d in temp_root.iterdir() if d.name.startswith("reinicorn-skillset-")
+    }
+
+    with pytest.raises(AdapterError):
+        fetch.fetch_source(source, cache_dir)
+
+    # Assert no new reinicorn-skillset-* dirs were created
+    dirs_after = {
+        d.name for d in temp_root.iterdir() if d.name.startswith("reinicorn-skillset-")
+    }
+    assert dirs_after == dirs_before, f"Temp dir was not cleaned up: {dirs_after - dirs_before}"
+
+
+def test_extraction_failure_removes_temp_dir_malicious_tarball(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malicious tarball extraction failure should not leave behind a temp dir."""
+    tar_path = build_malicious_tarball(tmp_path)
+    monkeypatch.setattr(fetch, "tarball_url", lambda _source: f"file://{tar_path}")
+    source = make_source()
+    cache_dir = tmp_path / "cache"
+
+    # Snapshot temp dirs before extraction attempt
+    temp_root = Path(tempfile.gettempdir())
+    dirs_before = {
+        d.name for d in temp_root.iterdir() if d.name.startswith("reinicorn-skillset-")
+    }
+
+    with pytest.raises(AdapterError):
+        fetch.fetch_source(source, cache_dir)
+
+    # Assert no new reinicorn-skillset-* dirs were created
+    dirs_after = {
+        d.name for d in temp_root.iterdir() if d.name.startswith("reinicorn-skillset-")
+    }
+    assert dirs_after == dirs_before, f"Temp dir was not cleaned up: {dirs_after - dirs_before}"
+
+
+def test_extraction_failure_removes_temp_dir_invalid_structure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An invalid tarball structure (no single top-level dir) should clean up temp."""
+    # Create a tarball with multiple top-level entries
+    tar_path = tmp_path / "invalid-structure.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as tar:
+        info1 = tarfile.TarInfo(name="file1.txt")
+        info1.size = 5
+        tar.addfile(info1, io.BytesIO(b"hello"))
+        info2 = tarfile.TarInfo(name="file2.txt")
+        info2.size = 5
+        tar.addfile(info2, io.BytesIO(b"world"))
+
+    monkeypatch.setattr(fetch, "tarball_url", lambda _source: f"file://{tar_path}")
+    source = make_source()
+    cache_dir = tmp_path / "cache"
+
+    # Snapshot temp dirs before extraction attempt
+    temp_root = Path(tempfile.gettempdir())
+    dirs_before = {
+        d.name for d in temp_root.iterdir() if d.name.startswith("reinicorn-skillset-")
+    }
+
+    with pytest.raises(AdapterError):
+        fetch.fetch_source(source, cache_dir)
+
+    # Assert no new reinicorn-skillset-* dirs were created
+    dirs_after = {
+        d.name for d in temp_root.iterdir() if d.name.startswith("reinicorn-skillset-")
+    }
+    assert dirs_after == dirs_before, f"Temp dir was not cleaned up: {dirs_after - dirs_before}"

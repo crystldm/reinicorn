@@ -46,6 +46,8 @@ def fetch_source(
     both. Extraction always uses tarfile's "data" filter, so archives with
     unsafe members (e.g. ones that would extract outside the destination
     directory) are rejected.
+
+    The caller owns eventual cleanup of the returned tree's parent temp directory.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     owner, name = source.repo.split("/", 1)
@@ -98,6 +100,7 @@ def _extract(source: AdapterSource, cache_path: Path) -> Path:
         with tarfile.open(cache_path) as tar:
             tar.extractall(path=extract_dir, filter="data")
     except (tarfile.TarError, OSError) as exc:
+        shutil.rmtree(extract_dir, ignore_errors=True)
         raise AdapterError(
             f"Failed to extract archive {cache_path} for "
             f"{source.repo}@{source.commit}: {exc}.\n"
@@ -108,6 +111,7 @@ def _extract(source: AdapterSource, cache_path: Path) -> Path:
 
     entries = list(extract_dir.iterdir())
     if len(entries) != 1 or not entries[0].is_dir():
+        shutil.rmtree(extract_dir, ignore_errors=True)
         raise AdapterError(
             f"Archive {cache_path} for {source.repo}@{source.commit} did not "
             f"extract to a single top-level directory (found "
