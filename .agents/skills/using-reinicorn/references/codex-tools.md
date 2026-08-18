@@ -7,12 +7,19 @@ Add to your Codex config (`~/.codex/config.toml`):
 multi_agent = true
 ```
 
-This enables `spawn_agent`, `wait_agent`, and `close_agent` for skills like `dispatching-parallel-agents` and `subagent-driven-development`. When using subagent-driven-development, you should always close implementer and reviewer subagents when they have finished all their work.
+This enables `spawn_agent`, `wait_agent`, and `close_agent` for skills such
+as `dispatching-parallel-agents` and `subagent-driven-development`, when your
+installed skill set provides them (see
+`references/skillset-wiring.md`). When using subagent-driven-development, you
+should always close implementer and reviewer subagents when they have
+finished all their work.
 
 ## Environment Detection
 
-Skills that create worktrees or finish branches should detect their
-environment with read-only git commands before proceeding:
+Skills that create worktrees or finish branches — such as
+`using-git-worktrees` and `finishing-a-development-branch`, when your
+installed skill set provides them — should detect their environment with
+read-only git commands before proceeding:
 
 ```bash
 GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
@@ -23,8 +30,10 @@ BRANCH=$(git branch --show-current)
 - `GIT_DIR != GIT_COMMON` → already in a linked worktree (skip creation)
 - `BRANCH` empty → detached HEAD (cannot branch/push/PR from sandbox)
 
-See `using-git-worktrees` Step 0 and `finishing-a-development-branch`
-Step 1 for how each skill uses these signals.
+See `references/skillset-wiring.md` for which skills your installed skill
+set provides and how each uses these signals (e.g. `using-git-worktrees`
+Step 0, `finishing-a-development-branch` Step 1, in the superpowers
+adapter).
 
 ## Codex App Finishing
 
