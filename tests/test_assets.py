@@ -70,6 +70,34 @@ def test_using_reinicorn_update_guidance_excludes_agents() -> None:
     assert "AGENTS" not in update_rows[0]
 
 
+def test_using_reinicorn_is_methodology_neutral():
+    """using-reinicorn must not name any forked/methodology skill by name.
+
+    It defers to the generated wiring doc instead of hardcoding skill
+    names like brainstorming/systematic-debugging/superpowers, so the
+    skill stays usable once the vendored superpowers forks are removed.
+    """
+    skill = get_asset_path(".agents/skills/using-reinicorn/SKILL.md")
+    assert skill is not None
+    text = skill.read_text()
+    lowered = text.lower()
+
+    forbidden = [
+        "brainstorming",
+        "writing-plans",
+        "superpowers",
+        "systematic-debugging",
+        "test-driven-development",
+        "executing-plans",
+        "subagent-driven-development",
+    ]
+    for word in forbidden:
+        assert word not in lowered, f"found forbidden methodology reference: {word}"
+
+    assert "references/skillset-wiring.md" in text
+    assert "the creation command alone is the contract" in text
+
+
 def test_doc_review_cleanup_workflow_asset_resolves():
     """The Reinicorn review setup workflow template is bundled/discoverable."""
     result = get_asset_path("workflows/reinicorn-doc-review-cleanup.yml")

@@ -28,18 +28,21 @@ Never use the Read tool on skill files -- always use your platform's native skil
 
 **Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.
 
-**Before entering plan mode:** if you haven't already brainstormed, invoke the brainstorming skill first.
-
 Then announce "Using [skill] to [purpose]" and follow the skill exactly. If it has a checklist, create a todo per item.
 
-## Skill Priority
+## Doc-Type Wiring
 
-When multiple skills apply, process skills come first — they set the approach, then implementation skills carry it out. brainstorming and systematic-debugging are the most common process skills, but the rule holds for any of them.
+Before authoring any registered doc type, consult
+`references/skillset-wiring.md` (generated — lists every doc type, its
+creation command, and the skill(s) to invoke first). Invoke the listed
+skill(s) before creating the doc. When a doc type lists no skills — no
+skill-set adapter is installed — the creation command alone is the contract:
+create the doc directly via the CLI.
 
-- "Let's build X" → brainstorming first, then implementation skills.
-- "Fix this bug" → systematic-debugging first, then domain skills.
-
-Before any creative work, check golden principles (see below).
+Process skills (debugging, planning, review) come from your installed
+skill set; when a task matches one, invoke it before acting. Reinicorn
+takes no position on methodology — only on where docs live and how they
+are created.
 
 ## Red Flags
 
