@@ -396,6 +396,41 @@ def test_init_regenerates_wiring_doc_with_lock(kb_repo: Path, tmp_path: Path) ->
     assert "alpha" in spec_row
 
 
+def test_init_copy_fallback_includes_wiring_doc(
+    kb_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When symlinks are unavailable, maintain_link's fallback copies the
+    skills dir to .claude/skills. That copy must include the wiring doc —
+    which means the wiring doc has to be regenerated BEFORE the fallback
+    copy is made, or a copy-fallback repo never gets skillset-wiring.md."""
+    r_root = _setup_init_r_root(tmp_path)
+
+    def no_symlinks(*_args: object, **_kwargs: object) -> None:
+        raise OSError("symlinks unavailable")
+
+    monkeypatch.setattr(Path, "symlink_to", no_symlinks)
+
+    with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
+         patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
+         patch("reinicorn.commands.init.repo_slug", return_value="testproject"), \
+         patch("reinicorn.commands.init.prompt_platforms", return_value=["claude"]), \
+         patch("reinicorn.commands.init.cmd_hooks_install", return_value=0), \
+         patch("reinicorn.commands.init.setup_kb_clone"):
+        def _resolve(name: str) -> Path | None:
+            p = r_root / name
+            return p if p.exists() else None
+        mock_asset.side_effect = _resolve
+
+        result = cmd_init(cwd=kb_repo)
+
+    assert result == 0
+    copied_doc = (
+        kb_repo / ".claude" / "skills" / "using-reinicorn"
+        / "references" / "skillset-wiring.md"
+    )
+    assert copied_doc.is_file()
+
+
 def test_cli_init_dispatches_with_flags():
     """reins init --kb-url should pass the flag through to cmd_init."""
     from reinicorn.cli import main

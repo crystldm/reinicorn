@@ -299,8 +299,12 @@ def _setup_assets(
         return None
     selected = prompt_platforms() if platforms is None else platforms
     install_platform_instructions(cwd, slug, selected)
-    _copy_skills(r_root, cwd)
+    # Wiring doc before the skills copy: maintain_link's copy fallback (when
+    # symlinks are unavailable) snapshots the skills dir as it stands at
+    # that moment, so the doc must already exist under it or a
+    # copy-fallback repo never gets skillset-wiring.md.
     _regenerate_wiring_doc(cwd)
+    _copy_skills(r_root, cwd)
     _install_session_hook(cwd)
     _copy_lint_config(cwd)
     _write_init_manifest(cwd)
