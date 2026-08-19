@@ -4,7 +4,7 @@ Read and follow `AGENTS.md` in this repository root. It contains all project con
 
 ## Skill Invocation
 
-This project uses Reinicorn skills in `.agents/skills/`. Use the `Skill` tool to invoke them by name. Before any response or action, check if a skill applies — even a 1% chance means invoke it.
+This project uses Reinicorn skills in your skills directory (default `.agents/skills/`, configurable via `REINICORN_SKILLS_DIR`). Use the `Skill` tool to invoke them by name. Before any response or action, check if a skill applies — even a 1% chance means invoke it.
 
 Key skills:
 - `using-reinicorn` — start of every conversation in this repo
@@ -21,7 +21,7 @@ are created.
 All kb docs must be created via the per-type commands: `rcorn spec create "title"`, `rcorn prd create "title"`, `rcorn plan create`, `rcorn retro create`, `rcorn idea create "title"`, etc. Never hand-write docs in `kb/{repo}/` protected paths.
 
 Before authoring any registered doc type, consult
-`.agents/skills/using-reinicorn/references/skillset-wiring.md` (generated —
+`<skills-dir>/using-reinicorn/references/skillset-wiring.md` (generated —
 lists every doc type, its creation command, and the skill(s) to invoke
 first). Invoke the listed skill(s) before creating the doc. When a doc
 type lists no skills, no skill-set adapter is installed — the creation
