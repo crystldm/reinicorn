@@ -27,6 +27,22 @@ if TYPE_CHECKING:
     from reinicorn.skillset.adapter import Adapter
 
 
+def _stale_symlink_target(link: Path, skills: Path) -> str | None:
+    """The link's current raw target, if it differs from the target
+    `skills` currently resolves to — else None (also None when *link*
+    isn't a symlink).
+
+    Compared as the raw `readlink()` string against the relative target
+    `maintain_link` would create, not resolved filesystem paths, so this
+    works even when `skills` doesn't exist yet.
+    """
+    if not link.is_symlink():
+        return None
+    expected = os.path.relpath(skills, link.parent)
+    current = str(link.readlink())
+    return None if current == expected else current
+
+
 def maintain_link(repo_root: Path) -> None:
     """Point the configured compatibility link at the configured skills dir.
 
@@ -34,9 +50,12 @@ def maintain_link(repo_root: Path) -> None:
     `.agents/skills` natively, so the link keeps one canonical tree readable
     by both. A pre-existing REAL link directory is left untouched (never
     delete user content) — warn instead; a platform without symlinks gets a
-    copy plus a warning; `REINICORN_SKILLS_LINK=none` disables the link.
+    copy plus a warning; `REINICORN_SKILLS_LINK=none` disables the link. An
+    existing symlink that no longer points at the configured skills dir
+    (e.g. REINICORN_SKILLS_DIR changed, or a stale checkout) is relinked —
+    only a REAL directory is left alone, never a stale link.
 
-    Every early return here is mirrored by `_commit`'s link-tracking
+    Every path this can mutate is mirrored by `_commit`'s link-tracking
     predicate — keep the two in lockstep (see the comment there).
     """
     link_rel = skills_link(repo_root)
@@ -47,14 +66,23 @@ def maintain_link(repo_root: Path) -> None:
     link = repo_root / link_rel
     skills = repo_root / skills_rel
 
+    stale_target = _stale_symlink_target(link, skills)
     if link.is_symlink():
-        return  # already linked
-    if link.is_dir():
+        if stale_target is None:
+            return  # already linked correctly
+        console.warn(
+            f"{link_rel.as_posix()} was a stale link (-> {stale_target}) — "
+            f"relinking it to {skills_rel.as_posix()}/."
+        )
+        link.unlink()
+    elif link.is_dir():
         console.warn(
             f"{link_rel.as_posix()} already exists as a real directory — "
             f"left in place.\n"
-            f"  Canonical skills now live in {skills_rel.as_posix()}/. Remove the old\n"
-            f"  directory and re-run 'rcorn update' to switch to the symlink."
+            f"  It is not managed by Reinicorn and may be stale. Canonical\n"
+            f"  skills now live in {skills_rel.as_posix()}/ — remove "
+            f"{link_rel.as_posix()} and\n"
+            f"  re-run 'rcorn update' to get a live symlink."
         )
         return
     if not skills.is_dir():
@@ -258,15 +286,16 @@ def _commit(
         link_rel = skills_link(repo_root)
         if link_rel is not None:
             link = repo_root / link_rel
-            # Only the create/copy path mutates anything: an existing symlink
-            # or real directory is left alone, so there is nothing to back up
-            # (and no reason to copy a user's whole directory aside).
-            # This predicate mirrors `maintain_link`'s early returns — if a
-            # new early return is added there, add it here too, or the link
-            # maintain_link writes escapes the transaction and survives a
-            # rollback. (Tracking a path maintain_link then skips is safe: an
-            # absent path rolls back to absent.)
-            if not link.is_symlink() and not link.is_dir():
+            # Only a REAL (non-symlink) directory is guaranteed left alone by
+            # maintain_link — an absent path gets created, and ANY symlink
+            # may be relinked if it is stale, so both must be tracked.
+            # (Tracking a symlink maintain_link decides not to touch is
+            # safe and cheap: the backup just goes unused.) This predicate
+            # mirrors `maintain_link`'s mutation cases — if a new one is
+            # added there, add it here too, or the link maintain_link
+            # writes escapes the transaction and survives a rollback.
+            real_dir = link.is_dir() and not link.is_symlink()
+            if not real_dir:
                 transaction.track(link)
                 transaction.ensure_parents(link)
         maintain_link(repo_root)

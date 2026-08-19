@@ -254,6 +254,8 @@ def test_maintain_link_leaves_real_directory_in_place(tmp_path: Path, capsys) ->
     assert (real / "mine.md").read_text() == "hand-written\n"
     out = capsys.readouterr().out
     assert ".claude/skills already exists as a real directory — left in place." in out
+    assert "not managed" in out.lower()
+    assert "stale" in out.lower()
 
 
 def test_maintain_link_skips_when_the_skills_dir_is_missing(
@@ -276,7 +278,24 @@ def test_maintain_link_skips_when_the_skills_dir_is_missing(
     assert "REINICORN_SKILLS_DIR" in out
 
 
-def test_maintain_link_leaves_existing_symlink_alone(tmp_path: Path) -> None:
+def test_maintain_link_leaves_a_correctly_targeted_symlink_alone(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "project"
+    (repo_root / ".agents" / "skills").mkdir(parents=True)
+    link = repo_root / ".claude" / "skills"
+    link.parent.mkdir(parents=True)
+    link.symlink_to("../.agents/skills", target_is_directory=True)
+
+    installer.maintain_link(repo_root)
+
+    assert str(link.readlink()) == "../.agents/skills"
+
+
+def test_maintain_link_replaces_a_stale_symlink(tmp_path: Path, capsys) -> None:
+    """A symlink left over from before REINICORN_SKILLS_DIR changed (or
+    from a stale checkout) must be relinked to the currently configured
+    skills dir, not silently accepted just because it is *a* symlink."""
     repo_root = tmp_path / "project"
     (repo_root / ".agents" / "skills").mkdir(parents=True)
     link = repo_root / ".claude" / "skills"
@@ -285,7 +304,30 @@ def test_maintain_link_leaves_existing_symlink_alone(tmp_path: Path) -> None:
 
     installer.maintain_link(repo_root)
 
-    assert str(link.readlink()) == "elsewhere"
+    assert str(link.readlink()) == "../.agents/skills"
+    out = capsys.readouterr().out
+    assert "stale" in out.lower()
+    assert ".claude/skills" in out
+
+
+def test_maintain_link_relinks_a_stale_symlink_to_a_reconfigured_skills_dir(
+    tmp_path: Path,
+) -> None:
+    """The staleness check is against the currently configured skills dir,
+    not just any change — a symlink correctly pointing at the OLD
+    REINICORN_SKILLS_DIR is stale once the config points elsewhere."""
+    repo_root = tmp_path / "project"
+    (repo_root / "custom" / "skills").mkdir(parents=True)
+    (repo_root / CONFIG_FILE_NAME).write_text(
+        "REINICORN_SKILLS_DIR=custom/skills\n"
+    )
+    link = repo_root / ".claude" / "skills"
+    link.parent.mkdir(parents=True)
+    link.symlink_to("../.agents/skills", target_is_directory=True)
+
+    installer.maintain_link(repo_root)
+
+    assert str(link.readlink()) == "../custom/skills"
 
 
 def test_init_link_helper_delegates_to_maintain_link(tmp_path: Path) -> None:
