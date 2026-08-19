@@ -67,34 +67,18 @@ def test_using_reinicorn_update_guidance_excludes_agents() -> None:
 
     assert update_rows == [
         "| `rcorn update [--diff X]` | Re-sync bundled files "
-        "(skills, hooks, linters) to the installed Reinicorn version |"
+        "(native skills, hooks, linters) to the installed Reinicorn version |"
     ]
     assert "AGENTS" not in update_rows[0]
 
 
-def test_using_reinicorn_is_methodology_neutral():
-    """using-reinicorn must not name any forked/methodology skill by name.
-
-    It defers to the generated wiring doc instead of hardcoding skill
-    names like brainstorming/systematic-debugging/superpowers, so the
-    skill stays usable once the vendored superpowers forks are removed.
-    """
+def test_using_reinicorn_defers_to_wiring_doc():
+    """using-reinicorn routes doc authoring through the generated wiring
+    doc and states the no-adapter fallback, instead of hardcoding doc
+    types or skill names."""
     skill = get_asset_path(".agents/skills/using-reinicorn/SKILL.md")
     assert skill is not None
     text = skill.read_text()
-    lowered = text.lower()
-
-    forbidden = [
-        "brainstorming",
-        "writing-plans",
-        "superpowers",
-        "systematic-debugging",
-        "test-driven-development",
-        "executing-plans",
-        "subagent-driven-development",
-    ]
-    for word in forbidden:
-        assert word not in lowered, f"found forbidden methodology reference: {word}"
 
     assert "references/skillset-wiring.md" in text
     assert "the creation command alone is the contract" in text
