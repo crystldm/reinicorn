@@ -525,10 +525,12 @@ def test_update_migrates_legacy_forks_on_yes(tmp_path: Path) -> None:
     answering 'y' installs the bundled adapter and deletes the hash-clean
     fork file from disk, and it is never re-added from package assets."""
     from reinicorn.commands.update import cmd_update
+    from reinicorn.manifest import sha256_file
 
     repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
     assets = _setup_native_only_assets(tmp_path)
     fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    fork_hash = sha256_file(fork_file)
 
     with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
@@ -543,6 +545,10 @@ def test_update_migrates_legacy_forks_on_yes(tmp_path: Path) -> None:
     adapter_arg, repo_arg = mock_install.call_args.args
     assert adapter_arg.name == "superpowers"
     assert repo_arg == repo
+    # The legacy inventory is handed to the installer so the transaction
+    # adopts the on-disk forks instead of flagging them as collisions.
+    adopt_hashes = mock_install.call_args.kwargs["adopt_hashes"]
+    assert adopt_hashes == {"brainstorming/SKILL.md": fork_hash}
     assert not fork_file.is_file()
     assert not fork_file.parent.exists()  # emptied dir pruned
 
@@ -717,6 +723,193 @@ def test_update_migration_failure_leaves_forks_and_does_not_record_declined(
     assert config_get(SKILLSET_MIGRATION_KEY, root=repo) != "declined"
     captured = capsys.readouterr()
     assert "offline: could not fetch obra/superpowers" in captured.out
+
+
+# --- Legacy fork migration with the real installer (adoption contract) -----
+#
+# The tests above mock install_adapter to isolate the prompt/config flow.
+# These run the REAL transactional installer (network faked at fetch_source)
+# because the migration's core contract — the legacy fork directories are
+# still on disk when the installer's collision check runs, and must be
+# adopted, not treated as unmanaged collisions — is exactly what a mock
+# would hide.
+
+_ADAPTER_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+_ADAPTER_SKILL_CONTENT = "# Brainstorming (from the superpowers adapter)\n"
+
+
+def _setup_bundled_adapter_with_upstream(tmp_path: Path):
+    """A synthetic bundled 'superpowers' adapter plus a fake fetch_source.
+
+    The adapter installs a skill named 'brainstorming' — deliberately the
+    same name as the legacy fork `_setup_repo_with_manifest` lays down — so
+    what's under test is the adoption contract, not superpowers content.
+    """
+    import shutil
+    import tempfile
+
+    upstream = tmp_path / "upstream"
+    skill = upstream / "skills" / "brainstorming"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(_ADAPTER_SKILL_CONTENT)
+
+    adapter_dir = tmp_path / "bundled-superpowers"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter.yaml").write_text(
+        f"""\
+name: superpowers
+source:
+  repo: acme/superpowers
+  commit: {_ADAPTER_COMMIT}
+  annotation: v1.0.0
+skills:
+  skills/brainstorming: brainstorming
+wiring:
+  spec: [brainstorming]
+"""
+    )
+
+    def fake_fetch(source, cache_dir, *, expected_digest=None):
+        parent = Path(tempfile.mkdtemp(prefix="reinicorn-test-fetch-"))
+        tree = parent / "tree"
+        shutil.copytree(upstream, tree)
+        return tree, "c" * 64
+
+    return adapter_dir, fake_fetch
+
+
+def _migration_patches(repo: Path, assets: Path, adapter_dir: Path, fake_fetch):
+    """The patch stack every real-installer migration test shares."""
+    return [
+        patch("reinicorn.commands.update._get_package_version", return_value="0.1.0"),
+        patch("reinicorn.commands.update._get_repo_root", return_value=repo),
+        patch("reinicorn.commands.update._get_asset_sources", return_value=assets),
+        patch(
+            "reinicorn.commands.update.get_asset_path",
+            lambda name: adapter_dir if name == "adapters/superpowers" else None,
+        ),
+        patch("reinicorn.skillset.installer.fetch_source", fake_fetch),
+        patch("builtins.input", return_value="y"),
+    ]
+
+
+def test_update_migration_with_real_installer_adopts_clean_forks(
+    tmp_path: Path, capsys
+) -> None:
+    """The forks are still on disk when the installer runs — they must be
+    adopted (replaced inside the transaction), never flagged as unmanaged
+    collisions. A legacy file the adapter does not produce is cleaned up
+    post-install when hash-clean; the manifest drops all migrated entries."""
+    from contextlib import ExitStack
+
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset.lockfile import read_lock
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    # A second legacy fork with no adapter counterpart.
+    oldskill = repo / ".agents" / "skills" / "oldskill"
+    oldskill.mkdir(parents=True)
+    (oldskill / "SKILL.md").write_text("# Old skill\n")
+    write_manifest(repo, version="0.1.0")  # re-track, now including oldskill
+    assets = _setup_native_only_assets(tmp_path)
+    adapter_dir, fake_fetch = _setup_bundled_adapter_with_upstream(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+
+    with ExitStack() as stack:
+        for p in _migration_patches(repo, assets, adapter_dir, fake_fetch):
+            stack.enter_context(p)
+        rc = cmd_update()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "already exists" not in out  # no collision abort
+    assert "migration failed" not in out.lower()
+    assert "Migrated legacy superpowers forks" in out
+    # Hash-clean fork replaced by the adapter's copy inside the transaction.
+    assert fork_file.read_text() == _ADAPTER_SKILL_CONTENT
+    # Legacy file with no adapter counterpart: hash-clean → deleted + pruned.
+    assert not oldskill.exists()
+    lock = read_lock(repo)
+    assert lock is not None
+    assert lock.adapter == "superpowers"
+    assert set(lock.files) == {"brainstorming/SKILL.md"}
+    manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
+    assert ".agents/skills/brainstorming/SKILL.md" not in manifest["files"]
+    assert ".agents/skills/oldskill/SKILL.md" not in manifest["files"]
+
+
+def test_update_migration_with_real_installer_preserves_drifted_fork(
+    tmp_path: Path, capsys
+) -> None:
+    """A locally modified fork the adapter produces is kept verbatim by the
+    transaction, warned about by name, and the lock records the adapter's
+    INTENDED hash so the next 'rcorn skills update' sees a local edit."""
+    import hashlib
+    from contextlib import ExitStack
+
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset.lockfile import read_lock
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    adapter_dir, fake_fetch = _setup_bundled_adapter_with_upstream(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    fork_file.write_text("# My local edits\n")  # drift after manifest recorded it
+
+    with ExitStack() as stack:
+        for p in _migration_patches(repo, assets, adapter_dir, fake_fetch):
+            stack.enter_context(p)
+        rc = cmd_update()
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "migration failed" not in out.lower()
+    assert fork_file.read_text() == "# My local edits\n"
+    assert "brainstorming/SKILL.md" in out
+    assert "rcorn skills update --force" in out
+    lock = read_lock(repo)
+    assert lock is not None
+    assert lock.files["brainstorming/SKILL.md"] == hashlib.sha256(
+        _ADAPTER_SKILL_CONTENT.encode()
+    ).hexdigest()
+    manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
+    assert ".agents/skills/brainstorming/SKILL.md" not in manifest["files"]
+
+
+def test_update_migration_with_real_installer_rolls_back_on_failure(
+    tmp_path: Path, capsys
+) -> None:
+    """A mid-transaction failure restores the legacy forks byte for byte,
+    writes no lock, keeps the manifest entries, and lets 'rcorn update'
+    finish normally so the next run re-offers the migration."""
+    from contextlib import ExitStack
+
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset.lockfile import read_lock
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    adapter_dir, fake_fetch = _setup_bundled_adapter_with_upstream(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    before = fork_file.read_bytes()
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    with ExitStack() as stack:
+        for p in _migration_patches(repo, assets, adapter_dir, fake_fetch):
+            stack.enter_context(p)
+        stack.enter_context(
+            patch("reinicorn.skillset.installer.write_lock", boom)
+        )
+        rc = cmd_update()
+
+    assert rc == 0  # migration failure never aborts the rest of update
+    assert fork_file.read_bytes() == before  # rollback restored the fork
+    assert read_lock(repo) is None
+    manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
+    assert ".agents/skills/brainstorming/SKILL.md" in manifest["files"]
+    assert "migration failed" in capsys.readouterr().out.lower()
 
 
 def _wiring_doc_path(repo: Path) -> Path:

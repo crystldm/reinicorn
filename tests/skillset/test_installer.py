@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -509,6 +510,164 @@ def test_adapter_claiming_the_wiring_doc_raises_and_writes_nothing(
     message = str(excinfo.value)
     assert "wiring doc" in message
     assert "How to fix" in message
+    assert snapshot(project) == before
+
+
+# --- adoption (legacy-fork migration) --------------------------------------
+
+
+def write_legacy_files(
+    skills: Path, contents: dict[str, str]
+) -> dict[str, str]:
+    """Lay down pre-existing files and return their {rel: sha256} adopt map."""
+    adopt_hashes: dict[str, str] = {}
+    for rel, content in contents.items():
+        path = skills / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        adopt_hashes[rel] = sha256_file(path)
+    return adopt_hashes
+
+
+def test_install_adopts_listed_preexisting_files(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]]
+) -> None:
+    """Pre-existing files covered by adopt_hashes are not collisions: a
+    hash-clean adopted file is replaced by the adapter's copy, and the
+    install completes with a normal lock."""
+    skills = project / ".agents" / "skills"
+    adopt_hashes = write_legacy_files(skills, {
+        "alpha/SKILL.md": "# legacy alpha fork\n",
+        "alpha/scratch.md": "legacy scratch\n",
+    })
+    adapter = make_adapter(tmp_path / "adapter", BASE_YAML, EXTRA_FILES)
+
+    installer.install_adapter(
+        adapter, project, cache_dir=tmp_path / "cache", adopt_hashes=adopt_hashes
+    )
+
+    for rel in adopt_hashes:
+        assert (skills / rel).read_text() == (
+            FIXTURE_ROOT / "skills" / rel
+        ).read_text(), rel
+    lock = read_lock(project)
+    assert lock is not None
+    assert set(lock.files) == STAGED_PATHS
+
+
+def test_install_adoption_preserves_a_drifted_file_and_locks_intended_hash(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]], capsys
+) -> None:
+    """An adopted file whose disk content no longer matches its adopt hash
+    is the user's work: kept verbatim, warned about (naming the file and
+    the --force escape hatch), while the lock records the hash of the
+    adapter's INTENDED content so the next update sees a local edit."""
+    skills = project / ".agents" / "skills"
+    adopt_hashes = write_legacy_files(skills, {
+        "alpha/scratch.md": "legacy scratch\n",
+    })
+    drifted = skills / "alpha" / "SKILL.md"
+    drifted.write_text("# my edited legacy alpha\n")
+    # The legacy manifest recorded the original content; the user edited since.
+    adopt_hashes["alpha/SKILL.md"] = hashlib.sha256(
+        b"# original legacy alpha\n"
+    ).hexdigest()
+    adapter = make_adapter(tmp_path / "adapter", BASE_YAML, EXTRA_FILES)
+
+    installer.install_adapter(
+        adapter, project, cache_dir=tmp_path / "cache", adopt_hashes=adopt_hashes
+    )
+
+    assert drifted.read_text() == "# my edited legacy alpha\n"
+    assert (skills / "alpha" / "scratch.md").read_text() == (
+        FIXTURE_ROOT / "skills" / "alpha" / "scratch.md"
+    ).read_text()
+    out = capsys.readouterr().out
+    assert "alpha/SKILL.md" in out
+    assert "rcorn skills update --force" in out
+    lock = read_lock(project)
+    assert lock is not None
+    assert lock.files["alpha/SKILL.md"] == sha256_file(
+        FIXTURE_ROOT / "skills" / "alpha" / "SKILL.md"
+    )
+
+
+def test_install_adoption_preserves_an_adopted_path_replaced_by_a_directory(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]], capsys
+) -> None:
+    """An adopted path the user replaced with a directory is drift too — it
+    must be preserved, never rmtree'd by the commit."""
+    skills = project / ".agents" / "skills"
+    adopt_hashes = write_legacy_files(skills, {
+        "alpha/SKILL.md": "# legacy alpha fork\n",
+    })
+    replaced = skills / "alpha" / "scratch.md"
+    adopt_hashes["alpha/scratch.md"] = hashlib.sha256(
+        b"legacy scratch\n"
+    ).hexdigest()
+    replaced.mkdir()
+    (replaced / "notes.txt").write_text("mine\n")
+    adapter = make_adapter(tmp_path / "adapter", BASE_YAML, EXTRA_FILES)
+
+    installer.install_adapter(
+        adapter, project, cache_dir=tmp_path / "cache", adopt_hashes=adopt_hashes
+    )
+
+    assert replaced.is_dir()
+    assert (replaced / "notes.txt").read_text() == "mine\n"
+    assert "alpha/scratch.md" in capsys.readouterr().out
+
+
+def test_install_adoption_still_blocks_an_unlisted_foreign_file(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]]
+) -> None:
+    """adopt_hashes exempts exactly the listed paths — a staged target that
+    exists on disk without being listed (or owned) still collides."""
+    skills = project / ".agents" / "skills"
+    adopt_hashes = write_legacy_files(skills, {
+        "alpha/SKILL.md": "# legacy alpha fork\n",
+    })
+    (skills / "alpha" / "scratch.md").write_text("someone else's file\n")
+    before = snapshot(project)
+    adapter = make_adapter(tmp_path / "adapter", BASE_YAML, EXTRA_FILES)
+
+    with pytest.raises(
+        AdapterError, match=re.escape("alpha/scratch.md")
+    ) as excinfo:
+        installer.install_adapter(
+            adapter, project, cache_dir=tmp_path / "cache",
+            adopt_hashes=adopt_hashes,
+        )
+
+    assert "unmanaged" in str(excinfo.value)
+    assert snapshot(project) == before
+
+
+def test_failed_adoption_install_restores_the_legacy_files(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mid-transaction failure rolls the adopted legacy files back byte
+    for byte — adoption must not weaken the all-or-nothing guarantee."""
+    skills = project / ".agents" / "skills"
+    adopt_hashes = write_legacy_files(skills, {
+        "alpha/SKILL.md": "# legacy alpha fork\n",
+        "alpha/scratch.md": "legacy scratch\n",
+    })
+    before = snapshot(project)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(installer, "write_lock", boom)
+    adapter = make_adapter(tmp_path / "adapter", BASE_YAML, EXTRA_FILES)
+
+    with pytest.raises(AdapterError, match="rolled back"):
+        installer.install_adapter(
+            adapter, project, cache_dir=tmp_path / "cache",
+            adopt_hashes=adopt_hashes,
+        )
+
     assert snapshot(project) == before
 
 

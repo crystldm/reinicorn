@@ -115,7 +115,11 @@ def maintain_link(repo_root: Path) -> None:
 
 
 def install_adapter(
-    adapter: Adapter, repo_root: Path, *, cache_dir: Path | None = None
+    adapter: Adapter,
+    repo_root: Path,
+    *,
+    cache_dir: Path | None = None,
+    adopt_hashes: dict[str, str] | None = None,
 ) -> None:
     """Install *adapter* into *repo_root* as one transaction.
 
@@ -125,6 +129,13 @@ def install_adapter(
     failure restores the project exactly as it was. Re-installing the same
     adapter is a controlled replacement driven by the lockfile inventory
     (identical to `update_adapter` without `force`). Raises `AdapterError`.
+
+    *adopt_hashes* is the legacy-fork migration's inventory: skills-dir-
+    relative paths (same shape as the lock's `files` keys) mapped to the
+    sha256 the legacy asset manifest recorded for them. Listed paths that
+    pre-exist on disk are adopted rather than treated as collisions —
+    hash-clean ones are replaced by the adapter's copy, drifted ones are
+    preserved with a warning (see `_plan_adoption`).
     """
     lock = read_lock(repo_root)
     if lock is not None and lock.adapter != adapter.name:
@@ -136,7 +147,10 @@ def install_adapter(
             f"  How to fix: update or remove '{lock.adapter}' first, or install "
             f"'{adapter.name}' into a different project."
         )
-    _install_or_update(adapter, repo_root, lock=lock, force=False, cache_dir=cache_dir)
+    _install_or_update(
+        adapter, repo_root, lock=lock, force=False, cache_dir=cache_dir,
+        adopt_hashes=adopt_hashes,
+    )
 
 
 def update_adapter(
@@ -184,6 +198,7 @@ def _install_or_update(
     lock: SkillsetLock | None,
     force: bool,
     cache_dir: Path | None,
+    adopt_hashes: dict[str, str] | None = None,
 ) -> list[str]:
     """The one install path: fetch, stage, check ownership, commit or roll back."""
     # Pure checks first: a contradictory adapter fails before any fetch or write.
@@ -214,9 +229,11 @@ def _install_or_update(
             shutil.rmtree(tree.parent, ignore_errors=True)
 
         owned = dict(lock.files) if lock is not None else {}
-        _check_collisions(adapter, repo_root, skills_root, hashes, owned)
+        adopted = dict(adopt_hashes) if adopt_hashes else {}
+        _check_collisions(adapter, repo_root, skills_root, hashes, owned, adopted)
         _check_local_edits(adapter, skills_root, hashes, owned, force=force)
         removals, preserved = _plan_removals(skills_root, hashes, owned)
+        kept_adoptions = _plan_adoption(skills_root, hashes, adopted)
         _commit(
             adapter,
             repo_root,
@@ -226,7 +243,17 @@ def _install_or_update(
             removals=removals,
             digest=digest,
             transaction=transaction,
+            skip_paths=frozenset(kept_adoptions),
         )
+        for rel in kept_adoptions:
+            console.warn(
+                f"{rel} was locally modified — kept your version (the "
+                f"'{adapter.name}' adapter's copy was not written).\n"
+                f"  The lockfile records the adapter's version, so updates "
+                f"will keep flagging this file as locally edited.\n"
+                f"  How to fix: keep your edits, or run 'rcorn skills update "
+                f"--force' to replace the file with the adapter's copy."
+            )
     finally:
         # A failed rollback whose durable relocation itself failed preserves
         # its backups under work/backup and asks us to leave work alone —
@@ -246,11 +273,20 @@ def _commit(
     removals: list[str],
     digest: str,
     transaction: _Transaction,
+    skip_paths: frozenset[str] = frozenset(),
 ) -> None:
-    """Write skills, removals, wiring doc, lockfile, and link — or roll back."""
+    """Write skills, removals, wiring doc, lockfile, and link — or roll back.
+
+    *skip_paths* are staged paths the commit must leave untouched on disk
+    (adopted-but-drifted files: the user's version stays). They are still
+    recorded in the lock with the adapter's intended hash via *hashes*, so
+    the next update correctly sees them as locally modified.
+    """
     try:
         transaction.backup_root.mkdir(parents=True)
         for rel in sorted(hashes):
+            if rel in skip_paths:
+                continue
             target = skills_root / rel
             transaction.track(target)
             transaction.ensure_parents(target)
@@ -467,6 +503,7 @@ def _check_collisions(
     skills_root: Path,
     hashes: dict[str, str],
     owned: dict[str, str],
+    adopted: dict[str, str],
 ) -> None:
     """Refuse to write over anything the previous lock does not already own.
 
@@ -475,6 +512,12 @@ def _check_collisions(
     directories the adapter claims and the individual staged files are
     checked, so an unmanaged directory of the same name is caught even when
     none of its files happen to share a staged name.
+
+    *adopted* paths (the legacy-fork migration's inventory) are exempt to
+    the same extent *owned* paths are: Reinicorn shipped those files once,
+    so replacing them is a controlled operation, not an overwrite of
+    foreign work. A pre-existing file that is neither owned nor adopted
+    still blocks — unknown foreign files are never silently replaced.
 
     The reinicorn-generated wiring doc is rejected outright: `_commit`
     rewrites it after the lock has recorded the adapter's own hash for it,
@@ -499,11 +542,12 @@ def _check_collisions(
         )
 
     manifest_files = _manifest_files(repo_root)
+    known = owned.keys() | adopted.keys()
     for installed_name in sorted(set(adapter.skills.values())):
         directory = skills_root / installed_name
         prefix = f"{installed_name}/"
         if (directory.is_symlink() or directory.exists()) and not any(
-            rel == installed_name or rel.startswith(prefix) for rel in owned
+            rel == installed_name or rel.startswith(prefix) for rel in known
         ):
             raise _collision_error(
                 adapter, repo_root, directory, installed_name, manifest_files
@@ -511,7 +555,7 @@ def _check_collisions(
 
     for rel in sorted(hashes):
         target = skills_root / rel
-        if rel not in owned and (target.is_symlink() or target.exists()):
+        if rel not in known and (target.is_symlink() or target.exists()):
             raise _collision_error(adapter, repo_root, target, rel, manifest_files)
 
 
@@ -607,6 +651,36 @@ def _is_locally_modified(path: Path, locked_hash: str) -> bool:
     if not path.is_file():
         return True  # e.g. replaced by a directory
     return sha256_file(path) != locked_hash
+
+
+def _plan_adoption(
+    skills_root: Path, hashes: dict[str, str], adopted: dict[str, str]
+) -> list[str]:
+    """Adopted, staged paths whose on-disk state drifted from the adopt hash.
+
+    Adoption (the legacy-fork migration) hands the installer the hashes an
+    older Reinicorn recorded for files it once shipped. A staged path whose
+    disk content still matches its adopt hash is a clean legacy copy — the
+    adapter's file replaces it like any owned file. Anything else on disk
+    (edited content, or the path replaced by a directory or symlink —
+    mirroring `_is_locally_modified`'s spirit) is the user's work: the
+    commit skips it, never overwriting or rmtree'ing it. An absent path
+    protects nothing and installs normally. Adopted paths the adapter does
+    not produce are the caller's concern, not the transaction's.
+    """
+    kept: list[str] = []
+    for rel in sorted(adopted):
+        if rel not in hashes:
+            continue
+        target = skills_root / rel
+        drifted = (
+            target.is_symlink()
+            or target.is_dir()
+            or (target.is_file() and sha256_file(target) != adopted[rel])
+        )
+        if drifted:
+            kept.append(rel)
+    return kept
 
 
 def _plan_removals(

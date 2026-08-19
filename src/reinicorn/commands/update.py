@@ -150,9 +150,17 @@ def _maybe_migrate_legacy_forks(
         )
         return
 
+    # The legacy forks are still on disk when the installer runs, so the
+    # transaction must adopt them (replace hash-clean copies, preserve
+    # drifted ones) instead of flagging them as unmanaged collisions.
+    prefix = f"{skills_dir(repo_root).as_posix()}/"
+    adopt_hashes = {
+        rel[len(prefix):]: meta["sha256"] for rel, meta in legacy.items()
+    }
+
     try:
         adapter = load_adapter(adapter_dir)
-        install_adapter(adapter, repo_root)
+        install_adapter(adapter, repo_root, adopt_hashes=adopt_hashes)
     except AdapterError as exc:
         console.error(str(exc))
         console.warn(
@@ -162,8 +170,16 @@ def _maybe_migrate_legacy_forks(
         )
         return
 
+    # The transaction just handled every legacy file the adapter also
+    # produces (hash-clean → replaced, drifted → preserved with a warning).
+    # Only legacy files with no adapter counterpart are left to clean up:
+    # hash-clean → delete, drifted → preserve and warn.
+    lock = read_lock(repo_root)
+    produced = set(lock.files) if lock is not None else set()
     skl_root = repo_root / skills_dir(repo_root)
     for rel, meta in legacy.items():
+        if rel[len(prefix):] in produced:
+            continue
         target = repo_root / rel
         if target.is_file() and sha256_file(target) == meta["sha256"]:
             target.unlink()
