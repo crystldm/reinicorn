@@ -24,7 +24,7 @@ from reinicorn.commands.init_platforms import (
     prompt_platforms,
     resolve_platforms_arg,
 )
-from reinicorn.config import KB_DIR_NAME, config_set, kb_scope
+from reinicorn.config import KB_DIR_NAME, config_set, kb_scope, skills_dir
 from reinicorn.git import (
     file_transport_args,
     https_to_ssh,
@@ -503,7 +503,13 @@ def _check_skill_collisions(skill_names: list[str]) -> None:
 
 
 def _copy_skills(_r_root: Path, target_dir: Path) -> None:
-    """Copy skills to <target>/.agents/skills/ and link .claude/skills to it."""
+    """Copy native skills into the configured skills dir and link the
+    compatibility path to it.
+
+    The packaged asset SOURCE stays fixed at `.agents/skills` inside
+    Reinicorn's own tree (`SKILLS_ASSET`) — `REINICORN_SKILLS_DIR` only
+    reconfigures where they land in the *target* repo.
+    """
     skills_src = get_asset_path("skills")
     if skills_src is None:
         skills_src = get_asset_path(SKILLS_ASSET)
@@ -511,7 +517,8 @@ def _copy_skills(_r_root: Path, target_dir: Path) -> None:
         console.warn("No skills directory found — skipping")
         return
 
-    skills_dest = target_dir / SKILLS_ASSET
+    dest_rel = skills_dir(target_dir)
+    skills_dest = target_dir / dest_rel
     skills_dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(skills_src, skills_dest, dirs_exist_ok=True)
     _link_claude_skills(target_dir)
@@ -526,7 +533,7 @@ def _copy_skills(_r_root: Path, target_dir: Path) -> None:
         if f.is_file() and f.suffix == ".md" and f.name != "ATTRIBUTION.md"
     )
     all_skills = skill_names + standalone
-    console.success(f"Copied {len(all_skills)} skill(s) to .agents/skills/")
+    console.success(f"Copied {len(all_skills)} skill(s) to {dest_rel.as_posix()}/")
     for name in all_skills:
         print(f"    {name}")
     print()

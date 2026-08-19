@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from reinicorn.manifest import MANAGED_ASSETS, read_manifest, write_manifest
+from reinicorn.manifest import (
+    MANAGED_ASSETS,
+    read_manifest,
+    sha256_file,
+    write_manifest,
+)
 
 
 def test_agents_is_not_a_managed_asset() -> None:
@@ -109,7 +114,50 @@ def test_collect_files_excludes_generated_wiring_doc(tmp_path: Path) -> None:
     files = _collect_files(repo)
 
     assert ".agents/skills/brainstorming/SKILL.md" in files
-    assert ".agents/skills/using-reinicorn/references/skillset-wiring.md" not in files
+    assert wiring_path.relative_to(repo).as_posix() not in files
+
+
+def test_collect_files_honours_configured_skills_dir(tmp_path: Path) -> None:
+    """Native-skill collection is the DESTINATION half of the configurable
+    skills-dir contract: with REINICORN_SKILLS_DIR set to a non-default
+    relative dir, `_collect_files` must collect native skills from there,
+    not from the hardcoded `.agents/skills`."""
+    from reinicorn.manifest import _collect_files
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".reinicorn-config").write_text("REINICORN_SKILLS_DIR=custom/skills\n")
+    native_skill = repo / "custom" / "skills" / "brainstorming"
+    native_skill.mkdir(parents=True)
+    (native_skill / "SKILL.md").write_text("# native\n")
+
+    files = _collect_files(repo)
+
+    assert "custom/skills/brainstorming/SKILL.md" in files
+    assert ".agents/skills/brainstorming/SKILL.md" not in files
+
+
+def test_collect_files_tolerates_an_absolute_skills_dir_outside_the_repo(
+    tmp_path: Path,
+) -> None:
+    """An absolute REINICORN_SKILLS_DIR puts both the skills tree and the
+    generated wiring doc outside repo_root. Manifest generation must not
+    crash — it simply has nothing to collect or exclude for that dir."""
+    outside = tmp_path / "outside-skills"
+    outside.mkdir()
+    (outside / "brainstorming").mkdir()
+    (outside / "brainstorming" / "SKILL.md").write_text("# native\n")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".reinicorn-config").write_text(f"REINICORN_SKILLS_DIR={outside}\n")
+    (repo / ".reinicorn" / "hooks").mkdir(parents=True)
+    (repo / ".reinicorn" / "hooks" / "hook.sh").write_text("#!/bin/sh\n")
+
+    data = json.loads(write_manifest(repo, version="0.1.0").read_text())
+
+    hook_hash = sha256_file(repo / ".reinicorn" / "hooks" / "hook.sh")
+    assert data["files"] == {".reinicorn/hooks/hook.sh": {"sha256": hook_hash}}
 
 
 def test_write_manifest_with_no_lock_excludes_nothing(tmp_path: Path):

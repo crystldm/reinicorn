@@ -289,6 +289,31 @@ def test_init_copies_lint_config(existing_repo: Path, seeded_bare: Path, tmp_pat
     assert (existing_repo / "linters" / ".lint-config.json").is_file()
 
 
+def test_copy_skills_honours_configured_skills_dir(tmp_path: Path) -> None:
+    """The native-skill copy destination follows REINICORN_SKILLS_DIR — only
+    the packaged asset SOURCE path stays fixed at `.agents/skills`."""
+    from reinicorn.commands.init import _copy_skills
+
+    r_root = tmp_path / "r_root"
+    skills_src = r_root / ".agents" / "skills" / "test-skill"
+    skills_src.mkdir(parents=True)
+    (skills_src / "SKILL.md").write_text("# Test Skill\n")
+
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / ".reinicorn-config").write_text("REINICORN_SKILLS_DIR=custom/skills\n")
+
+    def _resolve(name: str) -> Path | None:
+        p = r_root / name
+        return p if p.exists() else None
+
+    with patch("reinicorn.commands.init.get_asset_path", side_effect=_resolve):
+        _copy_skills(r_root, target)
+
+    assert (target / "custom" / "skills" / "test-skill" / "SKILL.md").is_file()
+    assert not (target / ".agents" / "skills").exists()
+
+
 def _wiring_doc_path(repo: Path) -> Path:
     return repo / ".agents/skills/using-reinicorn/references/skillset-wiring.md"
 
