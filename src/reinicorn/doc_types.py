@@ -68,6 +68,9 @@ class DocType:
     gated: bool = False  # Review-gated: create writes to drafts/, approval via the review lane
 
 
+# Row order is meaningful: CLI groups render in registry order, and
+# by_dir() prefers earlier rows when two types share a dir_path
+# (plan and retro both use "exec-plans" — plan must stay first).
 REGISTRY: dict[str, DocType] = {
     "spec": DocType(
         key="spec",
@@ -87,20 +90,6 @@ REGISTRY: dict[str, DocType] = {
         index_file="index.md",
         required_sections=("Problem", "Design Goals", "Design", "Non-Goals"),
         gated=True,
-    ),
-    "plan": DocType(
-        key="plan",
-        dir_path="exec-plans",
-        filename="active/{branch}/plan.md",
-        protected=True,
-        create_hint="rcorn plan create",
-        help_text="Execution plan operations",
-        template_body="",  # fallback plan.md is frontmatter + H1 only
-        addressing=Addressing.BRANCH,
-        title_source=TitleSource.NONE,
-        create_status="planning",
-        readme_label="Active plans",
-        required_sections=("Goal", "Acceptance Criteria", "Tasks"),
     ),
     "prd": DocType(
         key="prd",
@@ -162,6 +151,20 @@ REGISTRY: dict[str, DocType] = {
         addressing=Addressing.SLUG,
         title_source=TitleSource.FREE_TEXT,
         create_status="new",
+    ),
+    "plan": DocType(
+        key="plan",
+        dir_path="exec-plans",
+        filename="active/{branch}/plan.md",
+        protected=True,
+        create_hint="rcorn plan create",
+        help_text="Execution plan operations",
+        template_body="",  # fallback plan.md is frontmatter + H1 only
+        addressing=Addressing.BRANCH,
+        title_source=TitleSource.NONE,
+        create_status="planning",
+        readme_label="Active plans",
+        required_sections=("Goal", "Acceptance Criteria", "Tasks"),
     ),
     "retro": DocType(
         key="retro",

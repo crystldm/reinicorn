@@ -191,3 +191,12 @@ def test_registry_rejects_gated_non_slug_row():
     )
     with patch.dict(REGISTRY, {"phantom": bad}), pytest.raises(ValueError, match="phantom"):
         _validate_registry()
+
+
+def test_plan_precedes_retro_for_shared_dir():
+    """Row order is meaningful (see the comment above REGISTRY): plan and
+    retro share a dir_path, and by_dir must resolve it to plan."""
+    assert REGISTRY["plan"].dir_path == REGISTRY["retro"].dir_path
+    keys = list(REGISTRY)
+    assert keys.index("plan") < keys.index("retro")
+    assert by_dir(REGISTRY["plan"].dir_path) is REGISTRY["plan"]
