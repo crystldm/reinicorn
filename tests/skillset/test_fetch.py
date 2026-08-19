@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import tarfile
 import tempfile
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,34 @@ def test_fetch_source_rejects_absolute_path_member(
 
     message = str(exc_info.value)
     assert "acme/skills" in message or str(cache_dir) in message
+
+
+def test_download_passes_a_timeout_to_urlopen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stalled connection must not hang forever (no timeout = indefinite wait)."""
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            self.close()
+
+    def fake_urlopen(*args: object, **kwargs: object) -> FakeResponse:
+        calls.append((args, kwargs))
+        return FakeResponse(b"data")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    source = make_source()
+    cache_path = tmp_path / "cache.tar.gz"
+
+    fetch._download(source, cache_path)
+
+    assert len(calls) == 1
+    _args, kwargs = calls[0]
+    assert kwargs.get("timeout") == fetch._DOWNLOAD_TIMEOUT_SECONDS
 
 
 def test_tarball_url_matches_codeload_shape() -> None:

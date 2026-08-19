@@ -589,3 +589,48 @@ def test_wiring_skills_non_string_element_clear_message(tmp_path: Path) -> None:
 
     with pytest.raises(AdapterError, match=r"must be strings"):
         load_adapter(adapter_dir)
+
+
+# === T13: upstream-relative path safety (excludes entries, skills keys) ===
+
+
+def test_excludes_entry_absolute_path_rejected(tmp_path: Path) -> None:
+    yaml_text = VALID_YAML.replace(
+        "excludes:\n  - skills/alpha/scratch.md\n",
+        "excludes:\n  - /etc/passwd\n",
+    )
+    adapter_dir = make_adapter_dir(tmp_path, yaml_text, VALID_EXTRA_FILES)
+
+    with pytest.raises(AdapterError, match=re.escape("/etc/passwd")):
+        load_adapter(adapter_dir)
+
+
+def test_excludes_entry_parent_dir_escape_rejected(tmp_path: Path) -> None:
+    yaml_text = VALID_YAML.replace(
+        "excludes:\n  - skills/alpha/scratch.md\n",
+        "excludes:\n  - ../x\n",
+    )
+    adapter_dir = make_adapter_dir(tmp_path, yaml_text, VALID_EXTRA_FILES)
+
+    with pytest.raises(AdapterError, match=re.escape("../x")):
+        load_adapter(adapter_dir)
+
+
+def test_skills_key_parent_dir_escape_rejected(tmp_path: Path) -> None:
+    yaml_text = VALID_YAML.replace(
+        "  skills/alpha: alpha\n", "  ../evil: ok-name\n"
+    )
+    adapter_dir = make_adapter_dir(tmp_path, yaml_text, VALID_EXTRA_FILES)
+
+    with pytest.raises(AdapterError, match=re.escape("../evil")):
+        load_adapter(adapter_dir)
+
+
+def test_skills_key_absolute_path_rejected(tmp_path: Path) -> None:
+    yaml_text = VALID_YAML.replace(
+        "  skills/alpha: alpha\n", "  /etc/passwd: ok-name\n"
+    )
+    adapter_dir = make_adapter_dir(tmp_path, yaml_text, VALID_EXTRA_FILES)
+
+    with pytest.raises(AdapterError, match=re.escape("/etc/passwd")):
+        load_adapter(adapter_dir)

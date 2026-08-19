@@ -17,6 +17,10 @@ from reinicorn.skillset.adapter import AdapterError
 if TYPE_CHECKING:
     from reinicorn.skillset.adapter import AdapterSource
 
+# A stalled connection has no default timeout (`urlopen(url)` blocks
+# indefinitely) — bound every download so a dead upstream can't hang a fetch.
+_DOWNLOAD_TIMEOUT_SECONDS = 60
+
 
 def tarball_url(source: AdapterSource) -> str:
     """The codeload.github.com tarball URL for a commit-pinned source."""
@@ -78,7 +82,9 @@ def _download(source: AdapterSource, cache_path: Path) -> None:
     part_path = cache_path.with_suffix(cache_path.suffix + ".part")
     try:
         with (
-            urllib.request.urlopen(url) as response,  # noqa: S310
+            urllib.request.urlopen(  # noqa: S310
+                url, timeout=_DOWNLOAD_TIMEOUT_SECONDS
+            ) as response,
             part_path.open("wb") as part_file,
         ):
             shutil.copyfileobj(response, part_file)

@@ -388,6 +388,7 @@ class _Transaction:
                 f"then remove {self.backup_root}."
             )
         listing = ""
+        any_relocation_failed = False
         for target, backup in failed:
             listing += f"    {target}\n"
             if backup is None:
@@ -396,10 +397,27 @@ class _Transaction:
             kept = durable / backup.name
             try:
                 shutil.move(str(backup), str(kept))
-            except OSError:  # cannot preserve it — say where it briefly was
-                listing += f"      backup: LOST (could not preserve {backup})\n"
+            except OSError:
+                # Couldn't relocate this one out of the work dir — its only
+                # surviving copy is still where `track` put it, under
+                # backup_root. Keep the work dir alive (the caller's
+                # `finally` would otherwise rmtree it out from under the
+                # backup) and point at where it actually lives.
+                any_relocation_failed = True
+                self.preserve_work = True
+                listing += (
+                    f"      backup: {backup} (could not relocate to {durable} "
+                    f"— preserved in place under {self.backup_root})\n"
+                )
                 continue
             listing += f"      backup: {kept}\n"
+        also_backup_root = (
+            f"  Some backups also remain in {self.backup_root} — Reinicorn "
+            f"will not delete it either.\n"
+            if any_relocation_failed
+            else ""
+        )
+        remove_also = f" and {self.backup_root}" if any_relocation_failed else ""
         return AdapterError(
             f"Adapter '{self._adapter_name}': the rollback of a failed write "
             f"could not restore {len(failed)} path(s):\n"
@@ -408,8 +426,9 @@ class _Transaction:
             f"or hold partial install output.\n"
             f"  Their original contents are preserved in {durable} — "
             f"Reinicorn will never delete it.\n"
+            f"{also_backup_root}"
             f"  How to fix: copy each backup above back over its path, then "
-            f"remove {durable}."
+            f"remove {durable}{remove_also}."
         )
 
 
@@ -525,9 +544,7 @@ def _check_local_edits(
     modified = [
         rel
         for rel in sorted(hashes)
-        if rel in owned
-        and (skills_root / rel).is_file()
-        and sha256_file(skills_root / rel) != owned[rel]
+        if rel in owned and _is_locally_modified(skills_root / rel, owned[rel])
     ]
     if not modified:
         return
@@ -541,6 +558,26 @@ def _check_local_edits(
         f"override) and re-run, or run 'rcorn skills update --force' to "
         f"discard them."
     )
+
+
+def _is_locally_modified(path: Path, locked_hash: str) -> bool:
+    """True if *path* diverges from the lock's record of an owned file.
+
+    A regular file is compared by hash, as before. An owned path replaced
+    locally by anything else — a directory, or a symlink (including a
+    dangling one, which `.is_file()` also reports False for) — counts as
+    modified too: overwriting it without going through the force gate would
+    silently destroy a directory (`_remove` rmtree's it) or drop a symlink
+    the caller placed there, neither of which is what "local edit" was ever
+    meant to skip past.
+    """
+    if path.is_symlink():
+        return True
+    if not path.exists():
+        return False  # already gone by hand — nothing here to protect
+    if not path.is_file():
+        return True  # e.g. replaced by a directory
+    return sha256_file(path) != locked_hash
 
 
 def _plan_removals(

@@ -241,6 +241,9 @@ def _parse_skills(value: Any, name: str, adapter_dir: Path) -> dict[str, str]:
                 f"  How to fix: use 'skills: {{<upstream-path>: <installed-name>}}' "
                 f"with non-empty upstream paths."
             )
+        _check_path_safe(
+            upstream, "'skills' key", name, adapter_dir, boundary="upstream tree"
+        )
 
         # Check installed value (gap 1b: single component, no escape).
         if not isinstance(installed, str) or not installed:
@@ -323,6 +326,8 @@ def _parse_excludes(value: Any, name: str, adapter_dir: Path) -> tuple[str, ...]
             f"upstream-relative file paths.\n"
             f"  How to fix: list the upstream paths to drop under 'excludes:'."
         )
+    for rel in value:
+        _check_path_safe(rel, "excludes", name, adapter_dir, boundary="upstream tree")
     return tuple(value)
 
 
@@ -459,12 +464,19 @@ def _require_adapter_file(rel: str, field: str, name: str, adapter_dir: Path) ->
         )
 
 
-def _check_path_safe(rel: str, field: str, name: str, adapter_dir: Path) -> None:
-    """Refuse absolute paths and '..' components — never escape the adapter dir."""
+def _check_path_safe(
+    rel: str,
+    field: str,
+    name: str,
+    adapter_dir: Path,
+    *,
+    boundary: str = "adapter directory",
+) -> None:
+    """Refuse absolute paths and '..' components — never escape *boundary*."""
     if Path(rel).is_absolute() or ".." in Path(rel).parts:
         raise AdapterError(
             f"Adapter '{name}' at {adapter_dir}: {field} path '{rel}' escapes the "
-            f"adapter directory.\n"
-            f"  How to fix: use an adapter-relative path with no '..' components "
-            f"and no leading '/'."
+            f"{boundary}.\n"
+            f"  How to fix: use a path relative to the {boundary} with no '..' "
+            f"components and no leading '/'."
         )
