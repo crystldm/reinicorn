@@ -1,5 +1,5 @@
 diff --git a/skills/writing-skills/anthropic-best-practices.md b/skills/writing-skills/anthropic-best-practices.md
-index 15ea9ea..a5a7d07 100644
+index 15ea9ea..6c124f0 100644
 --- a/skills/writing-skills/anthropic-best-practices.md
 +++ b/skills/writing-skills/anthropic-best-practices.md
 @@ -1,30 +1,30 @@
@@ -64,13 +64,7 @@ index 15ea9ea..a5a7d07 100644
  
  ### Test with all models you plan to use
  
-@@ -144,12 +144,12 @@ What works perfectly for Opus might need more detail for Haiku. If you plan to u
- ## Skill structure
- 
- <Note>
--  **YAML Frontmatter**: The SKILL.md frontmatter requires two fields:
-+  **YAML Frontmatter**: The SKILL.md frontmatter supports two fields:
- 
+@@ -149,7 +149,7 @@ What works perfectly for Opus might need more detail for Haiku. If you plan to u
    * `name` - Human-readable name of the Skill (64 characters maximum)
    * `description` - One-line description of what the Skill does and when to use it (1024 characters maximum)
  
@@ -439,8 +433,7 @@ index 15ea9ea..a5a7d07 100644
 +**How Claude accesses Skills:**
  
  1. **Metadata pre-loaded**: At startup, the name and description from all Skills' YAML frontmatter are loaded into the system prompt
--2. **Files read on-demand**: Agents use their file-reading tools to access SKILL.md and other files from the filesystem when needed
-+2. **Files read on-demand**: Claude uses bash Read tools to access SKILL.md and other files from the filesystem when needed
+ 2. **Files read on-demand**: Agents use their file-reading tools to access SKILL.md and other files from the filesystem when needed
  3. **Scripts executed efficiently**: Utility scripts can be executed via bash without loading their full contents into context. Only the script's output consumes tokens
  4. **No context penalty for large files**: Reference files, data, or documentation don't consume context tokens until actually read
  
@@ -487,7 +480,7 @@ index 15ea9ea..a5a7d07 100644
  ### YAML frontmatter requirements
  
 -The SKILL.md frontmatter requires `name` (64 characters max) and `description` (1024 characters max) fields. See the [Skills overview](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview#skill-structure) for complete structure details.
-+The SKILL.md frontmatter includes only `name` (64 characters max) and `description` (1024 characters max) fields. See the [Skills overview](/en/docs/agents-and-tools/agent-skills/overview#skill-structure) for complete structure details.
++The SKILL.md frontmatter requires `name` (64 characters max) and `description` (1024 characters max) fields. See the [Skills overview](/en/docs/agents-and-tools/agent-skills/overview#skill-structure) for complete structure details.
  
  ### Token budgets
  
@@ -505,7 +498,7 @@ index 15ea9ea..a5a7d07 100644
  * [ ] Error handling is explicit and helpful
  * [ ] No "voodoo constants" (all values justified)
  * [ ] Required packages listed in instructions and verified as available
-@@ -1136,15 +1136,15 @@ Before sharing a Skill, verify:
+@@ -1136,7 +1136,7 @@ Before sharing a Skill, verify:
  ## Next steps
  
  <CardGroup cols={2}>
@@ -514,40 +507,6 @@ index 15ea9ea..a5a7d07 100644
      Create your first Skill
    </Card>
  
--  <Card title="Use Skills in Claude Code" icon="terminal" href="https://code.claude.com/docs/en/skills">
-+  <Card title="Use Skills in Claude Code" icon="terminal" href="/en/docs/claude-code/skills">
-     Create and manage Skills in Claude Code
-   </Card>
- 
--  <Card title="Use Skills with the API" icon="code" href="https://platform.claude.com/docs/en/build-with-claude/skills-guide">
-+  <Card title="Use Skills with the API" icon="code" href="/en/api/skills-guide">
-     Upload and use Skills programmatically
-   </Card>
- </CardGroup>
-diff --git a/skills/writing-skills/persuasion-principles.md b/skills/writing-skills/persuasion-principles.md
-index 9756416..9818a5f 100644
---- a/skills/writing-skills/persuasion-principles.md
-+++ b/skills/writing-skills/persuasion-principles.md
-@@ -33,7 +33,7 @@ LLMs respond to the same persuasion principles as humans. Understanding this psy
- **How it works in skills:**
- - Require announcements: "Announce skill usage"
- - Force explicit choices: "Choose A, B, or C"
--- Use tracking: todos for checklists
-+- Use tracking: TodoWrite for checklists
- 
- **When to use:**
- - Ensuring skills are actually followed
-@@ -80,8 +80,8 @@ LLMs respond to the same persuasion principles as humans. Understanding this psy
- 
- **Example:**
- ```markdown
--✅ Checklists without todo tracking = steps get skipped. Every time.
--❌ Some people find a todo list helpful for checklists.
-+✅ Checklists without TodoWrite tracking = steps get skipped. Every time.
-+❌ Some people find TodoWrite helpful for checklists.
- ```
- 
- ### 5. Unity
 diff --git a/skills/writing-skills/testing-skills-with-subagents.md b/skills/writing-skills/testing-skills-with-subagents.md
 index a5acfea..ab79b16 100644
 --- a/skills/writing-skills/testing-skills-with-subagents.md

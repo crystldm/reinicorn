@@ -12,10 +12,10 @@ index 4b8aa60..75d96dd 100644
    HEAD_SHA: 3df7661
  
 diff --git a/skills/requesting-code-review/code-reviewer.md b/skills/requesting-code-review/code-reviewer.md
-index db84ae2..3c427c9 100644
+index db84ae2..e3bca3e 100644
 --- a/skills/requesting-code-review/code-reviewer.md
 +++ b/skills/requesting-code-review/code-reviewer.md
-@@ -1,137 +1,111 @@
+@@ -1,137 +1,115 @@
 -# Code Reviewer Prompt Template
 +# Code Review Agent
  
@@ -24,7 +24,7 @@ index db84ae2..3c427c9 100644
  
 -**Purpose:** Review completed work against requirements and code quality standards before it cascades into more work.
 +**Your task:**
-+1. Review {WHAT_WAS_IMPLEMENTED}
++1. Review {DESCRIPTION}
 +2. Compare against {PLAN_OR_REQUIREMENTS}
 +3. Check code quality, architecture, testing
 +4. Categorize issues by severity
@@ -50,24 +50,29 @@ index db84ae2..3c427c9 100644
 -
 -    **Base:** [BASE_SHA]
 -    **Head:** [HEAD_SHA]
--
++## What Was Implemented
+ 
 -    ```bash
 -    git diff --stat [BASE_SHA]..[HEAD_SHA]
 -    git diff [BASE_SHA]..[HEAD_SHA]
 -    ```
--
++{DESCRIPTION}
+ 
 -    ## Read-Only Review
--
++## Requirements/Plan
+ 
 -    Your review is read-only on this checkout. Do not mutate the working tree, the index, HEAD, or branch state in any way. Use tools like `git show`, `git diff`, and `git log` to inspect history. If you need a working copy of a different revision, check it out into a separate temporary directory (e.g. `git worktree add /tmp/review-[SHA] [SHA]`) — never move HEAD on this checkout.
--
++{PLAN_OR_REQUIREMENTS}
+ 
 -    ## What to Check
-+## What Was Implemented
++## Git Range to Review
  
 -    **Plan alignment:**
 -    - Does the implementation match the plan / requirements?
 -    - Are deviations justified improvements, or problematic departures?
 -    - Is all planned functionality present?
-+{DESCRIPTION}
++**Base:** {BASE_SHA}
++**Head:** {HEAD_SHA}
  
 -    **Code quality:**
 -    - Clean separation of concerns?
@@ -75,84 +80,75 @@ index db84ae2..3c427c9 100644
 -    - Type safety where applicable?
 -    - DRY without premature abstraction?
 -    - Edge cases handled?
-+## Requirements/Plan
++```bash
++git diff --stat {BASE_SHA}..{HEAD_SHA}
++git diff {BASE_SHA}..{HEAD_SHA}
++```
  
 -    **Architecture:**
 -    - Sound design decisions?
 -    - Reasonable scalability and performance?
 -    - Security concerns?
 -    - Integrates cleanly with surrounding code?
-+{PLAN_REFERENCE}
++## Read-Only Review
  
 -    **Testing:**
 -    - Tests verify real behavior, not mocks?
 -    - Edge cases covered?
 -    - Integration tests where they matter?
 -    - All tests passing?
-+## Git Range to Review
++Your review is read-only on this checkout. Do not mutate the working tree, the index, HEAD, or branch state in any way. Use tools like `git show`, `git diff`, and `git log` to inspect history. If you need a working copy of a different revision, check it out into a separate temporary directory (e.g. `git worktree add /tmp/review-{SHA} {SHA}`) — never move HEAD on this checkout.
  
 -    **Production readiness:**
 -    - Migration strategy if schema changed?
 -    - Backward compatibility considered?
 -    - Documentation complete?
 -    - No obvious bugs?
-+**Base:** {BASE_SHA}
-+**Head:** {HEAD_SHA}
++## Review Checklist
  
 -    ## Calibration
--
--    Categorize issues by actual severity. Not everything is Critical.
--    Acknowledge what was done well before listing issues — accurate praise
--    helps the implementer trust the rest of the feedback.
--
--    If you find significant deviations from the plan, flag them specifically
--    so the implementer can confirm whether the deviation was intentional.
--    If you find issues with the plan itself rather than the implementation,
--    say so.
--
--    ## Output Format
--
--    ### Strengths
--    [What's well done? Be specific.]
-+```bash
-+git diff --stat {BASE_SHA}..{HEAD_SHA}
-+git diff {BASE_SHA}..{HEAD_SHA}
-+```
- 
--    ### Issues
-+## Review Checklist
-+
 +**Code Quality:**
 +- Clean separation of concerns?
 +- Proper error handling?
 +- Type safety (if applicable)?
 +- DRY principle followed?
 +- Edge cases handled?
-+
+ 
+-    Categorize issues by actual severity. Not everything is Critical.
+-    Acknowledge what was done well before listing issues — accurate praise
+-    helps the implementer trust the rest of the feedback.
 +**Architecture:**
 +- Sound design decisions?
 +- Scalability considerations?
 +- Performance implications?
 +- Security concerns?
-+
+ 
+-    If you find significant deviations from the plan, flag them specifically
+-    so the implementer can confirm whether the deviation was intentional.
+-    If you find issues with the plan itself rather than the implementation,
+-    say so.
 +**Testing:**
 +- Tests actually test logic (not mocks)?
 +- Edge cases covered?
 +- Integration tests where needed?
 +- All tests passing?
-+
+ 
+-    ## Output Format
 +**Requirements:**
 +- All plan requirements met?
 +- Implementation matches spec?
 +- No scope creep?
 +- Breaking changes documented?
-+
+ 
+-    ### Strengths
+-    [What's well done? Be specific.]
 +**Production Readiness:**
 +- Migration strategy (if schema changes)?
 +- Backward compatibility considered?
 +- Documentation complete?
 +- No obvious bugs?
-+
+ 
+-    ### Issues
 +## Output Format
  
 -    #### Critical (Must Fix)

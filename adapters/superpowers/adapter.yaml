@@ -48,7 +48,6 @@ patches:
   - patches/executing-plans.patch
   - patches/requesting-code-review.patch
   - patches/subagent-driven-development.patch
-  - patches/systematic-debugging.patch
   - patches/using-git-worktrees.patch
   - patches/writing-plans.patch
   - patches/writing-skills.patch
