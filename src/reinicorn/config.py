@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
-from reinicorn.identity import CONFIG_FILE_NAME, KB_SCOPE_KEY
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
+from reinicorn.identity import (
+    CONFIG_FILE_NAME,
+    KB_SCOPE_KEY,
+    SKILLS_DIR_KEY,
+    SKILLS_LINK_KEY,
+)
 
 KB_DIR_NAME = "kb"
+SKILLS_DIR_DEFAULT = ".agents/skills"
+SKILLS_LINK_DEFAULT = ".claude/skills"
+SKILLS_LINK_NONE = "none"
 
 
 def config_get(key: str, default: str = "", root: Path | None = None) -> str:
@@ -77,3 +81,26 @@ def config_set(key: str, value: str, root: Path) -> None:
     if not replaced:
         output.append(replacement)
     path.write_text("\n".join(output) + "\n")
+
+
+def skills_dir(root: Path | None = None) -> Path:
+    """Return the configured skills directory.
+
+    Defaults to `.agents/skills`. The result is relative to *root* when the
+    configured value is relative — callers join it onto the repo root
+    themselves; an absolute configured value simply replaces the root on
+    join, per Path's normal `/` semantics.
+    """
+    return Path(config_get(SKILLS_DIR_KEY, SKILLS_DIR_DEFAULT, root=root))
+
+
+def skills_link(root: Path | None = None) -> Path | None:
+    """Return the configured skills compatibility-link path, or None if disabled.
+
+    Defaults to `.claude/skills`. Set `REINICORN_SKILLS_LINK=none` to disable
+    the compatibility link entirely.
+    """
+    value = config_get(SKILLS_LINK_KEY, SKILLS_LINK_DEFAULT, root=root)
+    if value == SKILLS_LINK_NONE:
+        return None
+    return Path(value)

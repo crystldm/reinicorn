@@ -20,7 +20,7 @@ def test_top_level_help_lists_noun_groups():
     r = _rcorn("--help")
     out = r.stdout
     for noun in ("spec", "prd", "debt", "idea", "plan",
-                 "retro", "principle", "review", "kb", "mode",
+                 "retro", "principle", "review", "kb", "mode", "skills",
                  "init", "hooks", "update", "feedback"):
         assert noun in out, f"missing noun group: {noun}"
 
@@ -58,6 +58,12 @@ def test_mode_subcommands_listed():
     r = _rcorn("mode", "--help")
     for verb in ("enable", "disable", "incognito", "status"):
         assert verb in r.stdout, f"missing mode verb: {verb}"
+
+
+def test_skills_subcommands_listed():
+    r = _rcorn("skills", "--help")
+    for verb in ("install", "status", "update", "list"):
+        assert verb in r.stdout, f"missing skills verb: {verb}"
 
 
 def test_spec_subcommands_listed():

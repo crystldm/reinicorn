@@ -65,16 +65,16 @@ def test_list_dispatches_include_drafts_flag(noun):
     mock_list.assert_called_once_with(noun, include_drafts=True)
 
 
-def test_plan_show_dispatches_to_cmd_plan_show():
-    with patch("reinicorn.commands.doc_show.cmd_plan_show", return_value=0) as mock_show:
-        assert main(["plan", "show", "some-branch"]) == 0
-    mock_show.assert_called_once_with("some-branch", full=False)
-
-
-def test_retro_show_dispatches_to_cmd_retro_show():
-    with patch("reinicorn.commands.doc_show.cmd_retro_show", return_value=0) as mock_show:
-        assert main(["retro", "show"]) == 0
-    mock_show.assert_called_once_with(None, full=False)
+@pytest.mark.parametrize("noun,argv_tail,expected_branch", [
+    ("plan", ["show", "some-branch"], "some-branch"),
+    ("retro", ["show"], None),
+])
+def test_branch_show_dispatches_to_cmd_branch_show(noun, argv_tail, expected_branch):
+    with patch(
+        "reinicorn.commands.doc_show.cmd_branch_show", return_value=0
+    ) as mock_show:
+        assert main([noun, *argv_tail]) == 0
+    mock_show.assert_called_once_with(noun, expected_branch, full=False)
 
 
 def _subparser_choices(parser: argparse.ArgumentParser):
@@ -98,3 +98,77 @@ def test_every_parser_verb_has_a_dispatch_entry():
         pairs = [(noun, None)] if verbs is None else [(noun, v) for v in verbs]
         missing.extend(p for p in pairs if p not in _DISPATCH)
     assert not missing, f"parser verbs without _DISPATCH entries: {missing}"
+
+
+@pytest.mark.parametrize("noun,argv_tail,expected_args", [
+    ("spec", ["create", "My", "Title"], ("spec", "My Title")),
+    ("prd", ["create", "My", "Title"], ("prd", "My Title")),
+    ("debt", ["create", "My", "Title"], ("debt", "My Title")),
+    ("idea", ["create", "some", "idea", "text"], ("idea", "some idea text")),
+    ("principle", ["add", "My", "Rule"], ("principle", "My Rule")),
+])
+def test_create_dispatches_to_cmd_doc_create(noun, argv_tail, expected_args):
+    with patch(
+        "reinicorn.commands.doc_create.cmd_doc_create", return_value=0
+    ) as mock_create:
+        assert main([noun, *argv_tail]) == 0
+    mock_create.assert_called_once_with(*expected_args)
+
+
+def test_retro_create_dispatches_without_title():
+    with patch(
+        "reinicorn.commands.doc_create.cmd_doc_create", return_value=0
+    ) as mock_create:
+        assert main(["retro", "create"]) == 0
+    mock_create.assert_called_once_with("retro")
+
+
+def test_plan_create_dispatches_to_cmd_plan_create():
+    """Plan create must keep routing to the lifecycle-aware entry point,
+    not the generic cmd_doc_create."""
+    with patch(
+        "reinicorn.commands.plan.cmd_plan_create", return_value=0
+    ) as mock_create:
+        assert main(["plan", "create"]) == 0
+    mock_create.assert_called_once_with()
+
+
+def test_skills_install_dispatches_to_cmd_skills_install():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_install", return_value=0
+    ) as mock_install:
+        assert main(["skills", "install", "demo"]) == 0
+    mock_install.assert_called_once_with("demo")
+
+
+def test_skills_status_dispatches_to_cmd_skills_status():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_status", return_value=0
+    ) as mock_status:
+        assert main(["skills", "status"]) == 0
+    mock_status.assert_called_once_with()
+
+
+def test_skills_update_dispatches_to_cmd_skills_update():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_update", return_value=0
+    ) as mock_update:
+        assert main(["skills", "update"]) == 0
+    mock_update.assert_called_once_with(ref=None, force=False)
+
+
+def test_skills_update_dispatches_ref_and_force_flags():
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_update", return_value=0
+    ) as mock_update:
+        assert main(["skills", "update", "--ref", sha, "--force"]) == 0
+    mock_update.assert_called_once_with(ref=sha, force=True)
+
+
+def test_skills_list_dispatches_to_cmd_skills_list():
+    with patch(
+        "reinicorn.commands.skills_cmds.cmd_skills_list", return_value=0
+    ) as mock_list:
+        assert main(["skills", "list"]) == 0
+    mock_list.assert_called_once_with()

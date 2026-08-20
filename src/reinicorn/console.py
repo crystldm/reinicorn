@@ -73,6 +73,18 @@ def header(msg: str) -> None:
     print(_c(_BOLD, msg))
 
 
+def is_interactive() -> bool:
+    """True when a prompt has a terminal on both ends.
+
+    `confirm` collapses "the user said no" and "nobody could answer" into
+    the same False, which is right for a flag-guarded action but wrong for
+    a one-time offer whose refusal is recorded durably. Such callers check
+    this first and skip the question entirely when it is False.
+    """
+    stdin_tty = hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+    return _is_tty() and stdin_tty
+
+
 def confirm(prompt: str) -> bool:
     """Ask a y/N question on an interactive TTY; default No.
 
@@ -80,8 +92,7 @@ def confirm(prompt: str) -> bool:
     that will never be answered must not hang the process. Such callers are
     expected to pass an explicit flag (e.g. --force) instead of relying on this.
     """
-    stdin_tty = hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
-    if not (_is_tty() and stdin_tty):
+    if not is_interactive():
         return False
     print(f"{_pad()}{prompt} [y/N] ", end="", file=sys.stderr, flush=True)
     try:

@@ -11,10 +11,11 @@ your docs organized and helps minimize the slop.
 
 At the core of Reinicorn is a spec-driven-development workflow and a
 knowledgebase repository for keeping track of the `.md` files you generate.
-The workflow is a skill set forked from
-[obra/superpowers](https://github.com/obra/superpowers), modified to fit this
-one. Every document comes from a template, so provenance and review status are
-first-class rather than something you remember to add.
+The methodology skills that drive that workflow are pluggable: install the
+bundled adapter for [obra/superpowers](https://github.com/obra/superpowers)
+or bring your own (see [The skill set](#the-skill-set)). Every document comes
+from a template, so provenance and review status are first-class rather than
+something you remember to add.
 
 Specs get placed in `kb/<project-slug>/specs/drafts` and can then be put up for
 review. Organized metadata keeps track of all the details. When the review PR
@@ -105,18 +106,21 @@ several of them come up below.
 Work starts with a **spec**, the implementation contract: problem, design
 goals, design, non-goals. Specs come from wherever work comes from: a PRD, a
 roadmap conversation, a bug that exposed a design flaw, an idea captured weeks
-earlier. The brainstorming skill turns that raw intent into a design through
-dialogue, and `rcorn spec create` turns the design into a draft in the kb. A
-draft only becomes authoritative after doc review (next section).
+earlier. With the superpowers adapter installed (see [The skill
+set](#the-skill-set)), the brainstorming skill turns that raw intent into a
+design through dialogue; `rcorn spec create` turns the design into a draft in
+the kb either way. A draft only becomes authoritative after doc review (next
+section).
 
 With a spec in hand, work moves to a feature branch. `rcorn plan create`
 scaffolds an execution plan scoped to that branch (goal, acceptance criteria,
 tasks) and publishes it to the kb. Because every branch's plan is visible in
 one place, `rcorn kb status` can compare active branches and flag overlap
 before two people silently rewrite the same file. This is what the article
-calls cross-branch awareness. The executing-plans skill works the plan step by
-step, and when the branch merges, `rcorn plan complete` archives it and asks
-for a retro, because lessons that never get written down are lost.
+calls cross-branch awareness. With the superpowers adapter installed, the
+executing-plans skill works the plan step by step; when the branch merges,
+`rcorn plan complete` archives it and asks for a retro, because lessons that
+never get written down are lost.
 
 Two capture commands sit outside the main loop. `rcorn idea create` is for
 the thought that strikes while you're doing something else: file it and stay
@@ -205,6 +209,9 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
 | `rcorn review setup` | Install kb-repo CI cleanup workflow + ruleset |
 | `rcorn principle add "title"` | Append a golden principle |
+| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
+| `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn mode enable\|disable\|incognito\|status` | Mode toggles |
 | `rcorn init [...]` | Set up reinicorn in this repo |
 | `rcorn hooks install` | Install git and editor hooks |
@@ -214,36 +221,34 @@ enforce these rules, so read the spec before changing how any command talks.
 ## The skill set
 
 Skills live in `.agents/skills/` (the Agent Skills open standard) and load
-automatically on Claude Code, Cursor, GitHub Copilot, and Codex.
-
-**Workflow**
+automatically on Claude Code, Cursor, GitHub Copilot, and Codex. Reinicorn
+ships two native skills and takes no position on development methodology
+beyond them:
 
 - `using-reinicorn`: how to find and use skills; loads first, every session
-- `brainstorming`: explore intent and requirements before any creative work
-- `writing-plans`: turn a spec into a step-by-step implementation plan
-- `executing-plans`: work a written plan with review checkpoints
-- `subagent-driven-development`: execute independent plan tasks via subagents
-- `finishing-a-development-branch`: structured merge / PR / cleanup at the end
-
-**Discipline**
-
-- `test-driven-development`: tests before implementation, no exceptions
-- `systematic-debugging`: root-cause a bug before proposing a fix
-- `verification-before-completion`: evidence before you claim something works
-- `requesting-code-review`: get work reviewed before merging
-- `receiving-code-review`: respond to review with rigor, not reflexive agreement
-
-**Supporting**
-
-- `using-git-worktrees`: isolate feature work in a worktree
-- `dispatching-parallel-agents`: fan out 2+ independent tasks
 - `populate-agents-md`: fill in `AGENTS.md` through guided dialogue
-- `writing-skills`: author and verify new skills
-- `update-superpowers`: pull forked skills forward from upstream
 
-Skills forked from [superpowers](https://github.com/obra/superpowers) keep
-their attribution, versions, and the upstream MIT license text in
-[.agents/skills/ATTRIBUTION.md](.agents/skills/ATTRIBUTION.md).
+Methodology (brainstorming, planning, TDD, code review, worktrees, and so on)
+comes from a **skill-set adapter** you install:
+
+```bash
+rcorn skills install superpowers
+```
+
+This fetches a pinned, kb-compatible build of
+[obra/superpowers](https://github.com/obra/superpowers) — brainstorming,
+writing-plans, executing-plans, test-driven-development,
+systematic-debugging, and the rest of that pack — patched to write docs
+through `rcorn` instead of its own conventions. `rcorn skills list` shows
+bundled adapters, and `rcorn skills status` reports what's installed. You can
+also point `rcorn skills install` at your own adapter definition to wire up
+a house skill set.
+
+Whichever skill set (if any) is installed, `using-reinicorn`'s generated
+wiring doc
+([`.agents/skills/using-reinicorn/references/skillset-wiring.md`](.agents/skills/using-reinicorn/references/skillset-wiring.md))
+maps every doc type to its creation command and the skill(s) to invoke first;
+with no adapter installed, the creation commands alone are the contract.
 
 ## KB as a shared clone
 
@@ -292,7 +297,7 @@ or open an issue directly. Code and docs contributions are welcome too: see
 ## References
 
 - [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/): the article that inspired the project.
-- [obra/superpowers](https://github.com/obra/superpowers): the skill set this one is forked from.
+- [obra/superpowers](https://github.com/obra/superpowers): the upstream for the bundled `superpowers` skill-set adapter.
 - [core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md): the operating principles, adapted from the article for this project.
 - [axi principles](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/agent-native-output-surface-axi-principles.md): the agent-experience rules the CLI's output follows.
 - [Remove the kb submodule](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/remove-the-kb-submodule.md): why the kb is a plain clone instead of a git submodule.

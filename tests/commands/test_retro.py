@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from reinicorn.commands.doc_create import cmd_retro_create
+from reinicorn.commands.doc_create import cmd_doc_create
 from reinicorn.commands.plan import cmd_plan_complete
 from reinicorn.git import run_git
 
@@ -22,7 +22,7 @@ def _setup_branch_with_plan(repo: Path, branch: str) -> Path:
 def test_retro_create_targets_active_plan_dir(submodule_repo: Path, monkeypatch):
     active = _setup_branch_with_plan(submodule_repo, "feature-r")
     monkeypatch.chdir(submodule_repo)
-    assert cmd_retro_create() == 0
+    assert cmd_doc_create("retro", "") == 0
     retro = active / "retro.md"
     assert retro.is_file()
     text = retro.read_text()
@@ -33,7 +33,7 @@ def test_retro_create_targets_active_plan_dir(submodule_repo: Path, monkeypatch)
 def test_retro_create_without_plan_uses_completed_dir(submodule_repo: Path, monkeypatch):
     run_git("checkout", "-q", "-b", "feature-noplan", cwd=submodule_repo)
     monkeypatch.chdir(submodule_repo)
-    assert cmd_retro_create() == 0
+    assert cmd_doc_create("retro", "") == 0
     completed = submodule_repo / "kb" / "unknown" / "exec-plans" / "completed"
     assert (completed / "feature-noplan" / "retro.md").is_file()
 
@@ -41,7 +41,7 @@ def test_retro_create_without_plan_uses_completed_dir(submodule_repo: Path, monk
 def test_plan_complete_warns_on_empty_retro(submodule_repo: Path, monkeypatch, capsys):
     _setup_branch_with_plan(submodule_repo, "feature-empty-retro")
     monkeypatch.chdir(submodule_repo)
-    cmd_retro_create()
+    cmd_doc_create("retro", "")
     capsys.readouterr()  # discard create output
     assert cmd_plan_complete() == 0
     out = capsys.readouterr().out
@@ -52,7 +52,7 @@ def test_plan_complete_warns_on_empty_retro(submodule_repo: Path, monkeypatch, c
 def test_plan_complete_quiet_on_filled_retro(submodule_repo: Path, monkeypatch, capsys):
     active = _setup_branch_with_plan(submodule_repo, "feature-good-retro")
     monkeypatch.chdir(submodule_repo)
-    cmd_retro_create()
+    cmd_doc_create("retro", "")
     retro = active / "retro.md"
     retro.write_text(
         retro.read_text().replace(

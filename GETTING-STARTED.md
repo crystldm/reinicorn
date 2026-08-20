@@ -33,6 +33,17 @@ The interactive prompt asks where the shared kb should live. Three options:
 `init` adds the kb submodule, installs the git and editor hooks, creates your
 repo scope, and lays down the skills and agent instructions.
 
+`init` only ships two native skills (`using-reinicorn`, `populate-agents-md`)
+— reinicorn takes no position on methodology. To get brainstorming,
+planning, debugging, and review skills, install a skill-set adapter:
+
+```bash
+rcorn skills install superpowers
+```
+
+This installs a methodology skill set (adapter); see `rcorn skills status`
+and `rcorn skills list` for what's installed and what's bundled.
+
 ## Populate AGENTS.md
 
 `AGENTS.md` is the entry point every agent reads first, and it starts out as a
@@ -79,6 +90,9 @@ loop, including doc review.
 | `rcorn <type> create "<title>"` | Create a kb doc (spec, prd, retro, etc.) |
 | `rcorn idea create "<text>"` | Capture an idea |
 | `rcorn kb lint` | Run kb lint rules |
+| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
+| `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn update` | Sync local assets with installed version |
 | `rcorn feedback "<text>"` | Report a bug or idea |
 | `rcorn hooks install` | Re-install git hooks |

@@ -1,0 +1,69 @@
+# Bundled adapter: obra/superpowers, adapted for reinicorn conventions.
+#
+# Installing this reproduces the skill set reinicorn previously carried as
+# in-repo forks. Patches carry reinicorn-specific edits to upstream prose
+# (kb/ paths, `rcorn` commands); the `## Reinicorn ...` trailer sections are
+# append blocks, not patch content, so upstream rebases stay small.
+name: superpowers
+
+source:
+  repo: obra/superpowers
+  # v6.1.1 (annotated tag c984ea2e... dereferenced to its commit)
+  commit: d884ae04edebef577e82ff7c4e143debd0bbec99
+  annotation: v6.1.1
+
+skills:
+  skills/brainstorming: brainstorming
+  skills/dispatching-parallel-agents: dispatching-parallel-agents
+  skills/executing-plans: executing-plans
+  skills/finishing-a-development-branch: finishing-a-development-branch
+  skills/receiving-code-review: receiving-code-review
+  skills/requesting-code-review: requesting-code-review
+  skills/subagent-driven-development: subagent-driven-development
+  skills/systematic-debugging: systematic-debugging
+  skills/test-driven-development: test-driven-development
+  skills/using-git-worktrees: using-git-worktrees
+  skills/verification-before-completion: verification-before-completion
+  skills/writing-plans: writing-plans
+  skills/writing-skills: writing-skills
+
+# Upstream files reinicorn has never carried — dropped so an install matches
+# the skill tree reinicorn actually ships.
+excludes:
+  - skills/brainstorming/scripts/frame-template.html
+  - skills/brainstorming/scripts/helper.js
+  - skills/brainstorming/scripts/server.cjs
+  - skills/brainstorming/scripts/start-server.sh
+  - skills/brainstorming/scripts/stop-server.sh
+  - skills/brainstorming/spec-document-reviewer-prompt.md
+  - skills/brainstorming/visual-companion.md
+  - skills/subagent-driven-development/scripts/review-package
+  - skills/subagent-driven-development/scripts/sdd-workspace
+  - skills/subagent-driven-development/scripts/task-brief
+  - skills/subagent-driven-development/task-reviewer-prompt.md
+  - skills/writing-plans/plan-document-reviewer-prompt.md
+
+patches:
+  - patches/brainstorming.patch
+  - patches/executing-plans.patch
+  - patches/requesting-code-review.patch
+  - patches/subagent-driven-development.patch
+  - patches/using-git-worktrees.patch
+  - patches/writing-plans.patch
+  - patches/writing-skills.patch
+
+appends:
+  requesting-code-review:
+    - appends/requesting-code-review-reinicorn.md
+  writing-plans:
+    - appends/writing-plans-reinicorn.md
+
+# Reinicorn-authored files with no upstream counterpart.
+files:
+  ATTRIBUTION.md: files/ATTRIBUTION.md
+  subagent-driven-development/code-quality-reviewer-prompt.md: files/subagent-driven-development/code-quality-reviewer-prompt.md
+  subagent-driven-development/spec-reviewer-prompt.md: files/subagent-driven-development/spec-reviewer-prompt.md
+
+wiring:
+  spec: [brainstorming]
+  plan: [writing-plans, executing-plans, subagent-driven-development]

@@ -7,7 +7,10 @@ from pathlib import Path
 from reinicorn.doc_types import (
     DRAFTS_DIR_NAME,
     REGISTRY,
+    Addressing,
+    CreateMode,
     DocType,
+    TitleSource,
     by_dir,
     drafts_dir,
     gated_types,
@@ -109,3 +112,102 @@ def test_gated_defaults_false():
 def test_drafts_dir_under_type_dir():
     repo_dir = Path("/kb/myrepo")
     assert drafts_dir("spec", repo_dir) == repo_dir / "specs" / DRAFTS_DIR_NAME
+
+
+def test_addressing_values():
+    assert REGISTRY["spec"].addressing is Addressing.SLUG
+    assert REGISTRY["prd"].addressing is Addressing.SLUG
+    assert REGISTRY["debt"].addressing is Addressing.SLUG
+    assert REGISTRY["idea"].addressing is Addressing.SLUG
+    assert REGISTRY["plan"].addressing is Addressing.BRANCH
+    assert REGISTRY["retro"].addressing is Addressing.BRANCH
+    assert REGISTRY["principle"].addressing is Addressing.SINGLETON
+
+
+def test_title_source_values():
+    assert REGISTRY["idea"].title_source is TitleSource.FREE_TEXT
+    assert REGISTRY["plan"].title_source is TitleSource.NONE
+    assert REGISTRY["retro"].title_source is TitleSource.NONE
+    for key in ("spec", "prd", "debt", "principle"):
+        assert REGISTRY[key].title_source is TitleSource.TITLE
+
+
+def test_create_hint_is_derived_from_verb_and_title_source():
+    """create_hint has no hand-maintained literal — it is computed from
+    create_verb/title_source, the same facts `skillset.wiring` derives its
+    own create-command cell from (spec: the two must never be able to
+    disagree, as the hand-written `"<idea>"` vs derived `"<text>"` once did)."""
+    assert REGISTRY["spec"].create_hint == 'rcorn spec create "<title>"'
+    assert REGISTRY["idea"].create_hint == 'rcorn idea create "<text>"'
+    assert REGISTRY["plan"].create_hint == "rcorn plan create"
+    assert REGISTRY["principle"].create_hint == 'rcorn principle add "<title>"'
+
+
+def test_principle_append_mode():
+    p = REGISTRY["principle"]
+    assert p.create_verb == "add"
+    assert p.create_mode is CreateMode.APPEND
+    assert p.create_status == "active"
+
+
+def test_create_status_values():
+    assert REGISTRY["idea"].create_status == "new"
+    assert REGISTRY["plan"].create_status == "planning"
+    for key in ("spec", "prd", "debt", "retro"):
+        assert REGISTRY[key].create_status == "draft"
+
+
+def test_debt_extra_meta():
+    assert dict(REGISTRY["debt"].extra_meta) == {
+        "severity": "medium", "category": "_domain_", "remediation": "planned",
+    }
+    for key in ("spec", "prd", "idea", "plan", "retro", "principle"):
+        assert REGISTRY[key].extra_meta == ()
+
+
+def test_readme_labels():
+    assert REGISTRY["spec"].readme_label == "Approved specs"
+    assert REGISTRY["prd"].readme_label == "Product requirements"
+    assert REGISTRY["plan"].readme_label == "Active plans"
+    assert REGISTRY["debt"].readme_label == "Technical debt"
+    assert REGISTRY["principle"].readme_label == "Golden principles"
+    assert REGISTRY["idea"].readme_label is None
+    assert REGISTRY["retro"].readme_label is None
+
+
+def test_registry_invariant_required_fields_nonempty():
+    for dt in REGISTRY.values():
+        assert dt.help_text, dt.key
+        assert dt.create_verb, dt.key
+        assert dt.create_status, dt.key
+        assert dt.create_hint, dt.key
+
+
+def test_gated_implies_slug_addressing():
+    for dt in gated_types():
+        assert dt.addressing is Addressing.SLUG
+
+
+def test_registry_rejects_gated_non_slug_row():
+    from unittest.mock import patch
+
+    import pytest
+
+    from reinicorn.doc_types import _validate_registry
+    bad = DocType(
+        key="phantom", dir_path="phantoms", filename="active/{branch}/doc.md",
+        protected=True,
+        help_text="Phantom ops", template_body="",
+        addressing=Addressing.BRANCH, gated=True,
+    )
+    with patch.dict(REGISTRY, {"phantom": bad}), pytest.raises(ValueError, match="phantom"):
+        _validate_registry()
+
+
+def test_plan_precedes_retro_for_shared_dir():
+    """Row order is meaningful (see the comment above REGISTRY): plan and
+    retro share a dir_path, and by_dir must resolve it to plan."""
+    assert REGISTRY["plan"].dir_path == REGISTRY["retro"].dir_path
+    keys = list(REGISTRY)
+    assert keys.index("plan") < keys.index("retro")
+    assert by_dir(REGISTRY["plan"].dir_path) is REGISTRY["plan"]

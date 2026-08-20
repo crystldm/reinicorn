@@ -111,6 +111,8 @@ def cmd_plan_create() -> int:
                 "author": author,
                 "branch": branch,
                 "ticket": ticket_id or "N/A",
+                "origin": frontmatter.ORIGIN_AI,
+                "human_validated": False,
             })
             # Seeded templates predating the spec gate lack 'spec:'; without
             # this the created plan gives the author no in-doc placeholder to
@@ -119,20 +121,15 @@ def cmd_plan_create() -> int:
             target.write_text(frontmatter.render(meta, body))
         console.success("Created plan files from templates.")
     else:
-        (pdir / "plan.md").write_text(frontmatter.render(
-            {
-                "type": "plan",
-                "title": f"Execution Plan: {branch}",
+        from reinicorn.commands.doc_create import render_doc
+        (pdir / "plan.md").write_text(render_doc(
+            REGISTRY["plan"], f"Execution Plan: {branch}", author,
+            extra={
                 "slug": pdir.name,
-                "lifecycle": frontmatter.LIFECYCLE_ACTIVE,
-                "status": "planning",
-                "created": date.today(),
-                "author": author,
                 "branch": branch,
                 "ticket": ticket_id or "N/A",
                 "spec": SPEC_PLACEHOLDER,
             },
-            f"\n# Execution Plan: {branch}\n",
         ))
         console.success("Created minimal plan.md (no templates found).")
 

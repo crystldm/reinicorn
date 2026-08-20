@@ -7,6 +7,7 @@ import importlib
 import sys
 
 from reinicorn import __version__
+from reinicorn.doc_types import REGISTRY, Addressing, CreateMode, TitleSource
 from reinicorn.identity import CLI_NAME, PRODUCT_NAME
 
 
@@ -20,85 +21,72 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    # ── Doc-type groups ────────────────────────────────────
-    def _doc_group_with_create_title(name: str, help_text: str):
-        g = sub.add_parser(name, help=help_text)
-        gs = g.add_subparsers(dest=f"{name}_command")
-        gs.required = True
-        cp = gs.add_parser("create", help=f"Create a {name} doc")
-        cp.add_argument("title", nargs="+", help="Document title")
-        sp = gs.add_parser("show", help=f"Show a {name} doc (truncated; --full for all)")
-        sp.add_argument("slug", help="Doc slug (see 'list')")
-        sp.add_argument("--full", action="store_true", help="Print the whole doc")
-        sp.add_argument(
-            "--include-drafts", action="store_true",
-            help="Include drafts/ (unapproved) docs",
-        )
-        lp = gs.add_parser("list", help=f"List {name} docs")
-        lp.add_argument(
-            "--include-drafts", action="store_true",
-            help="Include drafts/ (unapproved) docs",
-        )
-        return g
+    # ── Doc-type groups (generated from the registry; spec:
+    # registry-driven-doc-types stage 2) ─────────────────────
+    def _add_doc_type_groups(sub) -> dict:
+        """Returns {key: subparsers action} so bespoke verbs (plan's
+        lifecycle) can attach without reflecting over argparse internals."""
+        groups: dict = {}
+        for dt in REGISTRY.values():
+            g = sub.add_parser(dt.key, help=dt.help_text)
+            gs = g.add_subparsers(dest=f"{dt.key}_command")
+            gs.required = True
+            groups[dt.key] = gs
+            if dt.title_source is TitleSource.TITLE:
+                cp = gs.add_parser(
+                    dt.create_verb,
+                    help=(f"Append a {dt.key}" if dt.create_mode is CreateMode.APPEND
+                          else f"Create a {dt.key} doc"),
+                )
+                cp.add_argument("title", nargs="+", help="Document title")
+            elif dt.title_source is TitleSource.FREE_TEXT:
+                cp = gs.add_parser(
+                    dt.create_verb, help=f"Capture free-form {dt.key} text"
+                )
+                cp.add_argument("text", nargs="+", help=f"{dt.key} text")
+            else:
+                gs.add_parser(
+                    dt.create_verb,
+                    help=f"Create the {dt.key} for the current branch",
+                )
+            if dt.addressing is Addressing.SLUG:
+                sp = gs.add_parser(
+                    "show",
+                    help=f"Show a {dt.key} doc (truncated; --full for all)",
+                )
+                sp.add_argument("slug", help="Doc slug (see 'list')")
+                sp.add_argument("--full", action="store_true", help="Print the whole doc")
+                sp.add_argument(
+                    "--include-drafts", action="store_true",
+                    help="Include drafts/ (unapproved) docs",
+                )
+                lp = gs.add_parser("list", help=f"List {dt.key} docs")
+                lp.add_argument(
+                    "--include-drafts", action="store_true",
+                    help="Include drafts/ (unapproved) docs",
+                )
+            elif dt.addressing is Addressing.BRANCH:
+                sp = gs.add_parser(
+                    "show", help=f"Show the {dt.key} doc (truncated; --full for all)"
+                )
+                sp.add_argument(
+                    "branch", nargs="?", default=None,
+                    help="Branch name (default: current)",
+                )
+                sp.add_argument("--full", action="store_true", help="Print the whole doc")
+            # Addressing.SINGLETON: create verb only (principle today).
+        return groups
 
-    _doc_group_with_create_title("spec", "Spec doc operations (the implementation contract)")
-    _doc_group_with_create_title("prd", "Product requirements doc operations")
-    _doc_group_with_create_title("debt", "Tech debt doc operations")
+    doc_groups = _add_doc_type_groups(sub)
 
-    # idea: takes free-form text, not a title
-    idea_p = sub.add_parser("idea", help="Idea capture")
-    idea_sub = idea_p.add_subparsers(dest="idea_command")
-    idea_sub.required = True
-    idea_create_p = idea_sub.add_parser("create", help="Capture an idea")
-    idea_create_p.add_argument("text", nargs="+", help="Idea text")
-    idea_show_p = idea_sub.add_parser("show", help="Show an idea doc (truncated; --full for all)")
-    idea_show_p.add_argument("slug", help="Doc slug (see 'list')")
-    idea_show_p.add_argument("--full", action="store_true", help="Print the whole doc")
-    idea_show_p.add_argument(
-        "--include-drafts", action="store_true",
-        help="Include drafts/ (unapproved) docs",
-    )
-    idea_list_p = idea_sub.add_parser("list", help="List idea docs")
-    idea_list_p.add_argument(
-        "--include-drafts", action="store_true",
-        help="Include drafts/ (unapproved) docs",
-    )
-
-    # plan: branch-derived; status/complete verbs
-    plan_p = sub.add_parser("plan", help="Execution plan operations")
-    plan_sub = plan_p.add_subparsers(dest="plan_command")
-    plan_sub.required = True
-    plan_sub.add_parser("create", help="Create execution plan for current branch")
+    # Plan lifecycle verbs stay hand-wired (spec non-goal: plan lifecycle
+    # stays code). Fetch the generated group and append them.
+    plan_sub = doc_groups["plan"]
     plan_sub.add_parser("status", help="Show plan status for current branch")
     plan_complete_p = plan_sub.add_parser("complete", help="Archive plan to completed/")
     plan_complete_p.add_argument(
         "branch", nargs="?", default=None, help="Branch name (default: current)"
     )
-    plan_show_p = plan_sub.add_parser("show", help="Show the plan doc (truncated; --full for all)")
-    plan_show_p.add_argument(
-        "branch", nargs="?", default=None, help="Branch name (default: current)"
-    )
-    plan_show_p.add_argument("--full", action="store_true", help="Print the whole doc")
-
-    # retro: branch-derived; no title
-    retro_p = sub.add_parser("retro", help="Retrospective operations")
-    retro_sub = retro_p.add_subparsers(dest="retro_command")
-    retro_sub.required = True
-    retro_sub.add_parser("create", help="Create retro for current branch")
-    retro_show_p = retro_sub.add_parser(
-        "show", help="Show the retro doc (truncated; --full for all)"
-    )
-    retro_show_p.add_argument(
-        "branch", nargs="?", default=None, help="Branch name (default: current)"
-    )
-    retro_show_p.add_argument("--full", action="store_true", help="Print the whole doc")
-
-    # principle: 'add' verb
-    principle_p = sub.add_parser("principle", help="Golden principle operations")
-    principle_sub = principle_p.add_subparsers(dest="principle_command")
-    principle_sub.required = True
-    principle_add_p = principle_sub.add_parser("add", help="Append a principle")
-    principle_add_p.add_argument("title", nargs="+", help="Principle title")
 
     # ── Review group ────────────────────────────────────────
     review_p = sub.add_parser(
@@ -169,6 +157,28 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     mode_sub.add_parser("status", help="Show active mode")
 
+    # ── Skills group ────────────────────────────────────────
+    skills_p = sub.add_parser(
+        "skills", help="Skill-set adapter management (install, status, update, list)"
+    )
+    skills_sub = skills_p.add_subparsers(dest="skills_command")
+    skills_sub.required = True
+    skills_install_p = skills_sub.add_parser("install", help="Install a skill-set adapter")
+    skills_install_p.add_argument(
+        "adapter", help="Bundled adapter name or path to an adapter directory"
+    )
+    skills_sub.add_parser("status", help="Installed adapter, pin, and local drift")
+    skills_update_p = skills_sub.add_parser(
+        "update", help="Re-fetch and re-apply the installed adapter"
+    )
+    skills_update_p.add_argument(
+        "--ref", dest="ref", default=None, help="New commit SHA to pin"
+    )
+    skills_update_p.add_argument(
+        "--force", action="store_true", help="Overwrite locally modified files"
+    )
+    skills_sub.add_parser("list", help="List bundled adapters")
+
     # ── Top-level (operate on reinicorn itself) ────────────────
     init_p = sub.add_parser("init", help="Set up reinicorn in this repo")
     init_source = init_p.add_mutually_exclusive_group()
@@ -218,45 +228,59 @@ def _load(module: str, func: str):
     return getattr(importlib.import_module(f"reinicorn.commands.{module}"), func)
 
 
+def _doc_dispatch_rows() -> dict:
+    """Generated (noun, verb) rows for every registry doc type (spec:
+    registry-driven-doc-types stage 2). Hand-wired rows merged into
+    _DISPATCH after this override plan's create/status/complete."""
+    rows: dict = {}
+    for dt in REGISTRY.values():
+        key = dt.key
+        if dt.title_source is TitleSource.TITLE:
+            rows[(key, dt.create_verb)] = (
+                lambda a, k=key: _load("doc_create", "cmd_doc_create")(
+                    k, " ".join(a.title)
+                )
+            )
+        elif dt.title_source is TitleSource.FREE_TEXT:
+            rows[(key, dt.create_verb)] = (
+                lambda a, k=key: _load("doc_create", "cmd_doc_create")(
+                    k, " ".join(a.text)
+                )
+            )
+        else:
+            rows[(key, dt.create_verb)] = (
+                lambda _, k=key: _load("doc_create", "cmd_doc_create")(k)
+            )
+        if dt.addressing is Addressing.SLUG:
+            rows[(key, "show")] = (
+                lambda a, k=key: _load("doc_show", "cmd_doc_show")(
+                    k, a.slug, full=a.full, include_drafts=a.include_drafts
+                )
+            )
+            rows[(key, "list")] = (
+                lambda a, k=key: _load("doc_show", "cmd_doc_list")(
+                    k, include_drafts=a.include_drafts
+                )
+            )
+        elif dt.addressing is Addressing.BRANCH:
+            rows[(key, "show")] = (
+                lambda a, k=key: _load("doc_show", "cmd_branch_show")(
+                    k, a.branch, full=a.full
+                )
+            )
+    return rows
+
+
 # Maps (noun, verb) -> handler taking the parsed args Namespace and returning an
 # exit code. Top-level nouns with no sub-verb use a None verb. Each handler lazily
 # imports its command so importing this module stays cheap.
 _DISPATCH = {
-    ("spec", "create"): lambda a: _load("doc_create", "cmd_spec_create")(" ".join(a.title)),
-    ("spec", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "spec", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("spec", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "spec", include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("prd", "create"): lambda a: _load("doc_create", "cmd_prd_create")(" ".join(a.title)),
-    ("prd", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "prd", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("prd", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "prd", include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("debt", "create"): lambda a: _load("doc_create", "cmd_debt_create")(" ".join(a.title)),
-    ("debt", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "debt", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("debt", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "debt", include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("idea", "create"): lambda a: _load("idea", "cmd_idea")(" ".join(a.text)),
-    ("idea", "show"): lambda a: _load("doc_show", "cmd_doc_show")(
-        "idea", a.slug, full=a.full, include_drafts=getattr(a, "include_drafts", False)
-    ),
-    ("idea", "list"): lambda a: _load("doc_show", "cmd_doc_list")(
-        "idea", include_drafts=getattr(a, "include_drafts", False)
-    ),
+    **_doc_dispatch_rows(),
+    # Plan lifecycle verbs stay hand-wired; create overrides the generated
+    # row (cmd_doc_create refuses "plan" — lifecycle logic lives in plan.py).
     ("plan", "create"): lambda _: _load("plan", "cmd_plan_create")(),
     ("plan", "status"): lambda _: _load("plan", "cmd_plan_status")(),
     ("plan", "complete"): lambda a: _load("plan", "cmd_plan_complete")(a.branch),
-    ("plan", "show"): lambda a: _load("doc_show", "cmd_plan_show")(a.branch, full=a.full),
-    ("retro", "create"): lambda _: _load("doc_create", "cmd_retro_create")(),
-    ("retro", "show"): lambda a: _load("doc_show", "cmd_retro_show")(a.branch, full=a.full),
-    ("principle", "add"): lambda a: _load("doc_create", "cmd_principle_add")(" ".join(a.title)),
     ("review", "start"): lambda a: _load("review", "cmd_review_start")(
         a.slug, a.reviewers, type_key=a.type_key
     ),
@@ -289,6 +313,14 @@ _DISPATCH = {
     ("mode", "disable"): lambda _: _load("mode_cmds", "cmd_disable")(),
     ("mode", "incognito"): lambda _: _load("mode_cmds", "cmd_incognito")(),
     ("mode", "status"): lambda _: _load("mode_cmds", "cmd_mode_status")(),
+    ("skills", "install"): lambda a: _load("skills_cmds", "cmd_skills_install")(
+        a.adapter
+    ),
+    ("skills", "status"): lambda _: _load("skills_cmds", "cmd_skills_status")(),
+    ("skills", "update"): lambda a: _load("skills_cmds", "cmd_skills_update")(
+        ref=a.ref, force=a.force
+    ),
+    ("skills", "list"): lambda _: _load("skills_cmds", "cmd_skills_list")(),
     ("init", None): lambda a: _load("init", "cmd_init")(
         kb_url=getattr(a, "kb_url", None),
         local=getattr(a, "local", False),
