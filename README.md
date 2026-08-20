@@ -1,40 +1,49 @@
 # Reinicorn
 
 Reinicorn is a doc-governance layer for agentic coding. It gives a team one
-shared knowledgebase for the `.md` files agents and humans generate — specs,
-plans, PRDs, retros, tech debt, ideas, golden principles — and the discipline
-around them: every doc is created from a registered template through the
-`rcorn` CLI, protected paths reject hand-written files, a linter checks what
-the templates can't, and specs go through a lightweight review lane before
-anything is built on them.
+shared knowledgebase for the `.md` files agents and humans generate (specs,
+plans, PRDs, retros, tech debt, ideas, golden principles) and some discipline
+around them. Docs are created through the `rcorn` CLI from registered
+templates, protected paths reject hand-written files, a linter checks what the
+templates can't, and specs go through a lightweight review lane before anything
+is built on them.
 
 Inspired by OpenAI's
 [Harness Engineering](https://openai.com/index/harness-engineering/) article,
-Reinicorn puts its central claim into practice: the repository is the source of
-truth, and if context lives in a chat thread or in someone's head, agents can't
-see it. The tool is a set of git and harness hooks, a small skill layer, and a
-CLI built on [AXI](https://github.com/kunchenguid/axi) principles. No MCP, no
-vector database, no extra cloud storage (excuse the LLM-ism).
+Reinicorn puts the principles outlined there into practice in a simple,
+straightforward way: a set of skills, hooks (both `git` and harness), and the
+`rcorn` CLI, built on [AXI](https://github.com/kunchenguid/axi) principles. No
+MCP, no vector database, no extra cloud storage (excuse the LLM-ism). It keeps
+your docs organized and helps minimize the slop.
 
 Reinicorn takes no position on development methodology. How you brainstorm,
-plan, debug, or review comes from whatever skill set you install — the bundled
-adapter for [obra/superpowers](https://github.com/obra/superpowers), or your
-own. Reinicorn owns three things and leaves the rest alone:
+plan, debug, or review comes from whatever skill set you install. Install the
+bundled adapter for [obra/superpowers](https://github.com/obra/superpowers)
+or bring your own (see [The skill layer](#the-skill-layer)). Reinicorn owns
+three things and leaves the rest alone:
 
-1. **Where docs live** — the kb, a shared git clone with one scope per repo.
-2. **How docs are created** — through `rcorn`, from a registered template,
-   never by hand.
-3. **Which skills gate which docs** — a wiring doc generated from the doc-type
+1. Where docs live: the kb, a shared git clone with one scope per repo.
+2. How docs are created: through `rcorn`, from a registered template, never by
+   hand.
+3. Which skills gate which docs: a wiring doc generated from the doc-type
    registry and the installed skill set.
 
-The kb is a separate repository, always on `main` except for single-doc review
-PRs. One kb can be shared across multiple repositories, so all domain knowledge
-sits in one place, accessible to every agent across a multi-repo, multi-team
-project.
+Every document comes from a template, so provenance and review status are
+first-class rather than something you remember to add. Specs get placed in
+`kb/<project-slug>/specs/drafts` and can then be put up for review. Organized
+metadata keeps track of all the details. When the review PR passes, the spec
+can be distilled into implementation plans. The code is reviewed as normal, of
+course, but having the team collaborate on and validate the intent first saves
+a lot of time and effort.
 
-The core loop works: capture → review → implement → retro. Plenty is still
-missing, and many ideas are open for implementation in the
-[knowledgebase](https://github.com/crystldm/reinicorn-kb). Contribution,
+The knowledgebase lives as a separate repository, always on its `main` branch
+except for single-doc review PRs. One `kb` can be shared across multiple
+repositories, so all domain knowledge sits in one place, accessible to every
+agent across a multi-repo, multi-team project.
+
+The core loop works: spec → review → implementation → test → retro is (mostly)
+there. Plenty is still missing, and many ideas are open for implementation in
+the [knowledgebase](https://github.com/crystldm/reinicorn-kb). Contribution,
 testing, and feedback are most welcome: `rcorn feedback` opens an issue on
 this repo. I've dog-fooded the project from day one (I built Reinicorn using
 Reinicorn), but the next test is real team workflows.
@@ -107,24 +116,29 @@ reinicorn/
 Agent-assisted work produces documents faster than anyone can curate them.
 Left alone they end up scattered across `docs/`, chat logs, and PR
 descriptions, with no way to tell a draft from a decision or a stale plan from
-a live one. Reinicorn's answer is the belief the harness engineering article
-calls mechanical enforcement over documented conventions: a rule that exists
-only in prose will eventually be violated, so wherever possible the rules are
-code. The full set of beliefs behind the design is in
-[core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md).
+a live one. Everything here follows from the harness engineering article's
+central claim: the repository is the source of truth. If context lives in a
+chat thread or in someone's head, agents can't see it. The kb is where it
+becomes visible to the whole team, including agents working on other branches.
+The other belief doing heavy lifting here is mechanical enforcement over
+documented conventions: a rule that exists only in prose will eventually be
+violated, so wherever possible the rules are code. The full set of beliefs
+behind the design is in
+[core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md);
+several of them come up below.
 
 ### Doc types come from a registry
 
 Every kind of document Reinicorn manages is a row in one registry, and that
-row is the single source of truth for the type: its directory in the kb, its
-filename pattern, its template body and required sections, whether it is
-protected, whether it is review-gated, and how it is addressed (by slug, by
-branch, or as a singleton). The CLI's `rcorn <type> create|show|list` groups,
-the linter's section checks, the editor guards, and the skill wiring doc are
-all generated from those rows. Adding or renaming a doc type is a registry
-change, not a sweep through the codebase.
+row defines the type: its directory in the kb, its filename pattern, its
+template body and required sections, whether it is protected, whether it is
+review-gated, and how it is addressed (by slug, by branch, or as a singleton).
+The CLI's `rcorn <type> create|show|list` groups, the linter's section checks,
+the editor guards, and the skill wiring doc are all generated from those rows.
+Adding or renaming a doc type means editing the registry instead of sweeping
+through the codebase.
 
-The shipped types, each with its template and protected location:
+The document types, each with its template and protected location:
 
 | Type | Create command | What it is |
 |------|----------------|------------|
@@ -138,38 +152,39 @@ The shipped types, each with its template and protected location:
 
 ### Every doc is created through the CLI
 
-A doc can't exist in the kb without its provenance. `rcorn <type> create`
-lays down the frontmatter (type, slug, lifecycle, status, author, origin,
-`human_validated`) and the required sections from the registry template; the
-protected kb paths (`specs/`, `prds/`, `tech-debt/`, `exec-plans/`, `ideas/`)
-reject direct writes through editor hooks on Claude Code, Cursor, and
-Copilot, and `rcorn kb git` is the only sanctioned way to touch the clone's
-git state. The hooks apply regardless of which skill set is installed, so a
-methodology that likes to write `docs/plans/whatever.md` still ends up going
-through `rcorn plan create`.
+`rcorn <type> create` lays down the frontmatter (type, slug, lifecycle,
+status, author, origin, `human_validated`) and the required sections from the
+registry template. The protected kb paths (`specs/`, `prds/`, `tech-debt/`,
+`exec-plans/`, `ideas/`) reject direct writes through editor hooks on Claude
+Code, Cursor, and Copilot, so a doc can't exist without its provenance fields
+and required sections. `rcorn kb git` is the only sanctioned way to touch the
+clone's git state. The hooks apply regardless of which skill set is installed,
+so a methodology that likes to write `docs/plans/whatever.md` still ends up
+going through `rcorn plan create`.
 
 Plans are the one type bound to a branch rather than a slug. `rcorn plan
-create` scaffolds the plan for the current branch and publishes it to the kb;
-because every branch's plan is visible in one place, `rcorn kb status` can
+create` scaffolds the plan for the current branch and publishes it to the kb.
+Because every branch's plan is visible in one place, `rcorn kb status` can
 compare active branches and flag overlap before two people silently rewrite
-the same file — what the article calls cross-branch awareness. When the branch
-merges, `rcorn plan complete` archives the plan and asks for a retro, because
+the same file. This is what the article calls cross-branch awareness. When the
+branch merges, `rcorn plan complete` archives it and asks for a retro, because
 lessons that never get written down are lost.
 
 Two capture types sit outside any workflow. `rcorn idea create` is for the
 thought that strikes while you're doing something else: file it and stay on
-task. `rcorn debt create` catalogs tech debt as you encounter it, since a
-shortcut taken today becomes a pattern agents replicate tomorrow.
+task, instead of losing it or chasing it. `rcorn debt create` catalogs tech
+debt as you encounter it. Debt compounds fast in agent-assisted codebases,
+since a shortcut taken today becomes a pattern agents replicate tomorrow.
 
 ### The linter checks what templates can't
 
-`rcorn kb lint` runs the rules in `linters/`: frontmatter is valid, cross-links resolve, index
-files are fresh, plans have their required structure, and no plan builds on
-a spec that is still a draft. Team taste gets the same treatment: `rcorn
-principle add` appends to the repo's golden principles, capturing a human
-preference once so it can be enforced continuously instead of re-litigated in
-every review. Principles are meant to be mechanical — if you can't imagine a
-lint rule for it, it's a convention, not a principle.
+`rcorn kb lint` runs the rules in `linters/`: frontmatter is valid,
+cross-links resolve, index files are fresh, plans have their required
+structure, and no plan builds on a spec that is still a draft. Team taste gets
+the same treatment: `rcorn principle add` appends to the repo's golden
+principles, capturing a human preference once so it can be enforced
+continuously instead of re-litigated in every review. Principles are meant to
+be mechanical: if you can't imagine a lint rule for it, it's a convention.
 
 ### Specs go through review
 
@@ -194,35 +209,36 @@ setup` installs a small CI workflow so a browser merge finishes the cleanup on
 its own. `gh` is optional at every step; without it, reinicorn pushes the
 branch and hands you the PR link to open yourself.
 
-Review gating is a registry flag, so which types are gated is a project
-decision rather than a hardcoded one. Specs ship gated; ideas and debt don't.
+Review gating is a registry flag, so each project decides which types are
+gated. Specs ship gated; ideas and debt don't.
 
 ## The skill layer
 
 Skills live in `.agents/skills/` (the Agent Skills open standard, configurable)
-and load natively on Claude Code, Cursor, GitHub Copilot, and Codex. Reinicorn
-ships two **native** skills, managed by `rcorn update`:
+and load automatically on Claude Code, Cursor, GitHub Copilot, and Codex.
+Reinicorn ships two native skills, managed by `rcorn update`:
 
-- `using-reinicorn`: the doc-lifecycle contract — where docs live, the
-  creation rule, and the wiring doc. Loads first, every session.
-- `populate-agents-md`: fill in `AGENTS.md` through guided dialogue.
+- `using-reinicorn`: the doc-lifecycle contract (where docs live, the
+  creation rule, and the wiring doc); loads first, every session
+- `populate-agents-md`: fill in `AGENTS.md` through guided dialogue
 
-That's the whole native opinion. Methodology — brainstorming, planning, TDD,
-debugging, code review, worktrees — comes from a **skill-set adapter**:
+That's the whole native opinion. Methodology (brainstorming, planning, TDD,
+debugging, code review, worktrees, and so on) comes from a **skill-set
+adapter** you install:
 
 ```bash
 rcorn skills install superpowers
 ```
 
 An adapter is a declarative definition (`adapters/<name>/adapter.yaml`): an
-upstream repo pinned to a commit, an explicit list of skills to take, a series
-of real git patches plus append blocks that make those skills kb-compatible
-(write docs through `rcorn`, respect protected paths), and a **wiring** map
-from doc types to the skills that should run before creating them. Same
-adapter plus same pin gives byte-identical output, and a patch that no longer
-applies fails the install loudly rather than landing half-way. The repo
-contains no forked third-party skill text — only adapter definitions — and
-adapter-installed skills are gitignored in your project, with a lockfile at
+upstream repo pinned to a commit, an explicit list of skills to take, git
+patches plus append blocks that make those skills kb-compatible (write docs
+through `rcorn`, respect protected paths), and a wiring map from doc types to
+the skills that should run before creating them. Same adapter plus same pin
+gives byte-identical output, and a patch that no longer applies fails the
+install loudly instead of landing half-way. The repo contains no forked
+third-party skill text, only adapter definitions, and adapter-installed skills
+are gitignored in your project, with a lockfile at
 `.reinicorn/skillset-lock.json` tracking the pin and per-file hashes.
 
 The bundled `superpowers` adapter installs a pinned build of
@@ -235,7 +251,7 @@ the same way.
 Whichever skill set (if any) is installed, the generated wiring doc at
 `.agents/skills/using-reinicorn/references/skillset-wiring.md` maps every
 registered doc type to its creation command and the skill(s) to invoke first.
-With no adapter installed, the creation commands alone are the contract — the
+With no adapter installed, the creation commands alone are the contract; the
 kb, the templates, the hooks, and the linter all work standalone.
 
 ## The CLI
