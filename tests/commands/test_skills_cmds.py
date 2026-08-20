@@ -127,6 +127,26 @@ def test_install_second_adapter_surfaces_installer_error_untouched(
     assert "demo" in out  # names the already-installed adapter, untouched
 
 
+def test_install_over_a_drifted_file_reports_the_preserved_path(
+    tmp_path: Path, project: Path, capsys
+) -> None:
+    """`cmd_skills_install` must report a preserved-drift path the same way
+    `cmd_skills_update` does — `install_adapter` now returns that list
+    instead of discarding it."""
+    adapter_dir = make_adapter_dir(tmp_path, "demo", DEMO_YAML)
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project), \
+         patch(
+             "reinicorn.commands.skills_cmds.install_adapter",
+             return_value=["alpha/scratch.md"],
+         ):
+        result = cmd_skills_install(str(adapter_dir))
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "1 locally modified file(s) preserved" in out
+    assert "alpha/scratch.md" in out
+
+
 # --- status --------------------------------------------------------------
 
 
@@ -272,6 +292,28 @@ def test_update_with_ref_rebuilds_adapter_and_moves_the_pin(
     assert lock.commit == COMMIT_B
     out = capsys.readouterr()
     assert COMMIT_B[:12] in out.out or True  # commit change is the key assertion
+
+
+def test_update_with_ref_builds_a_non_empty_annotation(
+    tmp_path: Path, project: Path, fetch_calls, monkeypatch, capsys
+) -> None:
+    """--ref must not build an AdapterSource with annotation="" — that
+    violates _parse_source's non-empty-annotation invariant (nothing
+    downstream re-validates a `dataclasses.replace`d Adapter, so a hollow
+    annotation would otherwise slip through silently)."""
+    adapter_dir = make_adapter_dir(tmp_path, "demo", DEMO_YAML)
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project), \
+         patch("reinicorn.commands.skills_cmds.update_adapter") as mock_update:
+        assert cmd_skills_install(str(adapter_dir)) == 0
+        mock_update.return_value = []
+        capsys.readouterr()
+        monkeypatch.chdir(tmp_path)
+        result = cmd_skills_update(ref=COMMIT_B)
+
+    assert result == 0
+    adapter_arg = mock_update.call_args[0][0]
+    assert adapter_arg.source.annotation
+    assert COMMIT_B in adapter_arg.source.annotation
 
 
 def test_update_unresolvable_local_adapter_errors(

@@ -559,6 +559,29 @@ def test_skills_value_nested_path_rejected(tmp_path: Path) -> None:
         load_adapter(adapter_dir)
 
 
+def test_skills_duplicate_installed_name_rejected(tmp_path: Path) -> None:
+    """Two upstream dirs installing to the same name must fail at load time,
+    naming the duplicate — not later as a raw FileExistsError out of
+    `shutil.copytree` when the engine stages them."""
+    yaml_text = """\
+name: demo
+source:
+  repo: acme/skills
+  commit: 0123456789abcdef0123456789abcdef01234567
+  annotation: v1.0.0
+skills:
+  skills/alpha: shared
+  skills/nested/beta: shared
+"""
+    adapter_dir = make_adapter_dir(tmp_path, yaml_text)
+
+    with pytest.raises(AdapterError, match="shared") as exc_info:
+        load_adapter(adapter_dir)
+    message = str(exc_info.value)
+    assert "skills/alpha" in message
+    assert "skills/nested/beta" in message
+
+
 # === Gap 2: skills key (upstream path) emptiness check ===
 
 

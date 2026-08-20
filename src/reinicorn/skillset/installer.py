@@ -120,7 +120,7 @@ def install_adapter(
     *,
     cache_dir: Path | None = None,
     adopt_hashes: dict[str, str] | None = None,
-) -> None:
+) -> list[str]:
     """Install *adapter* into *repo_root* as one transaction.
 
     Fetch the pinned upstream tree, build the staging tree, refuse to
@@ -128,7 +128,10 @@ def install_adapter(
     lockfile, the wiring doc, and the compatibility link together. Any
     failure restores the project exactly as it was. Re-installing the same
     adapter is a controlled replacement driven by the lockfile inventory
-    (identical to `update_adapter` without `force`). Raises `AdapterError`.
+    (identical to `update_adapter` without `force`), so — like
+    `update_adapter` — this returns the preserved-drift paths (skills-dir-
+    relative) that inventory replacement left untouched. Raises
+    `AdapterError`.
 
     *adopt_hashes* is the legacy-fork migration's inventory: skills-dir-
     relative paths (same shape as the lock's `files` keys) mapped to the
@@ -147,7 +150,7 @@ def install_adapter(
             f"  How to fix: update or remove '{lock.adapter}' first, or install "
             f"'{adapter.name}' into a different project."
         )
-    _install_or_update(
+    return _install_or_update(
         adapter, repo_root, lock=lock, force=False, cache_dir=cache_dir,
         adopt_hashes=adopt_hashes,
     )

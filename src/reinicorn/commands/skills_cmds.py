@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,13 +10,10 @@ from reinicorn.assets import get_asset_path
 from reinicorn.config import skills_dir
 from reinicorn.git import repo_root
 from reinicorn.manifest import sha256_file
-from reinicorn.skillset.adapter import AdapterError, load_adapter
+from reinicorn.skillset.adapter import COMMIT_RE, AdapterError, load_adapter
 from reinicorn.skillset.installer import install_adapter, update_adapter
 from reinicorn.skillset.lockfile import read_lock
 from reinicorn.skillset.wiring import wiring_doc_path
-
-# Must stay in sync with adapter.py's _COMMIT_RE pattern.
-_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _resolve_adapter_dir(name_or_path: str) -> Path | None:
@@ -56,7 +52,7 @@ def cmd_skills_install(name_or_path: str) -> int:
 
     try:
         adapter = load_adapter(adapter_dir)
-        install_adapter(adapter, root)
+        preserved = install_adapter(adapter, root)
     except AdapterError as e:
         console.error(str(e))
         return 1
@@ -69,6 +65,12 @@ def cmd_skills_install(name_or_path: str) -> int:
         f"({file_count} file(s))."
     )
     console.info(f"Wiring doc: {doc}")
+    if preserved:
+        console.warn(
+            f"{len(preserved)} locally modified file(s) preserved (not touched):"
+        )
+        for rel in preserved:
+            console.info(f"  {rel}")
     return 0
 
 
@@ -125,7 +127,7 @@ def _lookup_annotation(adapter_name: str, commit: str) -> str | None:
 
 def cmd_skills_update(ref: str | None = None, force: bool = False) -> int:
     """Re-fetch and re-apply the installed adapter, optionally moving the pin."""
-    if ref is not None and not _COMMIT_RE.match(ref):
+    if ref is not None and not COMMIT_RE.match(ref):
         console.error(
             f"--ref '{ref}' is not a 40-hex commit SHA.\n"
             f"  Tags are not valid pins — resolve the tag to its commit and "
@@ -161,7 +163,10 @@ def cmd_skills_update(ref: str | None = None, force: bool = False) -> int:
         adapter = load_adapter(adapter_dir)
         if ref is not None:
             adapter = replace(
-                adapter, source=replace(adapter.source, commit=ref, annotation="")
+                adapter,
+                source=replace(
+                    adapter.source, commit=ref, annotation=f"cli --ref {ref}"
+                ),
             )
         else:
             # Without --ref, re-apply the lock's pinned commit, clearing the

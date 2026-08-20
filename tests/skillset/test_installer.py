@@ -976,6 +976,27 @@ def test_update_preserves_a_dropped_locally_modified_file(
     assert scratch.read_text() == "my own notes\n"
 
 
+def test_install_over_a_drifted_file_returns_the_preserved_path(
+    project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]]
+) -> None:
+    """Re-installing the same adapter is a controlled replacement driven by
+    the lockfile inventory — identical to `update_adapter` without `force` —
+    so `install_adapter` must return the preserved-drift list too, not
+    discard it (a caller like `cmd_skills_install` has no other way to
+    learn that a locally modified file was kept, not overwritten)."""
+    install_base(project, tmp_path)
+    scratch = project / ".agents" / "skills" / "alpha" / "scratch.md"
+    scratch.write_text("my own notes\n")
+    adapter_v2 = make_adapter(tmp_path / "v2", DROPS_SCRATCH_YAML, EXTRA_FILES)
+
+    preserved = installer.install_adapter(
+        adapter_v2, project, cache_dir=tmp_path / "cache"
+    )
+
+    assert preserved == ["alpha/scratch.md"]
+    assert scratch.read_text() == "my own notes\n"
+
+
 def test_update_dropping_a_whole_skill_removes_its_directory(
     project: Path, tmp_path: Path, fetch_calls: list[dict[str, object]]
 ) -> None:

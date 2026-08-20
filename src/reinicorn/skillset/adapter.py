@@ -58,7 +58,7 @@ from typing import Any
 import yaml
 
 _REPO_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
-_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 _TOP_LEVEL_KEYS = frozenset({
     "name", "source", "skills", "patches", "appends",
@@ -199,7 +199,7 @@ def _parse_source(value: Any, name: str, adapter_dir: Path) -> AdapterSource:
         )
 
     commit = value.get("commit")
-    if not isinstance(commit, str) or not _COMMIT_RE.match(commit):
+    if not isinstance(commit, str) or not COMMIT_RE.match(commit):
         raise AdapterError(
             f"Adapter '{name}' at {adapter_dir}: source.commit '{commit}' is not a "
             f"40-hex commit SHA.\n  Tags are not valid pins — resolve the tag to its "
@@ -226,6 +226,7 @@ def _parse_skills(value: Any, name: str, adapter_dir: Path) -> dict[str, str]:
             f"<installed-name>}}' entry — there is no 'take everything' mode."
         )
 
+    seen_installed: dict[str, str] = {}
     for upstream, installed in value.items():
         # Check upstream key (gap 2: emptiness).
         if not isinstance(upstream, str):
@@ -266,6 +267,20 @@ def _parse_skills(value: Any, name: str, adapter_dir: Path) -> dict[str, str]:
                 f"  How to fix: use just the skill name, no '/' or '..' separators "
                 f"(e.g., 'alpha', not 'nested/alpha' or '../escape')."
             )
+
+        # Two upstream dirs installing to the same name would collide at
+        # `shutil.copytree` time (a raw FileExistsError, not an AdapterError)
+        # — caught here instead, at load time, with the other adapter-shape
+        # errors.
+        if installed in seen_installed:
+            raise AdapterError(
+                f"Adapter '{name}' at {adapter_dir}: 'skills' value {installed!r} "
+                f"is used for two upstream paths: {seen_installed[installed]!r} "
+                f"and {upstream!r}.\n"
+                f"  How to fix: give each upstream path a distinct installed "
+                f"skill name."
+            )
+        seen_installed[installed] = upstream
 
     return dict(value)
 
