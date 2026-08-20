@@ -321,7 +321,7 @@ def cmd_update(*, diff_target: str | None = None) -> int:
 
     counts = {"updated": 0, "added": 0, "skipped": 0}
 
-    package_files = _collect_package_files(asset_root)
+    package_files = _collect_package_files(asset_root, repo_root)
 
     # Adapter-installed files (recorded in the skillset lock) are owned by
     # `rcorn skills`, not `rcorn update` — never sync, warn, or count them.
@@ -383,17 +383,24 @@ def cmd_update(*, diff_target: str | None = None) -> int:
     return 0
 
 
-def _collect_package_files(asset_root: Path) -> dict[str, Path]:
+def _collect_package_files(asset_root: Path, repo_root: Path) -> dict[str, Path]:
     """Collect all files from the package asset directories.
 
     Handles both wheel layout (skills/, hooks/) and editable layout
     (.agents/skills/, .claude/hooks/) by checking which actually exists.
+
+    Only the *source* layout is probed: the native-skill destination is
+    whatever `REINICORN_SKILLS_DIR` configures for *repo_root*, so update
+    writes to the same tree init and the manifest use.
     """
     files: dict[str, Path] = {}
 
     # Each entry: (candidate source names, destination prefix)
     asset_probes: list[tuple[list[str], str]] = [
-        (["skills", ".agents/skills", ".claude/skills"], ".agents/skills"),
+        (
+            ["skills", ".agents/skills", ".claude/skills"],
+            skills_dir(repo_root).as_posix(),
+        ),
         (["hooks", ".claude/hooks"], ".claude/hooks"),
         (["editor-hooks"], ".reinicorn/hooks"),
         (["linters"], "linters"),
@@ -424,7 +431,7 @@ def _show_diff(repo_root: Path, target: str) -> int:
         )
         return 1
 
-    package_files = _collect_package_files(asset_root)
+    package_files = _collect_package_files(asset_root, repo_root)
 
     matches = [k for k in package_files if target in k]
     if not matches:

@@ -91,7 +91,7 @@ def test_collect_package_files_excludes_agents_template(tmp_path: Path) -> None:
     templates.mkdir()
     (templates / "AGENTS.md").write_text("# Package template\n")
 
-    package_files = _collect_package_files(assets)
+    package_files = _collect_package_files(assets, tmp_path)
     assert all("AGENTS.md" not in path for path in package_files)
 
 
@@ -179,6 +179,42 @@ def test_update_adds_new_files(tmp_path: Path):
 
     assert rc == 0
     assert (repo / ".agents/skills/debugging/SKILL.md").read_text() == "# Debugging\n"
+
+
+def test_update_honors_configured_skills_dir(tmp_path: Path, capsys) -> None:
+    """Native skills are synced to REINICORN_SKILLS_DIR, not `.agents/skills`.
+
+    A hardcoded destination writes a second skills tree the manifest never
+    records, so every subsequent run re-reports the same files as "Added".
+    """
+    from reinicorn.commands.update import cmd_update
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".reinicorn-config").write_text("REINICORN_SKILLS_DIR=custom/skills\n")
+    skill = repo / "custom" / "skills" / "using-reinicorn"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Using Reinicorn old\n")
+    write_manifest(repo, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        assert cmd_update() == 0
+
+    capsys.readouterr()
+    assert (skill / "SKILL.md").read_text() == "# Using Reinicorn\n"
+    assert not (repo / ".agents").exists()
+
+    # Everything the package ships is already tracked at the configured
+    # destination, so a second run adds nothing.
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.3.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        assert cmd_update() == 0
+
+    assert "Added:   0 files" in capsys.readouterr().out
 
 
 def test_update_already_up_to_date(tmp_path: Path):
@@ -475,7 +511,7 @@ def test_get_asset_sources_editable_layout_returns_repo_root(tmp_path: Path):
 
     with patch.object(update, "get_asset_path", _fake_get_asset_path(root)):
         assert update._get_asset_sources() == root
-        files = update._collect_package_files(root)
+        files = update._collect_package_files(root, tmp_path)
 
     assert ".agents/skills/brainstorming/SKILL.md" in files
     assert ".claude/hooks/pre-push" in files
@@ -498,7 +534,7 @@ def test_get_asset_sources_wheel_layout_returns_data_root(tmp_path: Path):
 
     with patch.object(update, "get_asset_path", _fake_get_asset_path(data)):
         assert update._get_asset_sources() == data
-        files = update._collect_package_files(data)
+        files = update._collect_package_files(data, tmp_path)
 
     assert ".agents/skills/brainstorming/SKILL.md" in files
     assert ".claude/hooks/pre-push" in files
