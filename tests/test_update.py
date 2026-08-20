@@ -251,13 +251,11 @@ def test_update_warns_about_removed_upstream(tmp_path: Path, capsys):
     skills.mkdir(parents=True)
     (skills / "SKILL.md").write_text("# Brainstorming v2\n")
 
-    # 'removed' also matches the legacy-fork-migration shape (an
-    # unrecognized skills-dir entry with no lock); decline it so this
-    # unrelated "removed upstream" scenario proceeds undisturbed.
+    # 'removed' is not in the legacy-fork inventory, so the migration offer
+    # never fires here and this "removed upstream" scenario stands alone.
     with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
-         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
-         patch("builtins.input", return_value="n"):
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
         rc = cmd_update()
 
     assert rc == 0
@@ -286,8 +284,7 @@ def test_update_does_not_warn_about_removed_wiring_doc(tmp_path: Path, capsys):
 
     with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
-         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
-         patch("builtins.input", return_value="n"):
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
         rc = cmd_update()
 
     assert rc == 0
@@ -556,6 +553,50 @@ def test_update_migrates_legacy_forks_on_yes(tmp_path: Path) -> None:
     assert ".agents/skills/brainstorming/SKILL.md" not in manifest["files"]
 
 
+def test_update_migration_preserves_user_authored_skill(tmp_path: Path) -> None:
+    """A hand-written skill tracked in the manifest is not a legacy fork.
+
+    The manifest rglobs the whole skills directory, so classifying "any
+    tracked skill the package no longer ships" as a legacy superpowers fork
+    made the migration delete user-authored skills. Classification is by an
+    explicit legacy inventory instead, so this skill survives untouched and
+    stays tracked while the real fork beside it is migrated away.
+    """
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.manifest import sha256_file
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    mine = repo / ".agents" / "skills" / "my-skill" / "SKILL.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("# My own skill\n")
+    write_manifest(repo, version="0.1.0")  # re-track, now including my-skill
+    assets = _setup_native_only_assets(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    fork_hash = sha256_file(fork_file)
+
+    # Same version on both sides: the "Already up to date" path, so the
+    # migration's own manifest rewrite is what the assertions below read.
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.1.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("reinicorn.commands.update.install_adapter") as mock_install, \
+         patch("builtins.input", return_value="y"):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert mock_install.call_count == 1
+    # Only the real fork is handed to the installer for adoption.
+    assert mock_install.call_args.kwargs["adopt_hashes"] == {
+        "brainstorming/SKILL.md": fork_hash
+    }
+    assert mine.read_text() == "# My own skill\n"
+    assert not fork_file.is_file()
+
+    manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
+    assert ".agents/skills/my-skill/SKILL.md" in manifest["files"]
+    assert ".agents/skills/brainstorming/SKILL.md" not in manifest["files"]
+
+
 def test_update_migration_preserves_locally_modified_fork(
     tmp_path: Path, capsys
 ) -> None:
@@ -806,11 +847,13 @@ def test_update_migration_with_real_installer_adopts_clean_forks(
     from reinicorn.skillset.lockfile import read_lock
 
     repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
-    # A second legacy fork with no adapter counterpart.
-    oldskill = repo / ".agents" / "skills" / "oldskill"
+    # A second legacy skill with no adapter counterpart: 'update-superpowers'
+    # is in the legacy inventory (a pre-adapter Reinicorn shipped it) but no
+    # adapter installs it, so it must be cleaned up post-install.
+    oldskill = repo / ".agents" / "skills" / "update-superpowers"
     oldskill.mkdir(parents=True)
     (oldskill / "SKILL.md").write_text("# Old skill\n")
-    write_manifest(repo, version="0.1.0")  # re-track, now including oldskill
+    write_manifest(repo, version="0.1.0")  # re-track, now including it
     assets = _setup_native_only_assets(tmp_path)
     adapter_dir, fake_fetch = _setup_bundled_adapter_with_upstream(tmp_path)
     fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
@@ -835,7 +878,7 @@ def test_update_migration_with_real_installer_adopts_clean_forks(
     assert set(lock.files) == {"brainstorming/SKILL.md"}
     manifest = json.loads((repo / ".reinicorn/manifest.json").read_text())
     assert ".agents/skills/brainstorming/SKILL.md" not in manifest["files"]
-    assert ".agents/skills/oldskill/SKILL.md" not in manifest["files"]
+    assert ".agents/skills/update-superpowers/SKILL.md" not in manifest["files"]
 
 
 def test_update_migration_with_real_installer_preserves_drifted_fork(

@@ -17,12 +17,18 @@ from reinicorn.manifest import (
     write_manifest,
     write_manifest_data,
 )
-from reinicorn.skillset.adapter import AdapterError, load_adapter
+from reinicorn.skillset.adapter import Adapter, AdapterError, load_adapter
 from reinicorn.skillset.installer import install_adapter
 from reinicorn.skillset.lockfile import read_lock
 from reinicorn.skillset.wiring import wiring_doc_path, write_wiring
 
 _SUPERPOWERS_ADAPTER = "superpowers"
+
+# Skills-dir top-level names a pre-adapter Reinicorn shipped that the
+# superpowers adapter does not declare: the fork-updating helper skill and
+# the shared attribution file. Together with the adapter's own installed
+# skill names these are the complete legacy inventory.
+_LEGACY_EXTRA_NAMES = frozenset({"update-superpowers", "ATTRIBUTION.md"})
 
 _MIGRATION_PROMPT = (
     "Legacy superpowers skill forks detected (shipped by an older Reinicorn).\n"
@@ -83,10 +89,25 @@ def _native_skill_names(asset_root: Path) -> set[str]:
     return set()
 
 
+def _legacy_fork_names(adapter: Adapter, native_skills: set[str]) -> set[str]:
+    """Skills-dir top-level names a pre-adapter Reinicorn shipped.
+
+    An explicit inventory — the adapter's own installed skill names plus the
+    extras that never had an adapter counterpart — never "anything the
+    package no longer ships". The manifest tracks the whole skills
+    directory, so the latter would classify a user-authored skill as a
+    legacy fork and let the cleanup below delete it.
+
+    Currently-shipped native names are subtracted so a name the package
+    still owns is synced by update, never migrated out from under it.
+    """
+    return (set(adapter.skills.values()) | _LEGACY_EXTRA_NAMES) - native_skills
+
+
 def _legacy_fork_files(
-    repo_root: Path, manifest_files: dict, native_skills: set[str]
+    repo_root: Path, manifest_files: dict, legacy_names: set[str]
 ) -> dict[str, dict]:
-    """Manifest entries under the skills dir whose top-level dir isn't native.
+    """Manifest entries under the skills dir named by the legacy inventory.
 
     These are the vendored superpowers forks a pre-adapter Reinicorn shipped:
     still tracked in the manifest, no longer part of the package.
@@ -96,7 +117,7 @@ def _legacy_fork_files(
         rel: meta
         for rel, meta in manifest_files.items()
         if rel.startswith(prefix)
-        and rel[len(prefix):].split("/", 1)[0] not in native_skills
+        and rel[len(prefix):].split("/", 1)[0] in legacy_names
     }
 
 
@@ -131,8 +152,26 @@ def _maybe_migrate_legacy_forks(
     if asset_root is None:
         return  # can't tell what's native here; the rest of update reports this
 
+    # The adapter is loaded before detection, not after the prompt: it
+    # declares which skill names the legacy forks used, and that inventory
+    # is what makes detection safe for hand-written skills.
+    adapter_dir = get_asset_path(f"adapters/{_SUPERPOWERS_ADAPTER}")
+    if adapter_dir is None:
+        return  # no adapter to migrate to, and no inventory to classify with
+
+    try:
+        adapter = load_adapter(adapter_dir)
+    except AdapterError as exc:
+        console.error(
+            f"Cannot read the bundled '{_SUPERPOWERS_ADAPTER}' adapter: {exc}\n"
+            f"  Is reinicorn installed correctly? Try: uv pip install -e ."
+        )
+        return
+
     legacy = _legacy_fork_files(
-        repo_root, manifest_files, _native_skill_names(asset_root)
+        repo_root,
+        manifest_files,
+        _legacy_fork_names(adapter, _native_skill_names(asset_root)),
     )
     if not legacy:
         return
@@ -140,14 +179,6 @@ def _maybe_migrate_legacy_forks(
     answer = input(_MIGRATION_PROMPT).strip().lower()
     if answer != "y":
         config_set(SKILLSET_MIGRATION_KEY, "declined", repo_root)
-        return
-
-    adapter_dir = get_asset_path(f"adapters/{_SUPERPOWERS_ADAPTER}")
-    if adapter_dir is None:
-        console.error(
-            f"Cannot locate the bundled '{_SUPERPOWERS_ADAPTER}' adapter.\n"
-            f"  Is reinicorn installed correctly? Try: uv pip install -e ."
-        )
         return
 
     # The legacy forks are still on disk when the installer runs, so the
@@ -159,7 +190,6 @@ def _maybe_migrate_legacy_forks(
     }
 
     try:
-        adapter = load_adapter(adapter_dir)
         install_adapter(adapter, repo_root, adopt_hashes=adopt_hashes)
     except AdapterError as exc:
         console.error(str(exc))
