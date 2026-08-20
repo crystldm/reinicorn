@@ -45,6 +45,7 @@ only-include = [
     "hooks",
     "editor-hooks",
     "linters",
+    "adapters",
     "upgrades",
     "platform-instructions",
     "workflows",
@@ -70,6 +71,7 @@ packages = ["src/reinicorn"]
 "upgrades" = "reinicorn/_data/upgrades"
 "platform-instructions" = "reinicorn/_data/platform-instructions"
 "workflows" = "reinicorn/_data/workflows"
+"adapters" = "reinicorn/_data/adapters"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

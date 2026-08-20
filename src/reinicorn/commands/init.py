@@ -24,7 +24,7 @@ from reinicorn.commands.init_platforms import (
     prompt_platforms,
     resolve_platforms_arg,
 )
-from reinicorn.config import KB_DIR_NAME, config_set, kb_scope
+from reinicorn.config import KB_DIR_NAME, config_set, kb_scope, skills_dir
 from reinicorn.git import (
     file_transport_args,
     https_to_ssh,
@@ -299,6 +299,11 @@ def _setup_assets(
         return None
     selected = prompt_platforms() if platforms is None else platforms
     install_platform_instructions(cwd, slug, selected)
+    # Wiring doc before the skills copy: maintain_link's copy fallback (when
+    # symlinks are unavailable) snapshots the skills dir as it stands at
+    # that moment, so the doc must already exist under it or a
+    # copy-fallback repo never gets skillset-wiring.md.
+    _regenerate_wiring_doc(cwd)
     _copy_skills(r_root, cwd)
     _install_session_hook(cwd)
     _copy_lint_config(cwd)
@@ -502,7 +507,13 @@ def _check_skill_collisions(skill_names: list[str]) -> None:
 
 
 def _copy_skills(_r_root: Path, target_dir: Path) -> None:
-    """Copy skills to <target>/.agents/skills/ and link .claude/skills to it."""
+    """Copy native skills into the configured skills dir and link the
+    compatibility path to it.
+
+    The packaged asset SOURCE stays fixed at `.agents/skills` inside
+    Reinicorn's own tree (`SKILLS_ASSET`) — `REINICORN_SKILLS_DIR` only
+    reconfigures where they land in the *target* repo.
+    """
     skills_src = get_asset_path("skills")
     if skills_src is None:
         skills_src = get_asset_path(SKILLS_ASSET)
@@ -510,7 +521,8 @@ def _copy_skills(_r_root: Path, target_dir: Path) -> None:
         console.warn("No skills directory found — skipping")
         return
 
-    skills_dest = target_dir / SKILLS_ASSET
+    dest_rel = skills_dir(target_dir)
+    skills_dest = target_dir / dest_rel
     skills_dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(skills_src, skills_dest, dirs_exist_ok=True)
     _link_claude_skills(target_dir)
@@ -525,7 +537,7 @@ def _copy_skills(_r_root: Path, target_dir: Path) -> None:
         if f.is_file() and f.suffix == ".md" and f.name != "ATTRIBUTION.md"
     )
     all_skills = skill_names + standalone
-    console.success(f"Copied {len(all_skills)} skill(s) to .agents/skills/")
+    console.success(f"Copied {len(all_skills)} skill(s) to {dest_rel.as_posix()}/")
     for name in all_skills:
         print(f"    {name}")
     print()
@@ -533,39 +545,40 @@ def _copy_skills(_r_root: Path, target_dir: Path) -> None:
     _check_skill_collisions(all_skills)
 
 
-def _link_claude_skills(target_dir: Path) -> None:
-    """Make .claude/skills a symlink to ../.agents/skills (copy fallback).
+def _regenerate_wiring_doc(target_dir: Path) -> None:
+    """Regenerate the skillset wiring doc so it always exists after init.
 
-    Claude Code only reads .claude/skills; Codex/Cursor/Copilot read
-    .agents/skills natively. A pre-existing REAL .claude/skills dir is
-    left untouched (never delete user content) — warn instead.
+    Rendered from the lock's wiring when an adapter is installed,
+    registry-only otherwise — mirrors `rcorn update`'s regeneration so
+    `using-reinicorn`'s pointer to this doc never dangles. A write failure
+    (e.g. an unwritable skills dir) must not crash init; warn and move on.
     """
-    from pathlib import Path
+    from reinicorn.skillset.lockfile import read_lock
+    from reinicorn.skillset.wiring import wiring_doc_path, write_wiring
 
-    claude_dir = target_dir / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-    link = claude_dir / "skills"
-    rel_target = Path("..") / ".agents" / "skills"
-
-    if link.is_symlink():
-        return  # already linked
-    if link.is_dir():
-        console.warn(
-            ".claude/skills already exists as a real directory — left in place.\n"
-            "  Canonical skills now live in .agents/skills/. Remove the old\n"
-            "  directory and re-run 'rcorn update' to switch to the symlink."
-        )
-        return
     try:
-        link.symlink_to(rel_target, target_is_directory=True)
-        console.success("Linked .claude/skills -> .agents/skills")
-    except OSError:
-        shutil.copytree(target_dir / SKILLS_ASSET, link, dirs_exist_ok=True)
+        lock = read_lock(target_dir)
+        write_wiring(target_dir, lock.wiring if lock is not None else None)
+    except Exception as exc:
         console.warn(
-            "Symlinks unavailable (Windows without developer mode?) — copied\n"
-            "  skills to .claude/skills instead. This copy is NOT auto-synced;\n"
-            "  re-run 'rcorn init' after each 'rcorn update' to refresh it."
+            f"Could not generate the skillset wiring doc: {exc}\n"
+            f"  Where: {wiring_doc_path(target_dir)}\n"
+            f"  How to fix: check write permissions under .agents/skills, "
+            f"then rerun 'rcorn init'."
         )
+
+
+def _link_claude_skills(target_dir: Path) -> None:
+    """Maintain the .claude/skills compatibility link (see skillset.installer).
+
+    The link is shared infrastructure — `rcorn skills install/update` has to
+    maintain the same link — so the behavior lives in
+    `reinicorn.skillset.installer.maintain_link`, which also honors the
+    configured skills dir/link paths.
+    """
+    from reinicorn.skillset.installer import maintain_link
+
+    maintain_link(target_dir)
 
 
 _CHECK_AGENTS_SCRIPT = """\

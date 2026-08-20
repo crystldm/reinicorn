@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 from reinicorn.assets import _DATA_DIR, get_asset_path
+from reinicorn.git import reinicorn_root
 
 
 def test_bundled_assets_found_when_data_dir_exists(tmp_path: Path):
@@ -65,9 +67,50 @@ def test_using_reinicorn_update_guidance_excludes_agents() -> None:
 
     assert update_rows == [
         "| `rcorn update [--diff X]` | Re-sync bundled files "
-        "(skills, hooks, linters) to the installed Reinicorn version |"
+        "(native skills, hooks, linters) to the installed Reinicorn version |"
     ]
     assert "AGENTS" not in update_rows[0]
+
+
+def test_using_reinicorn_defers_to_wiring_doc():
+    """using-reinicorn routes doc authoring through the generated wiring
+    doc and states the no-adapter fallback, instead of hardcoding doc
+    types or skill names."""
+    skill = get_asset_path(".agents/skills/using-reinicorn/SKILL.md")
+    assert skill is not None
+    text = skill.read_text()
+
+    assert "references/skillset-wiring.md" in text
+    assert "the creation command alone is the contract" in text
+
+
+def test_native_skill_set_is_exactly_two_tracked_dirs():
+    """After the superpowers-fork cutover, `.agents/skills/` tracks only the
+    two Reinicorn-native skills; the 13 forked skills, `update-superpowers/`,
+    and `ATTRIBUTION.md` are gone from git — they live in the superpowers
+    adapter (`adapters/superpowers/`) or an adapter install instead.
+
+    This checks `git ls-files`, not directory contents: an adapter install
+    (`rcorn skills install superpowers`) populates `.agents/skills/` with
+    gitignored files on disk, so a filesystem-iteration check would wrongly
+    fail once this repo dogfoods its own adapter.
+    """
+    root = reinicorn_root()
+    assert root is not None
+    result = subprocess.run(
+        ["git", "ls-files", ".agents/skills"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    prefix = ".agents/skills/"
+    tracked = [
+        line[len(prefix):] for line in result.stdout.splitlines()
+        if line.startswith(prefix)
+    ]
+    top_level_dirs = sorted({line.split("/", 1)[0] for line in tracked})
+    assert top_level_dirs == ["populate-agents-md", "using-reinicorn"]
 
 
 def test_doc_review_cleanup_workflow_asset_resolves():

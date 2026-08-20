@@ -1,68 +1,65 @@
 ---
 name: using-reinicorn
-description: Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions
+description: Use when starting any conversation in a Reinicorn-managed repo - explains the kb doc layer, how registered doc types map to skills via the generated wiring doc, and the rcorn CLI.
 ---
 
 <SUBAGENT-STOP>
 If you were dispatched as a subagent to execute a specific task, ignore this skill.
 </SUBAGENT-STOP>
 
-<EXTREMELY-IMPORTANT>
-If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill.
+# Using Reinicorn
 
-IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
+Reinicorn manages a knowledge base (kb) of project docs and the discipline
+around them. It takes no position on methodology — how you brainstorm, plan,
+debug, or review comes from whatever skill set is installed. Reinicorn owns
+three things:
 
-This is not negotiable. You cannot rationalize your way out of this.
-</EXTREMELY-IMPORTANT>
+1. **Where docs live** — the kb, one scope per repo.
+2. **How docs are created** — through `rcorn`, never by hand.
+3. **Which skills gate which docs** — the wiring doc, generated from the
+   doc-type registry.
 
-## How to Access Skills
+## Doc-Type Wiring
 
-Skills live in `.agents/skills/` (with `.claude/skills` symlinked to it for Claude Code) and are loaded automatically by your platform (Claude Code, GitHub Copilot, Cursor). When a skill loads, its instructions appear in your context -- follow them directly.
+Before authoring any registered doc type, consult
+`references/skillset-wiring.md` (generated — lists every registered doc
+type, its creation command, and the skill(s) to invoke first). Invoke the
+listed skill(s) before creating the doc. When a doc type lists no skills
+(no skill-set adapter installed), the creation command alone is the contract:
+create the doc directly via the CLI.
 
-- **Claude Code:** Use the `Skill` tool to invoke skills by name.
-- **GitHub Copilot / Cursor:** Skills auto-load when your request matches a skill's description, or invoke via `/skill-name`.
+## Doc Creation Rule
 
-Never use the Read tool on skill files -- always use your platform's native skill mechanism.
+Every kb doc is created with its registered command (`rcorn <type> create
+...`, exact form per type in the wiring doc) — never hand-written into the
+kb's protected paths. The CLI owns placement, naming, templates, and
+frontmatter; hand-written docs break linting and review tooling.
 
-## The Rule
+## Skills
 
-**Invoke relevant or requested skills BEFORE any response or action** — including clarifying questions, exploring the codebase, or checking files. If it turns out wrong for the situation, you don't have to use it.
+Skills live in your skills directory (default `.agents/skills/`,
+configurable; `.claude/skills` is linked to it for Claude Code) and load
+through your platform's native mechanism — never use the Read tool on a
+skill file.
 
-**Before entering plan mode:** if you haven't already brainstormed, invoke the brainstorming skill first.
+- **Claude Code:** invoke skills with the `Skill` tool.
+- **GitHub Copilot / Cursor:** skills auto-load when a request matches, or
+  invoke via `/skill-name`.
 
-Then announce "Using [skill] to [purpose]" and follow the skill exactly. If it has a checklist, create a todo per item.
+Invoke a relevant skill *before* responding or acting — including before
+clarifying questions or codebase exploration — and announce "Using [skill]
+to [purpose]". Process skills (debugging, planning, review) come from your
+installed skill set; when a task matches one, it applies.
 
-## Skill Priority
-
-When multiple skills apply, process skills come first — they set the approach, then implementation skills carry it out. brainstorming and systematic-debugging are the most common process skills, but the rule holds for any of them.
-
-- "Let's build X" → brainstorming first, then implementation skills.
-- "Fix this bug" → systematic-debugging first, then domain skills.
-
-Before any creative work, check golden principles (see below).
-
-## Red Flags
-
-These thoughts mean STOP—you're rationalizing:
-
-| Thought | Reality |
-|---------|---------|
-| "This is just a simple question" | Questions are tasks. Check for skills. |
-| "I need more context first" | Skill check comes BEFORE clarifying questions. |
-| "Let me explore the codebase first" | Skills tell you HOW to explore. Check first. |
-| "I can check git/files quickly" | Files lack conversation context. Check for skills. |
-| "Let me gather information first" | Skills tell you HOW to gather information. |
-| "This doesn't need a formal skill" | If a skill exists, use it. |
-| "I remember this skill" | Skills evolve. Read current version. |
-| "This doesn't count as a task" | Action = task. Check for skills. |
-| "The skill is overkill" | Simple things become complex. Use it. |
-| "I'll just do this one thing first" | Check BEFORE doing anything. |
-| "This feels productive" | Undisciplined action wastes time. Skills prevent this. |
-| "I know what that means" | Knowing the concept ≠ using the skill. Invoke it. |
+Two native skills (`using-reinicorn`, `populate-agents-md`) ship with
+Reinicorn and are managed by `rcorn update`. Everything else comes from a
+skill-set adapter (`rcorn skills install <name>`) and is managed by the
+`rcorn skills` commands.
 
 ## Platform Adaptation
 
-If your harness appears here, read its reference file for special instructions:
+If your harness appears here, read its reference file for special
+instructions:
 
 - Codex: `references/codex-tools.md`
 
@@ -73,43 +70,34 @@ overlap), not usage — use `rcorn help` / `rcorn --help` for the manual.
 
 | Command | Purpose |
 |---|---|
+| `rcorn <type> create ...` | Create a kb doc of any registered type (creation commands per type: see the wiring doc) |
+| `rcorn <type> show [...] [--full]` | Read a kb doc, truncated preview (`--full` for all) |
+| `rcorn <type> list` | List kb docs of that type |
 | `rcorn kb sync` | Pull latest kb state |
 | `rcorn kb publish` | Push kb changes (rebase + push) |
-| `rcorn kb status` | Kb health, active plans, overlap, stale docs |
-| `rcorn kb status --compact` | ≤10-line dashboard for agent context (session-start hook) |
+| `rcorn kb status [--compact]` | Kb health, active plans, overlap, stale docs |
 | `rcorn kb lint` | Run kb lint rules |
 | `rcorn kb list` | List repo scopes in the kb |
 | `rcorn kb remove-scope <name>` | Remove a repo scope |
 | `rcorn kb git <args...>` | Raw git passthrough inside the kb |
-| `rcorn spec create "title"` | Create a spec (implementation contract) |
-| `rcorn prd create "title"` | Create a product requirements doc |
-| `rcorn debt create "title"` | Create a tech-debt doc |
-| `rcorn idea create "text"` | Capture an idea |
-| `rcorn <spec\|prd\|debt\|idea> show <slug> [--full]` | Read a kb doc, truncated preview (`--full` for all) |
-| `rcorn <spec\|prd\|debt\|idea> list` | List kb docs of that type |
-| `rcorn plan create` | Create execution plan for current branch |
-| `rcorn plan status` | Plan status for current branch |
-| `rcorn plan show [branch] [--full]` | Show plan doc, truncated preview (`--full` for all) |
-| `rcorn plan complete [branch]` | Archive plan to completed/ |
-| `rcorn retro create` | Create retro for current branch |
-| `rcorn retro show [branch] [--full]` | Show retro doc, truncated preview (`--full` for all) |
 | `rcorn principle add "title"` | Append a golden principle |
+| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
+| `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn mode enable` / `disable` / `incognito` / `status` | Mode toggles |
 | `rcorn init [...]` | Set up Reinicorn in this repo |
 | `rcorn hooks install` | Install git and editor hooks |
-| `rcorn update [--diff X]` | Re-sync bundled files (skills, hooks, linters) to the installed Reinicorn version |
+| `rcorn update [--diff X]` | Re-sync bundled files (native skills, hooks, linters) to the installed Reinicorn version |
 | `rcorn feedback [text]` | Open a GitHub issue on the Reinicorn tool repo itself (bug/idea about Reinicorn, not your project) |
-
-## Doc Creation Rule
-
-All kb docs MUST be created via the per-type commands shown above. Never hand-write kb docs in protected paths (`kb/{repo}/specs/`, `kb/{repo}/prds/`, `kb/{repo}/tech-debt/`, `kb/{repo}/exec-plans/`, `kb/{repo}/ideas/`).
-
-Available types: spec, plan, prd, debt, retro, idea, principle
 
 ## Golden Principles
 
-Before starting work, check `kb/{repo}/golden-principles.md` for project-specific rules that override general practices.
+Before starting work, check `kb/{repo}/golden-principles.md` for
+project-specific rules that override general practices.
 
 ## User Instructions
 
-User instructions (CLAUDE.md, AGENTS.md, direct requests) take precedence over skills, which in turn override default behavior. Only skip skill workflows or instructions when your human partner has explicitly told you to.
+User instructions (CLAUDE.md, AGENTS.md, direct requests) take precedence
+over skills, which in turn override default behavior. Only skip skill
+workflows or instructions when your human partner has explicitly told you
+to.

@@ -157,6 +157,28 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     mode_sub.add_parser("status", help="Show active mode")
 
+    # ── Skills group ────────────────────────────────────────
+    skills_p = sub.add_parser(
+        "skills", help="Skill-set adapter management (install, status, update, list)"
+    )
+    skills_sub = skills_p.add_subparsers(dest="skills_command")
+    skills_sub.required = True
+    skills_install_p = skills_sub.add_parser("install", help="Install a skill-set adapter")
+    skills_install_p.add_argument(
+        "adapter", help="Bundled adapter name or path to an adapter directory"
+    )
+    skills_sub.add_parser("status", help="Installed adapter, pin, and local drift")
+    skills_update_p = skills_sub.add_parser(
+        "update", help="Re-fetch and re-apply the installed adapter"
+    )
+    skills_update_p.add_argument(
+        "--ref", dest="ref", default=None, help="New commit SHA to pin"
+    )
+    skills_update_p.add_argument(
+        "--force", action="store_true", help="Overwrite locally modified files"
+    )
+    skills_sub.add_parser("list", help="List bundled adapters")
+
     # ── Top-level (operate on reinicorn itself) ────────────────
     init_p = sub.add_parser("init", help="Set up reinicorn in this repo")
     init_source = init_p.add_mutually_exclusive_group()
@@ -291,6 +313,14 @@ _DISPATCH = {
     ("mode", "disable"): lambda _: _load("mode_cmds", "cmd_disable")(),
     ("mode", "incognito"): lambda _: _load("mode_cmds", "cmd_incognito")(),
     ("mode", "status"): lambda _: _load("mode_cmds", "cmd_mode_status")(),
+    ("skills", "install"): lambda a: _load("skills_cmds", "cmd_skills_install")(
+        a.adapter
+    ),
+    ("skills", "status"): lambda _: _load("skills_cmds", "cmd_skills_status")(),
+    ("skills", "update"): lambda a: _load("skills_cmds", "cmd_skills_update")(
+        ref=a.ref, force=a.force
+    ),
+    ("skills", "list"): lambda _: _load("skills_cmds", "cmd_skills_list")(),
     ("init", None): lambda a: _load("init", "cmd_init")(
         kb_url=getattr(a, "kb_url", None),
         local=getattr(a, "local", False),
