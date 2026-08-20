@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from reinicorn.config import skills_dir
-from reinicorn.doc_types import REGISTRY, TitleSource
+from reinicorn.doc_types import REGISTRY
 from reinicorn.skillset.adapter import AdapterError
 
 if TYPE_CHECKING:
@@ -82,12 +82,8 @@ def write_wiring(repo_root: Path, wiring: dict[str, WiringEntry] | None) -> Path
 
 
 def _create_command(dt: DocType) -> str:
-    """The `rcorn <key> <verb> ...` cell, shaped by the type's title source."""
-    if dt.title_source is TitleSource.TITLE:
-        return f'`rcorn {dt.key} {dt.create_verb} "<title>"`'
-    if dt.title_source is TitleSource.FREE_TEXT:
-        return f'`rcorn {dt.key} {dt.create_verb} "<text>"`'
-    return f"`rcorn {dt.key} {dt.create_verb}`"
+    """The `rcorn <key> <verb> ...` cell: `dt.create_hint`, markdown-code-quoted."""
+    return f"`{dt.create_hint}`"
 
 
 def _skills_cell(entry: WiringEntry | None) -> str:

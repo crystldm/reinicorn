@@ -335,7 +335,7 @@ def test_phantom_type_creates_with_no_other_change(kb_repo: Path):
     from reinicorn.doc_types import REGISTRY, Addressing, DocType
     phantom = DocType(
         key="phantom", dir_path="phantoms", filename="{slug}.md",
-        protected=True, create_hint='rcorn phantom create "<title>"',
+        protected=True,
         help_text="Phantom doc operations",
         template_body="\n## Body\n\n_Filled by {author} on {date}._\n",
         addressing=Addressing.SLUG,

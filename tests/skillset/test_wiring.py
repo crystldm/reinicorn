@@ -13,7 +13,7 @@ from reinicorn.skillset.wiring import render_wiring, write_wiring
 
 PHANTOM = DocType(
     key="phantom", dir_path="phantoms", filename="{slug}.md",
-    protected=True, create_hint='rcorn phantom create "<title>"',
+    protected=True,
     help_text="Phantom doc operations",
     template_body="\n## Body\n\n_Text._\n",
     addressing=Addressing.SLUG,

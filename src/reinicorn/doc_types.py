@@ -49,7 +49,6 @@ class DocType:
     dir_path: str  # Relative to repo-scoped dir (e.g. "specs")
     filename: str  # Pattern: "{slug}.md", "active/{branch}/plan.md", etc.
     protected: bool  # Whether direct kb edits are blocked
-    create_hint: str  # Exact CLI command that creates docs of this type
     help_text: str  # CLI group help, wired into cli.py's generated subparser
     # Creation body appended after the frontmatter + H1. File-mode bodies may
     # name {title} {author} {date} {sections} {text}; append-mode bodies
@@ -67,6 +66,22 @@ class DocType:
     required_sections: tuple[str, ...] = ()  # Linter checks these headers
     gated: bool = False  # Review-gated: create writes to drafts/, approval via the review lane
 
+    @property
+    def create_hint(self) -> str:
+        """Exact CLI command that creates docs of this type.
+
+        Derived from `create_verb`/`title_source`, not a hand-maintained
+        literal — a per-row literal here and `skillset.wiring`'s own
+        derivation used to encode the same fact twice and had drifted apart
+        (`"<idea>"` vs `"<text>"`). This is the single source; `wiring`
+        wraps it in markdown code quotes for the wiring doc's table cell.
+        """
+        if self.title_source is TitleSource.TITLE:
+            return f'rcorn {self.key} {self.create_verb} "<title>"'
+        if self.title_source is TitleSource.FREE_TEXT:
+            return f'rcorn {self.key} {self.create_verb} "<text>"'
+        return f"rcorn {self.key} {self.create_verb}"
+
 
 # Row order is meaningful: CLI groups render in registry order, and
 # by_dir() prefers earlier rows when two types share a dir_path
@@ -77,7 +92,6 @@ REGISTRY: dict[str, DocType] = {
         dir_path="specs",
         filename="{slug}.md",
         protected=True,
-        create_hint='rcorn spec create "<title>"',
         help_text="Spec doc operations (the implementation contract)",
         template_body=(
             "\n## Problem\n\n_Describe the problem._\n"
@@ -96,7 +110,6 @@ REGISTRY: dict[str, DocType] = {
         dir_path="prds",
         filename="{slug}.md",
         protected=True,
-        create_hint='rcorn prd create "<title>"',
         help_text="Product requirements doc operations",
         template_body=(
             "\n## Overview\n\n_One-paragraph summary._\n"
@@ -121,7 +134,6 @@ REGISTRY: dict[str, DocType] = {
         dir_path="tech-debt",
         filename="{slug}.md",
         protected=True,
-        create_hint='rcorn debt create "<title>"',
         help_text="Tech debt doc operations",
         template_body=(
             "\n## Impact\n\n_What this debt causes._\n"
@@ -142,7 +154,6 @@ REGISTRY: dict[str, DocType] = {
         dir_path="ideas",
         filename="{username}/{slug}.md",
         protected=True,
-        create_hint='rcorn idea create "<idea>"',
         help_text="Idea capture",
         template_body=(
             "\n## Description\n\n{text}\n"
@@ -157,7 +168,6 @@ REGISTRY: dict[str, DocType] = {
         dir_path="exec-plans",
         filename="active/{branch}/plan.md",
         protected=True,
-        create_hint="rcorn plan create",
         help_text="Execution plan operations",
         template_body="",  # fallback plan.md is frontmatter + H1 only
         addressing=Addressing.BRANCH,
@@ -171,7 +181,6 @@ REGISTRY: dict[str, DocType] = {
         dir_path="exec-plans",
         filename="completed/{branch}/retro.md",
         protected=True,
-        create_hint="rcorn retro create",
         help_text="Retrospective operations",
         template_body="{sections}",
         addressing=Addressing.BRANCH,
@@ -188,7 +197,6 @@ REGISTRY: dict[str, DocType] = {
         dir_path=".",
         filename="golden-principles.md",
         protected=False,
-        create_hint='rcorn principle add "<title>"',
         help_text="Golden principle operations",
         template_body=(
             "\n\n{num}. **{title}**\n"

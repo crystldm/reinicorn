@@ -11,7 +11,7 @@ from reinicorn.doc_types import REGISTRY, Addressing, DocType, TitleSource
 
 PHANTOM = DocType(
     key="phantom", dir_path="phantoms", filename="{slug}.md",
-    protected=True, create_hint='rcorn phantom create "<title>"',
+    protected=True,
     help_text="Phantom doc operations",
     template_body="\n## Body\n\n_Text._\n",
     addressing=Addressing.SLUG,
@@ -56,7 +56,7 @@ def test_phantom_create_end_to_end(kb_repo):
 
 PHANTOM_BRANCH = DocType(
     key="ghost", dir_path="ghosts", filename="active/{branch}/ghost.md",
-    protected=True, create_hint="rcorn ghost create",
+    protected=True,
     help_text="Ghost doc operations", template_body="",
     addressing=Addressing.BRANCH, title_source=TitleSource.NONE,
 )

@@ -132,6 +132,17 @@ def test_title_source_values():
         assert REGISTRY[key].title_source is TitleSource.TITLE
 
 
+def test_create_hint_is_derived_from_verb_and_title_source():
+    """create_hint has no hand-maintained literal — it is computed from
+    create_verb/title_source, the same facts `skillset.wiring` derives its
+    own create-command cell from (spec: the two must never be able to
+    disagree, as the hand-written `"<idea>"` vs derived `"<text>"` once did)."""
+    assert REGISTRY["spec"].create_hint == 'rcorn spec create "<title>"'
+    assert REGISTRY["idea"].create_hint == 'rcorn idea create "<text>"'
+    assert REGISTRY["plan"].create_hint == "rcorn plan create"
+    assert REGISTRY["principle"].create_hint == 'rcorn principle add "<title>"'
+
+
 def test_principle_append_mode():
     p = REGISTRY["principle"]
     assert p.create_verb == "add"
@@ -185,7 +196,7 @@ def test_registry_rejects_gated_non_slug_row():
     from reinicorn.doc_types import _validate_registry
     bad = DocType(
         key="phantom", dir_path="phantoms", filename="active/{branch}/doc.md",
-        protected=True, create_hint="rcorn phantom create",
+        protected=True,
         help_text="Phantom ops", template_body="",
         addressing=Addressing.BRANCH, gated=True,
     )
