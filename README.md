@@ -1,7 +1,14 @@
 # Reinicorn
 
-Reinicorn is a tool and skill set for managing agentic coding workflows in
-close collaboration with human developers. Inspired by OpenAI's
+Reinicorn is a doc-governance layer for agentic coding. It gives a team one
+shared knowledgebase for the `.md` files agents and humans generate (specs,
+plans, PRDs, retros, tech debt, ideas, golden principles) and some discipline
+around them. Docs are created through the `rcorn` CLI from registered
+templates, protected paths reject hand-written files, a linter checks what the
+templates can't, and specs go through a lightweight review lane before anything
+is built on them.
+
+Inspired by OpenAI's
 [Harness Engineering](https://openai.com/index/harness-engineering/) article,
 Reinicorn puts the principles outlined there into practice in a simple,
 straightforward way: a set of skills, hooks (both `git` and harness), and the
@@ -9,19 +16,25 @@ straightforward way: a set of skills, hooks (both `git` and harness), and the
 MCP, no vector database, no extra cloud storage (excuse the LLM-ism). It keeps
 your docs organized and helps minimize the slop.
 
-At the core of Reinicorn is a spec-driven-development workflow and a
-knowledgebase repository for keeping track of the `.md` files you generate.
-The methodology skills that drive that workflow are pluggable: install the
+Reinicorn takes no position on development methodology. How you brainstorm,
+plan, debug, or review comes from whatever skill set you install. Install the
 bundled adapter for [obra/superpowers](https://github.com/obra/superpowers)
-or bring your own (see [The skill set](#the-skill-set)). Every document comes
-from a template, so provenance and review status are first-class rather than
-something you remember to add.
+or bring your own (see [The skill layer](#the-skill-layer)). Reinicorn owns
+three things and leaves the rest alone:
 
-Specs get placed in `kb/<project-slug>/specs/drafts` and can then be put up for
-review. Organized metadata keeps track of all the details. When the review PR
-passes, the spec can be distilled into implementation plans. The code is
-reviewed as normal, of course, but having the team collaborate on and validate
-the intent first saves a lot of time and effort.
+1. Where docs live: the kb, a shared git clone with one scope per repo.
+2. How docs are created: through `rcorn`, from a registered template, never by
+   hand.
+3. Which skills gate which docs: a wiring doc generated from the doc-type
+   registry and the installed skill set.
+
+Every document comes from a template, so provenance and review status are
+first-class rather than something you remember to add. Specs get placed in
+`kb/<project-slug>/specs/drafts` and can then be put up for review. Organized
+metadata keeps track of all the details. When the review PR passes, the spec
+can be distilled into implementation plans. The code is reviewed as normal, of
+course, but having the team collaborate on and validate the intent first saves
+a lot of time and effort.
 
 The knowledgebase lives as a separate repository, always on its `main` branch
 except for single-doc review PRs. One `kb` can be shared across multiple
@@ -59,14 +72,19 @@ rcorn init
 `init` asks where the shared kb should live: an existing remote your team
 already shares, a new private GitHub repo (`--create-remote`, uses the `gh`
 CLI), or a local bare repo for solo experiments (`--local`). It then clones the
-kb, installs the git and editor hooks, and lays down the skills and agent
-instructions for your platforms.
+kb, installs the git and editor hooks, and lays down the native skills and
+agent instructions for your platforms. Optionally, add a methodology skill set
+(see [The skill layer](#the-skill-layer)):
+
+```bash
+rcorn skills install superpowers
+```
 
 The daily loop after that is two commands around your normal work:
 
 ```bash
 rcorn kb sync      # start of day: pull the latest shared kb state
-# ... work the skills: brainstorm → spec → plan → execute → retro ...
+# ... work: rcorn spec create, rcorn plan create, rcorn idea create, ...
 rcorn kb publish   # push your kb changes back
 ```
 
@@ -79,9 +97,10 @@ populating `AGENTS.md` on first run and troubleshooting.
 reinicorn/
 ├── AGENTS.md               # Universal agent entry point (sparse map)
 ├── GETTING-STARTED.md      # Setup and troubleshooting walkthrough
-├── src/reinicorn/          # The CLI: commands, kb/git plumbing, linter, doc-type registry
-├── .agents/skills/         # Canonical skill set (.claude/skills symlinks here)
-├── hooks/                  # Git hooks: post-checkout, post-merge, pre-push
+├── src/reinicorn/          # The CLI: commands, kb/git plumbing, linter, doc-type registry, skillset engine
+├── adapters/               # Bundled skill-set adapter definitions (superpowers)
+├── .agents/skills/         # Native skills (.claude/skills symlinks here); adapter skills install here, gitignored
+├── hooks/                  # Git hooks: pre-commit, post-checkout, post-merge, pre-push
 ├── editor-hooks/           # Editor guard hooks: doc-template + raw-kb-git guards
 ├── linters/                # Stack-agnostic kb lint framework and rules
 ├── platform-instructions/  # Per-platform pointer files (claude, cursor, copilot)
@@ -92,66 +111,82 @@ reinicorn/
 └── tests/                  # Test suite
 ```
 
-## The workflow
+## Doc governance
 
-Everything here follows from the harness engineering article's central claim:
-the repository is the source of truth. If context lives in a chat thread or in
-someone's head, agents can't see it. The kb is where it becomes visible to the
-whole team, including agents working on other branches. The workflow exists to
-get the important context written down, and to make sure it can be trusted
-once it is. The full set of beliefs behind the design is in
+Agent-assisted work produces documents faster than anyone can curate them.
+Left alone they end up scattered across `docs/`, chat logs, and PR
+descriptions, with no way to tell a draft from a decision or a stale plan from
+a live one. Everything here follows from the harness engineering article's
+central claim: the repository is the source of truth. If context lives in a
+chat thread or in someone's head, agents can't see it. The kb is where it
+becomes visible to the whole team, including agents working on other branches.
+The other belief doing heavy lifting here is mechanical enforcement over
+documented conventions: a rule that exists only in prose will eventually be
+violated, so wherever possible the rules are code. The full set of beliefs
+behind the design is in
 [core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md);
 several of them come up below.
 
-Work starts with a **spec**, the implementation contract: problem, design
-goals, design, non-goals. Specs come from wherever work comes from: a PRD, a
-roadmap conversation, a bug that exposed a design flaw, an idea captured weeks
-earlier. With the superpowers adapter installed (see [The skill
-set](#the-skill-set)), the brainstorming skill turns that raw intent into a
-design through dialogue; `rcorn spec create` turns the design into a draft in
-the kb either way. A draft only becomes authoritative after doc review (next
-section).
+### Doc types come from a registry
 
-With a spec in hand, work moves to a feature branch. `rcorn plan create`
-scaffolds an execution plan scoped to that branch (goal, acceptance criteria,
-tasks) and publishes it to the kb. Because every branch's plan is visible in
-one place, `rcorn kb status` can compare active branches and flag overlap
-before two people silently rewrite the same file. This is what the article
-calls cross-branch awareness. With the superpowers adapter installed, the
-executing-plans skill works the plan step by step; when the branch merges,
-`rcorn plan complete` archives it and asks for a retro, because lessons that
-never get written down are lost.
-
-Two capture commands sit outside the main loop. `rcorn idea create` is for
-the thought that strikes while you're doing something else: file it and stay
-on task, instead of losing it or chasing it. `rcorn debt create` catalogs tech
-debt as you encounter it. Debt compounds fast in agent-assisted codebases,
-since a shortcut taken today becomes a pattern agents replicate tomorrow.
-
-The other belief doing heavy lifting here is mechanical enforcement over
-documented conventions: a rule that exists only in prose will eventually be
-violated, so wherever possible the rules are code. Every document is created
-from a template through the CLI. The protected kb paths (`specs/`, `prds/`,
-`tech-debt/`, `exec-plans/`, `ideas/`) reject direct writes, so a doc can't
-exist without its provenance fields and required sections. `rcorn kb lint`
-checks cross-links, doc freshness, plan structure, and drafts referenced as if
-they were approved. Team taste gets the same treatment: `rcorn principle add`
-appends to the repo's golden principles, capturing a human preference once so
-it can be enforced continuously instead of re-litigated in every review.
+Every kind of document Reinicorn manages is a row in one registry, and that
+row defines the type: its directory in the kb, its filename pattern, its
+template body and required sections, whether it is protected, whether it is
+review-gated, and how it is addressed (by slug, by branch, or as a singleton).
+The CLI's `rcorn <type> create|show|list` groups, the linter's section checks,
+the editor guards, and the skill wiring doc are all generated from those rows.
+Adding or renaming a doc type means editing the registry instead of sweeping
+through the codebase.
 
 The document types, each with its template and protected location:
 
 | Type | Create command | What it is |
 |------|----------------|------------|
-| spec | `rcorn spec create "<title>"` | The implementation contract: problem, design goals, design, non-goals |
+| spec | `rcorn spec create "<title>"` | The implementation contract: problem, design goals, design, non-goals. Review-gated. |
 | prd | `rcorn prd create "<title>"` | Product requirements: overview, user stories, acceptance criteria, out of scope |
 | plan | `rcorn plan create` | Per-branch execution plan: goal, acceptance criteria, tasks |
 | retro | `rcorn retro create` | Per-branch retrospective: what went well, what to improve, lessons, actions |
 | debt | `rcorn debt create "<title>"` | Tech-debt entry: impact and remediation plan |
-| idea | `rcorn idea create "<idea>"` | Quick capture, filed by author |
+| idea | `rcorn idea create "<text>"` | Quick capture, filed by author |
 | principle | `rcorn principle add "<title>"` | Appends a golden principle to the repo's ruleset |
 
-### Doc review
+### Every doc is created through the CLI
+
+`rcorn <type> create` lays down the frontmatter (type, slug, lifecycle,
+status, author, origin, `human_validated`) and the required sections from the
+registry template. The protected kb paths (`specs/`, `prds/`, `tech-debt/`,
+`exec-plans/`, `ideas/`) reject direct writes through editor hooks on Claude
+Code, Cursor, and Copilot, so a doc can't exist without its provenance fields
+and required sections. `rcorn kb git` is the only sanctioned way to touch the
+clone's git state. The hooks apply regardless of which skill set is installed,
+so a methodology that likes to write `docs/plans/whatever.md` still ends up
+going through `rcorn plan create`.
+
+Plans are the one type bound to a branch rather than a slug. `rcorn plan
+create` scaffolds the plan for the current branch and publishes it to the kb.
+Because every branch's plan is visible in one place, `rcorn kb status` can
+compare active branches and flag overlap before two people silently rewrite
+the same file. This is what the article calls cross-branch awareness. When the
+branch merges, `rcorn plan complete` archives it and asks for a retro, because
+lessons that never get written down are lost.
+
+Two capture types sit outside any workflow. `rcorn idea create` is for the
+thought that strikes while you're doing something else: file it and stay on
+task, instead of losing it or chasing it. `rcorn debt create` catalogs tech
+debt as you encounter it. Debt compounds fast in agent-assisted codebases,
+since a shortcut taken today becomes a pattern agents replicate tomorrow.
+
+### The linter checks what templates can't
+
+`rcorn kb lint` runs the rules in `linters/`: frontmatter is valid,
+cross-links resolve, index files are fresh, plans have their required
+structure, and no plan builds on a spec that is still a draft. Team taste gets
+the same treatment: `rcorn principle add` appends to the repo's golden
+principles, capturing a human preference once so it can be enforced
+continuously instead of re-litigated in every review. Principles are meant to
+be mechanical: if you can't imagine a lint rule for it, it's a convention.
+
+### Specs go through review
 
 Specs shape everything built after them, so they get the same review treatment
 as code. The process stays lightweight, though: corrections are cheap and
@@ -172,8 +207,52 @@ your working copy stays put. Merging (from the CLI or the GitHub UI) flips the
 draft to `approved` at its canonical `specs/<slug>.md` path, and `rcorn review
 setup` installs a small CI workflow so a browser merge finishes the cleanup on
 its own. `gh` is optional at every step; without it, reinicorn pushes the
-branch and hands you the PR link to open yourself. `rcorn kb lint` warns when
-a plan builds on a spec that never got approved.
+branch and hands you the PR link to open yourself.
+
+Review gating is a registry flag, so each project decides which types are
+gated. Specs ship gated; ideas and debt don't.
+
+## The skill layer
+
+Skills live in `.agents/skills/` (the Agent Skills open standard, configurable)
+and load automatically on Claude Code, Cursor, GitHub Copilot, and Codex.
+Reinicorn ships two native skills, managed by `rcorn update`:
+
+- `using-reinicorn`: the doc-lifecycle contract (where docs live, the
+  creation rule, and the wiring doc); loads first, every session
+- `populate-agents-md`: fill in `AGENTS.md` through guided dialogue
+
+That's the whole native opinion. Methodology (brainstorming, planning, TDD,
+debugging, code review, worktrees, and so on) comes from a **skill-set
+adapter** you install:
+
+```bash
+rcorn skills install superpowers
+```
+
+An adapter is a declarative definition (`adapters/<name>/adapter.yaml`): an
+upstream repo pinned to a commit, an explicit list of skills to take, git
+patches plus append blocks that make those skills kb-compatible (write docs
+through `rcorn`, respect protected paths), and a wiring map from doc types to
+the skills that should run before creating them. Same adapter plus same pin
+gives byte-identical output, and a patch that no longer applies fails the
+install loudly instead of landing half-way. The repo contains no forked
+third-party skill text, only adapter definitions, and adapter-installed skills
+are gitignored in your project, with a lockfile at
+`.reinicorn/skillset-lock.json` tracking the pin and per-file hashes.
+
+The bundled `superpowers` adapter installs a pinned build of
+[obra/superpowers](https://github.com/obra/superpowers). `rcorn skills list`
+shows bundled adapters, `rcorn skills status` reports what's installed and
+whether you've edited it locally, and `rcorn skills update` re-applies or
+re-pins. `rcorn skills install ./path/to/adapter` wires up a house skill set
+the same way.
+
+Whichever skill set (if any) is installed, the generated wiring doc at
+`.agents/skills/using-reinicorn/references/skillset-wiring.md` maps every
+registered doc type to its creation command and the skill(s) to invoke first.
+With no adapter installed, the creation commands alone are the contract; the
+kb, the templates, the hooks, and the linter all work standalone.
 
 ## The CLI
 
@@ -209,46 +288,14 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
 | `rcorn review setup` | Install kb-repo CI cleanup workflow + ruleset |
 | `rcorn principle add "title"` | Append a golden principle |
-| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills install <name\|path>` | Install a skill-set adapter (bundled name or local directory) |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn mode enable\|disable\|incognito\|status` | Mode toggles |
 | `rcorn init [...]` | Set up reinicorn in this repo |
 | `rcorn hooks install` | Install git and editor hooks |
-| `rcorn update [--diff X]` | Re-sync bundled files (skills, hooks, linters) to the installed version |
+| `rcorn update [--diff X]` | Re-sync bundled files (native skills, hooks, linters) to the installed version |
 | `rcorn feedback [text]` | Open a GitHub issue on the reinicorn repo itself |
-
-## The skill set
-
-Skills live in `.agents/skills/` (the Agent Skills open standard) and load
-automatically on Claude Code, Cursor, GitHub Copilot, and Codex. Reinicorn
-ships two native skills and takes no position on development methodology
-beyond them:
-
-- `using-reinicorn`: how to find and use skills; loads first, every session
-- `populate-agents-md`: fill in `AGENTS.md` through guided dialogue
-
-Methodology (brainstorming, planning, TDD, code review, worktrees, and so on)
-comes from a **skill-set adapter** you install:
-
-```bash
-rcorn skills install superpowers
-```
-
-This fetches a pinned, kb-compatible build of
-[obra/superpowers](https://github.com/obra/superpowers) — brainstorming,
-writing-plans, executing-plans, test-driven-development,
-systematic-debugging, and the rest of that pack — patched to write docs
-through `rcorn` instead of its own conventions. `rcorn skills list` shows
-bundled adapters, and `rcorn skills status` reports what's installed. You can
-also point `rcorn skills install` at your own adapter definition to wire up
-a house skill set.
-
-Whichever skill set (if any) is installed, `using-reinicorn`'s generated
-wiring doc
-([`.agents/skills/using-reinicorn/references/skillset-wiring.md`](.agents/skills/using-reinicorn/references/skillset-wiring.md))
-maps every doc type to its creation command and the skill(s) to invoke first;
-with no adapter installed, the creation commands alone are the contract.
 
 ## KB as a shared clone
 
@@ -259,16 +306,15 @@ is what makes cross-branch context and overlap detection possible. On a
 fresh checkout of your repo, `rcorn kb sync` bootstraps `kb/` from scratch —
 there's no pointer to check out, so nothing to forget to init.
 
-The clone design is also what enables multi-repo support, unchanged from
-before. Several repos can attach the same kb repo, and each gets its own
-top-level scope directory named after its repo slug (`kb/reinicorn/`,
-`kb/my-service/`). All doc types live inside that scope, so projects sharing
-one kb never collide, while agents working in any repo can see the others'
-context. `rcorn init` is additive (safe to run against a kb that already
-holds other repos' scopes), and `rcorn kb list` / `rcorn kb remove-scope
-<name>` manage the scopes.
+The clone design is also what enables multi-repo support. Several repos can
+attach the same kb repo, and each gets its own top-level scope directory
+named after its repo slug (`kb/reinicorn/`, `kb/my-service/`). All doc types
+live inside that scope, so projects sharing one kb never collide, while
+agents working in any repo can see the others' context. `rcorn init` is
+additive (safe to run against a kb that already holds other repos' scopes),
+and `rcorn kb list` / `rcorn kb remove-scope <name>` manage the scopes.
 
-As promised in the intro, nobody manages the kb checkout by hand:
+Nobody manages the kb checkout by hand:
 
 - `rcorn kb sync` clones `kb/` if it's missing, pulls the latest kb state, and
   reports overlap.
@@ -297,10 +343,12 @@ or open an issue directly. Code and docs contributions are welcome too: see
 ## References
 
 - [OpenAI: Harness Engineering](https://openai.com/index/harness-engineering/): the article that inspired the project.
-- [obra/superpowers](https://github.com/obra/superpowers): the upstream for the bundled `superpowers` skill-set adapter.
 - [core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md): the operating principles, adapted from the article for this project.
 - [axi principles](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/agent-native-output-surface-axi-principles.md): the agent-experience rules the CLI's output follows.
+- [Skill-base agnostic Reinicorn](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/skill-base-agnostic-reinicorn-adapter-infrastructure-for-ext.md): why methodology comes from adapters instead of forked skills.
+- [Registry-driven doc types](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/registry-driven-doc-types.md): the doc-type registry that generates the CLI, linter, and wiring.
 - [Remove the kb submodule](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/remove-the-kb-submodule.md): why the kb is a plain clone instead of a git submodule.
+- [obra/superpowers](https://github.com/obra/superpowers): the upstream for the bundled `superpowers` skill-set adapter.
 
 ## License
 
