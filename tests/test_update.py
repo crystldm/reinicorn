@@ -413,6 +413,32 @@ def test_update_does_not_readd_deleted_agents_file(tmp_path: Path):
     assert not (repo / "AGENTS.md").is_file()
 
 
+def test_update_readd_prompt_non_interactive_skips_without_crashing(
+    tmp_path: Path, capsys,
+) -> None:
+    """The "was deleted. Re-add?" prompt goes through `console.confirm`, not
+    raw `input()` — a non-interactive run (agent, CI, closed stdin) must not
+    raise EOFError, and must leave the deleted file deleted rather than
+    taking silence for a "yes"."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    skill_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    skill_file.unlink()
+    assets = _setup_package_assets(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("builtins.input", side_effect=AssertionError("must not call input() directly")):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert not skill_file.is_file()
+    out = capsys.readouterr().out
+    assert "Skipped: 1 files" in out
+
+
 def test_update_diff_shows_changes(tmp_path: Path, capsys):
     """--diff flag shows diff between repo and upstream."""
     from reinicorn.commands.update import cmd_update

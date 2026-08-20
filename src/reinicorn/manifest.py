@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 from reinicorn.config import skills_dir
 from reinicorn.identity import MANIFEST_FILE_NAME, STATE_DIR_NAME
-from reinicorn.skillset.lockfile import read_lock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -55,8 +54,13 @@ def _lock_owned_paths(repo_root: Path) -> set[str]:
     skills-dir-relative) are `rcorn skills`-managed, not `rcorn
     update`-managed — they must never appear in the asset manifest. Reads
     the lock lazily and tolerates its absence: no lock means no adapter is
-    installed, so nothing is excluded.
+    installed, so nothing is excluded. `read_lock` is imported here, not at
+    module top, for the same reason `_generated_paths` lazily imports
+    `wiring`: avoid a needless import-time dependency on the skillset
+    package (and its `yaml` import) for callers that never touch it.
     """
+    from reinicorn.skillset.lockfile import read_lock
+
     lock = read_lock(repo_root)
     if lock is None:
         return set()

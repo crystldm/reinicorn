@@ -354,10 +354,12 @@ def cmd_update(*, diff_target: str | None = None) -> int:
                     print(f"    Run: rcorn update --diff {rel_path}")
                     counts["skipped"] += 1
             else:
-                answer = input(
-                    f"  {rel_path} was deleted. Re-add? [y/N] "
-                ).strip().lower()
-                if answer == "y":
+                # console.confirm, not raw input(): a non-interactive run
+                # (agent, CI, closed stdin) gets False without blocking or
+                # raising EOFError, and just skips re-adding this file —
+                # same defect class as the fork migration prompt fixed in
+                # f6d112c.
+                if console.confirm(f"{rel_path} was deleted. Re-add?"):
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src_path, dest)
                     counts["added"] += 1
