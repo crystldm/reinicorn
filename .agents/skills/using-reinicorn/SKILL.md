@@ -24,9 +24,9 @@ three things:
 Before authoring any registered doc type, consult
 `references/skillset-wiring.md` (generated — lists every registered doc
 type, its creation command, and the skill(s) to invoke first). Invoke the
-listed skill(s) before creating the doc. When a doc type lists no skills
-(no skill-set adapter installed), the creation command alone is the contract:
-create the doc directly via the CLI.
+listed skill(s) before creating the doc. When a doc type lists no skills,
+the creation command alone is the contract: create the doc directly via
+the CLI.
 
 ## Doc Creation Rule
 

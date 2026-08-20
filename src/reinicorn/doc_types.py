@@ -50,7 +50,7 @@ class DocType:
     filename: str  # Pattern: "{slug}.md", "active/{branch}/plan.md", etc.
     protected: bool  # Whether direct kb edits are blocked
     create_hint: str  # Exact CLI command that creates docs of this type
-    help_text: str  # CLI group help (hand-written in cli.py until stage 2)
+    help_text: str  # CLI group help, wired into cli.py's generated subparser
     # Creation body appended after the frontmatter + H1. File-mode bodies may
     # name {title} {author} {date} {sections} {text}; append-mode bodies
     # (CreateMode.APPEND) are formatted with {num} and {title} only.

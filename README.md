@@ -209,6 +209,9 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
 | `rcorn review setup` | Install kb-repo CI cleanup workflow + ruleset |
 | `rcorn principle add "title"` | Append a golden principle |
+| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
+| `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn mode enable\|disable\|incognito\|status` | Mode toggles |
 | `rcorn init [...]` | Set up reinicorn in this repo |
 | `rcorn hooks install` | Install git and editor hooks |

@@ -24,7 +24,7 @@ Before authoring any registered doc type, consult
 `<skills-dir>/using-reinicorn/references/skillset-wiring.md` (generated —
 lists every doc type, its creation command, and the skill(s) to invoke
 first). Invoke the listed skill(s) before creating the doc. When a doc
-type lists no skills, no skill-set adapter is installed — the creation
-command alone is the contract.
+type lists no skills, the creation command alone is the contract: create
+the doc directly via the CLI.
 
 Available types: spec, plan, prd, debt, retro, idea, principle
