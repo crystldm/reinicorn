@@ -35,7 +35,7 @@ _MIGRATION_PROMPT = (
     "These are now provided by the 'superpowers' skill-set adapter instead.\n"
     "Migrate now? Installs the adapter (network required) and removes the old\n"
     "copies; locally modified files are kept. Answer 'n' to keep the old forks\n"
-    "and never ask again (rcorn skills install superpowers migrates later). [y/N] "
+    "and never ask again (rcorn skills install superpowers migrates later)."
 )
 
 
@@ -176,8 +176,13 @@ def _maybe_migrate_legacy_forks(
     if not legacy:
         return
 
-    answer = input(_MIGRATION_PROMPT).strip().lower()
-    if answer != "y":
+    if not console.is_interactive():
+        # Nobody is there to answer. Skipping outright — rather than taking
+        # silence for a "no" — keeps the durable opt-out something the user
+        # actually chose, and leaves a later interactive run free to ask.
+        return
+
+    if not console.confirm(_MIGRATION_PROMPT):
         config_set(SKILLSET_MIGRATION_KEY, "declined", repo_root)
         return
 

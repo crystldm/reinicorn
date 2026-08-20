@@ -548,7 +548,7 @@ _MIGRATION_PROMPT_TEXT = (
     "These are now provided by the 'superpowers' skill-set adapter instead.\n"
     "Migrate now? Installs the adapter (network required) and removes the old\n"
     "copies; locally modified files are kept. Answer 'n' to keep the old forks\n"
-    "and never ask again (rcorn skills install superpowers migrates later). [y/N] "
+    "and never ask again (rcorn skills install superpowers migrates later)."
 )
 
 
@@ -569,11 +569,12 @@ def test_update_migrates_legacy_forks_on_yes(tmp_path: Path) -> None:
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
          patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
          patch("reinicorn.commands.update.install_adapter") as mock_install, \
-         patch("builtins.input", return_value="y") as mock_input:
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch("reinicorn.console.confirm", return_value=True) as mock_confirm:
         rc = cmd_update()
 
     assert rc == 0
-    assert mock_input.call_args.args[0] == _MIGRATION_PROMPT_TEXT
+    assert mock_confirm.call_args.args[0] == _MIGRATION_PROMPT_TEXT
     assert mock_install.call_count == 1
     adapter_arg, repo_arg = mock_install.call_args.args
     assert adapter_arg.name == "superpowers"
@@ -616,7 +617,8 @@ def test_update_migration_preserves_user_authored_skill(tmp_path: Path) -> None:
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
          patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
          patch("reinicorn.commands.update.install_adapter") as mock_install, \
-         patch("builtins.input", return_value="y"):
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch("reinicorn.console.confirm", return_value=True):
         rc = cmd_update()
 
     assert rc == 0
@@ -650,7 +652,8 @@ def test_update_migration_preserves_locally_modified_fork(
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
          patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
          patch("reinicorn.commands.update.install_adapter") as mock_install, \
-         patch("builtins.input", return_value="y"):
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch("reinicorn.console.confirm", return_value=True):
         rc = cmd_update()
 
     assert rc == 0
@@ -700,7 +703,11 @@ def test_update_migration_skipped_when_lock_present(tmp_path: Path) -> None:
     with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
          patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
-         patch("builtins.input", side_effect=AssertionError("must not prompt")):
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch(
+             "reinicorn.console.confirm",
+             side_effect=AssertionError("must not prompt"),
+         ):
         rc = cmd_update()
 
     assert rc == 0
@@ -722,7 +729,8 @@ def test_update_migration_decline_records_opt_out(tmp_path: Path) -> None:
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
          patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
          patch("reinicorn.commands.update.install_adapter") as mock_install, \
-         patch("builtins.input", return_value="n"):
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch("reinicorn.console.confirm", return_value=False):
         rc = cmd_update()
 
     assert rc == 0
@@ -735,12 +743,48 @@ def test_update_migration_decline_records_opt_out(tmp_path: Path) -> None:
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
          patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
          patch("reinicorn.commands.update.install_adapter") as mock_install_2, \
-         patch("builtins.input", side_effect=AssertionError("must not prompt again")):
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch(
+             "reinicorn.console.confirm",
+             side_effect=AssertionError("must not prompt again"),
+         ):
         rc2 = cmd_update()
 
     assert rc2 == 0
     assert mock_install_2.call_count == 0
     assert fork_file.read_bytes() == before
+
+
+def test_update_migration_skipped_when_non_interactive(tmp_path: Path) -> None:
+    """A non-interactive run must neither crash nor answer for the user.
+
+    Agents, CI, and piped stdin cannot see a prompt: offering one there
+    either blew up on EOF or banked a permanent "declined" for a question
+    nobody was shown. The offer is skipped outright instead, so a later
+    interactive run still asks.
+    """
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.config import config_get
+    from reinicorn.identity import CONFIG_FILE_NAME, SKILLSET_MIGRATION_KEY
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.1.0")
+    assets = _setup_native_only_assets(tmp_path)
+    fork_file = repo / ".agents" / "skills" / "brainstorming" / "SKILL.md"
+    before = fork_file.read_bytes()
+
+    # No console patches: under pytest neither stdout nor stdin is a tty,
+    # which is exactly the non-interactive case under test.
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
+         patch("reinicorn.commands.update.install_adapter") as mock_install:
+        rc = cmd_update()
+
+    assert rc == 0
+    assert mock_install.call_count == 0
+    assert fork_file.read_bytes() == before
+    assert not (repo / CONFIG_FILE_NAME).exists()
+    assert config_get(SKILLSET_MIGRATION_KEY, root=repo) != "declined"
 
 
 def test_update_migration_runs_on_same_version(tmp_path: Path) -> None:
@@ -757,7 +801,8 @@ def test_update_migration_runs_on_same_version(tmp_path: Path) -> None:
          patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
          patch("reinicorn.commands.update._get_asset_sources", return_value=assets), \
          patch("reinicorn.commands.update.install_adapter") as mock_install, \
-         patch("builtins.input", return_value="y"):
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch("reinicorn.console.confirm", return_value=True):
         rc = cmd_update()
 
     assert rc == 0
@@ -791,7 +836,8 @@ def test_update_migration_failure_leaves_forks_and_does_not_record_declined(
              "reinicorn.commands.update.install_adapter",
              side_effect=AdapterError("offline: could not fetch obra/superpowers"),
          ), \
-         patch("builtins.input", return_value="y"):
+         patch("reinicorn.console.is_interactive", return_value=True), \
+         patch("reinicorn.console.confirm", return_value=True):
         rc = cmd_update()
 
     assert rc == 0
@@ -866,7 +912,8 @@ def _migration_patches(repo: Path, assets: Path, adapter_dir: Path, fake_fetch):
             lambda name: adapter_dir if name == "adapters/superpowers" else None,
         ),
         patch("reinicorn.skillset.installer.fetch_source", fake_fetch),
-        patch("builtins.input", return_value="y"),
+        patch("reinicorn.console.is_interactive", return_value=True),
+        patch("reinicorn.console.confirm", return_value=True),
     ]
 
 

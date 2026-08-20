@@ -88,6 +88,24 @@ def test_indentation_when_tty(capsys, monkeypatch):
 # ── confirm ──────────────────────────────────────────────────
 
 
+def test_is_interactive_requires_both_ends(monkeypatch):
+    """A prompt needs a terminal on both ends.
+
+    Callers that must tell "the user declined" from "nobody could answer"
+    check this first — `confirm` collapses both cases to False by design.
+    """
+    monkeypatch.setattr(console, "_is_tty", lambda: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    assert console.is_interactive() is True
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert console.is_interactive() is False
+
+    monkeypatch.setattr(console, "_is_tty", lambda: False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    assert console.is_interactive() is False
+
+
 def test_confirm_false_when_not_tty(monkeypatch, capsys):
     """Agent/CI (non-TTY) callers never block on a prompt — default No."""
     monkeypatch.setattr(console, "_is_tty", lambda: False)
