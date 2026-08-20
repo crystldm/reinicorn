@@ -210,7 +210,7 @@ def cmd_init(
         )
         if hooks_rc is None:
             return 1
-        _print_full_summary(hooks_rc, asset_slug)
+        _print_full_summary(hooks_rc, asset_slug, cwd)
         return 0
 
     r_root = reinicorn_root()
@@ -277,7 +277,7 @@ def cmd_init(
     if hooks_rc is None:
         return 1
     local_bare_path = str(cwd.parent / f"{cwd.name}-kb.git") if local else None
-    _print_full_summary(hooks_rc, slug, local_bare_path=local_bare_path)
+    _print_full_summary(hooks_rc, slug, cwd, local_bare_path=local_bare_path)
     return 0
 
 
@@ -563,8 +563,8 @@ def _regenerate_wiring_doc(target_dir: Path) -> None:
         console.warn(
             f"Could not generate the skillset wiring doc: {exc}\n"
             f"  Where: {wiring_doc_path(target_dir)}\n"
-            f"  How to fix: check write permissions under .agents/skills, "
-            f"then rerun 'rcorn init'."
+            f"  How to fix: check write permissions under "
+            f"{skills_dir(target_dir)}, then rerun 'rcorn init'."
         )
 
 
@@ -649,7 +649,9 @@ def _copy_lint_config(target_dir: Path) -> None:
     print()
 
 
-def _print_full_summary(hooks_rc: int, slug: str, *, local_bare_path: str | None = None) -> None:
+def _print_full_summary(
+    hooks_rc: int, slug: str, repo_root: Path, *, local_bare_path: str | None = None
+) -> None:
     """Print summary after full init."""
     print()
     if hooks_rc != 0:
@@ -660,11 +662,16 @@ def _print_full_summary(hooks_rc: int, slug: str, *, local_bare_path: str | None
     print()
     print("Next steps:")
     print()
+    skl_dir = skills_dir(repo_root).as_posix()
     print("  1. Review and customize AGENTS.md")
-    print("  2. Review .agents/skills/ for your workflow")
-    print(f"  3. Review {KB_DIR_NAME}/{slug}/golden-principles.md")
+    print(f"  2. Review {skl_dir}/ for your workflow")
     print(
-        "  4. Commit: git add .gitignore AGENTS.md "
+        "  3. rcorn skills install superpowers — installs a methodology "
+        "skill set (adapter)"
+    )
+    print(f"  4. Review {KB_DIR_NAME}/{slug}/golden-principles.md")
+    print(
+        "  5. Commit: git add .gitignore AGENTS.md "
         ".agents .claude .cursor .github .reinicorn CLAUDE.md .reinicorn-config"
     )
     print("     git commit -m 'chore: initialize reinicorn kb'")
