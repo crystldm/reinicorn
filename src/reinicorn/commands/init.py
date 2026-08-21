@@ -43,6 +43,7 @@ from reinicorn.github import (
 from reinicorn.identity import KB_SCOPE_KEY
 from reinicorn.kb_setup import KbSetupError, setup_kb_clone
 from reinicorn.manifest import MANIFEST_PATH, write_manifest
+from reinicorn.skillset.restore import ensure_adapter_files
 from reinicorn.validation import is_valid_scope_name
 
 if TYPE_CHECKING:
@@ -193,6 +194,9 @@ def cmd_init(
             ):
                 return 1
             hooks_rc = cmd_hooks_install()
+            # The committed lock names the adapter; the skill files may be
+            # gitignored, so a teammate's clone needs them brought back.
+            ensure_adapter_files(cwd)
             _print_teammate_summary(hooks_rc)
             return 0
         console.info(

@@ -1183,3 +1183,79 @@ def test_update_wiring_write_failure_warns_and_continues(
     assert "disk full" in captured.out
     # The rest of the sync still ran normally.
     assert (repo / ".agents/skills/brainstorming/SKILL.md").read_text() == "# Brainstorming v2\n"
+
+
+# --- Restore adapter files from the committed lock ---------------------------
+
+
+def _lock_demo_adapter(tmp_path: Path, repo: Path) -> Path:
+    """Install a demo adapter into *repo* so it has a lock, then chdir-able
+    adapter dir at tmp_path/demo for the lock's name to re-resolve."""
+    from reinicorn.skillset import installer
+    from reinicorn.skillset.adapter import load_adapter
+
+    adapter_dir = tmp_path / "demo"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter.yaml").write_text(
+        "name: demo\n"
+        "source:\n"
+        "  repo: acme/skills\n"
+        "  commit: 0123456789abcdef0123456789abcdef01234567\n"
+        "  annotation: v1.0.0\n"
+        "skills:\n"
+        "  skills/alpha: alpha\n"
+        "wiring:\n"
+        "  spec: [alpha]\n"
+    )
+    installer.install_adapter(load_adapter(adapter_dir), repo, cache_dir=tmp_path / "cache")
+    return repo / ".agents" / "skills" / "alpha" / "scratch.md"
+
+
+def test_update_restores_missing_adapter_files_from_lock(
+    tmp_path: Path, fake_skillset_fetch, monkeypatch
+) -> None:
+    """A fresh clone carries the lock but not the (gitignored) adapter files:
+    `rcorn update` brings them back, even when nothing else needs syncing."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.2.0")
+    assets = _setup_package_assets(tmp_path)
+    scratch = _lock_demo_adapter(tmp_path, repo)
+    scratch.unlink()
+    monkeypatch.chdir(tmp_path)
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert scratch.is_file()
+
+
+def test_update_continues_when_restore_fails(
+    tmp_path: Path, fake_skillset_fetch, monkeypatch, capsys
+) -> None:
+    """Offline is not a reason for `rcorn update` to fail: report, carry on."""
+    from reinicorn.commands.update import cmd_update
+    from reinicorn.skillset import restore
+    from reinicorn.skillset.adapter import AdapterError
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.2.0")
+    assets = _setup_package_assets(tmp_path)
+    scratch = _lock_demo_adapter(tmp_path, repo)
+    scratch.unlink()
+    monkeypatch.chdir(tmp_path)
+
+    def offline(*_a, **_k):
+        raise AdapterError("Failed to fetch: offline.")
+
+    monkeypatch.setattr(restore, "fetch_source", offline)
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        rc = cmd_update()
+
+    assert rc == 0
+    assert not scratch.exists()
+    assert "offline" in capsys.readouterr().out
