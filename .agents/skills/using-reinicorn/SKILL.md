@@ -81,7 +81,7 @@ overlap), not usage — use `rcorn help` / `rcorn --help` for the manual.
 | `rcorn kb remove-scope <name>` | Remove a repo scope |
 | `rcorn kb git <args...>` | Raw git passthrough inside the kb |
 | `rcorn principle add "title"` | Append a golden principle |
-| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills install [<name>]` | Install a skill-set adapter; no name restores the one the lockfile records |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn mode enable` / `disable` / `incognito` / `status` | Mode toggles |
