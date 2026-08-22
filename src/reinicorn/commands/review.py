@@ -11,6 +11,7 @@ follow-up command for the GitHub half.
 
 from __future__ import annotations
 
+import copy
 import functools
 import subprocess
 from datetime import date
@@ -495,26 +496,56 @@ def cmd_review_status() -> int:
     return 0
 
 
-_WORKFLOW_ASSET = "workflows/reinicorn-doc-review-cleanup.yml"
-_WORKFLOW_DEST = ".github/workflows/reinicorn-doc-review-cleanup.yml"
+# (bundled asset, kb-repo-relative destination) — every workflow `review
+# setup` installs and maintains. Both go through the same placeholder
+# substitution, modified-file refusal, and --force overwrite.
+_WORKFLOW_ASSETS: tuple[tuple[str, str], ...] = (
+    ("workflows/reinicorn-doc-review-cleanup.yml",
+     ".github/workflows/reinicorn-doc-review-cleanup.yml"),
+    ("workflows/reinicorn-doc-review-checks.yml",
+     ".github/workflows/reinicorn-doc-review-checks.yml"),
+)
 _REPO_PLACEHOLDER = "__REINICORN_REPO__"
+
+# The status-check contexts the ruleset requires on PRs into kb main. These
+# are the job `name:` values in reinicorn-doc-review-checks.yml — the two
+# must stay identical or every review PR is blocked forever.
+CHECK_DOC_LINT = "Doc lint"
+CHECK_CANDIDATE_INTEGRITY = "Candidate integrity"
+REQUIRED_CHECKS: tuple[str, ...] = (CHECK_DOC_LINT, CHECK_CANDIDATE_INTEGRITY)
+
+# Rule shape per the GitHub REST rulesets docs (2022-11-28): `context` is the
+# required per-check field; `strict_required_status_checks_policy` is
+# required and false here — a candidate need not be rebased onto the latest
+# main for its checks to count.
+_STATUS_CHECKS_RULE_TYPE = "required_status_checks"
+_STATUS_CHECKS_RULE = {
+    "type": _STATUS_CHECKS_RULE_TYPE,
+    "parameters": {
+        "strict_required_status_checks_policy": False,
+        "required_status_checks": [{"context": c} for c in REQUIRED_CHECKS],
+    },
+}
 
 _RULESET = {
     "name": "reinicorn-doc-review",
     "target": "branch",
     "enforcement": "active",
     "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
-    "rules": [{
-        "type": "pull_request",
-        "parameters": {
-            "required_approving_review_count": 1,
-            "dismiss_stale_reviews_on_push": True,
-            "require_code_owner_review": False,
-            "require_last_push_approval": False,
-            "required_review_thread_resolution": False,
-            "allowed_merge_methods": ["squash", "merge"],
+    "rules": [
+        {
+            "type": "pull_request",
+            "parameters": {
+                "required_approving_review_count": 1,
+                "dismiss_stale_reviews_on_push": True,
+                "require_code_owner_review": False,
+                "require_last_push_approval": False,
+                "required_review_thread_resolution": False,
+                "allowed_merge_methods": ["squash", "merge"],
+            },
         },
-    }],
+        _STATUS_CHECKS_RULE,
+    ],
     # Every push-capable role (write, maintain, admin) bypasses, so direct
     # `kb publish` pushes to main keep working for all collaborators — the kb
     # is push-first and this rule exists to give review PRs approval +
@@ -537,15 +568,62 @@ _REQUIRED_BYPASS = frozenset(
 )
 
 
-def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) -> None:
-    """Repair a same-named ruleset that is missing required bypass actors.
+def _installed_checks(rules: list[dict]) -> set[str]:
+    """Status-check contexts an installed ruleset already requires."""
+    contexts: set[str] = set()
+    for rule in rules:
+        if rule.get("type") != _STATUS_CHECKS_RULE_TYPE:
+            continue
+        params = rule.get("parameters") or {}
+        for check in params.get("required_status_checks") or []:
+            if isinstance(check, dict) and isinstance(check.get("context"), str):
+                contexts.add(check["context"])
+    return contexts
+
+
+def _merge_checks_rule(rules: list[dict]) -> list[dict]:
+    """*rules* with every REQUIRED_CHECKS context required.
+
+    An existing required_status_checks rule gains only the missing contexts
+    (user-added contexts and its strict-policy setting are preserved); when
+    none exists the canonical rule is appended. Other rules pass through
+    untouched — additive, never destructive.
+    """
+    merged: list[dict] = []
+    done = False
+    for rule in rules:
+        if done or rule.get("type") != _STATUS_CHECKS_RULE_TYPE:
+            merged.append(rule)
+            continue
+        params = dict(rule.get("parameters") or {})
+        checks = [
+            c for c in (params.get("required_status_checks") or [])
+            if isinstance(c, dict)
+        ]
+        present = {c.get("context") for c in checks}
+        checks += [{"context": c} for c in REQUIRED_CHECKS if c not in present]
+        params["required_status_checks"] = checks
+        params.setdefault("strict_required_status_checks_policy", False)
+        merged.append({**rule, "parameters": params})
+        done = True
+    if not done:
+        merged.append(copy.deepcopy(_STATUS_CHECKS_RULE))
+    return merged
+
+
+def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None:
+    """Repair a same-named ruleset that is missing required bypass actors or
+    the required status checks.
 
     Name-matching alone is not enough: a ruleset from an earlier Reinicorn
-    version can retain the same name while lacking the maintain-role bypass,
-    silently blocking `kb publish` for some collaborators. This fetches the
-    installed ruleset, compares its bypass actors against _REQUIRED_BYPASS as a
-    subset, and — only under --force — merges the missing required roles in
-    while preserving every user-added actor (additive, never destructive).
+    version can retain the same name while lacking the maintain-role bypass
+    (silently blocking `kb publish` for some collaborators) or the
+    required_status_checks rule (review PRs merge with red checks). This
+    fetches the installed ruleset, compares its bypass actors against
+    _REQUIRED_BYPASS and its required contexts against REQUIRED_CHECKS as
+    subsets, and — only under --force — merges the missing pieces in while
+    preserving every user-added actor, rule, and context (additive, never
+    destructive).
     """
     import json
     detail = github.run_gh("api", f"repos/{gh_repo}/rulesets/{ruleset_id}", check=False)
@@ -582,19 +660,36 @@ def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) 
             f"configuration — verify the maintain/write/admin bypass at {manual}"
         )
         return
+    rules = data.get("rules") or []
+    if not isinstance(rules, list) or not all(isinstance(r, dict) for r in rules):
+        console.warn(
+            "doc-review ruleset is installed but returned an unreadable "
+            f"configuration — verify its rules at {manual}"
+        )
+        return
     installed = {
         (a.get("actor_id"), a.get("actor_type"), a.get("bypass_mode"))
         for a in actors
     }
     missing = _REQUIRED_BYPASS - installed
-    if not missing:
+    missing_checks = [c for c in REQUIRED_CHECKS if c not in _installed_checks(rules)]
+    if not missing and not missing_checks:
         console.info("doc-review ruleset already installed")
         return
     if not force:
-        console.warn(
-            "doc-review ruleset is outdated — it lacks the maintain/write/admin "
-            "bypass, so some collaborators cannot push to kb main."
-        )
+        gaps = []
+        if missing:
+            gaps.append(
+                "lacks the maintain/write/admin bypass, so some collaborators "
+                "cannot push to kb main"
+            )
+        if missing_checks:
+            gaps.append(
+                "does not require the "
+                + ", ".join(f"'{c}'" for c in missing_checks)
+                + " status check(s), so review PRs can merge with them red"
+            )
+        console.warn("doc-review ruleset is outdated — it " + "; it ".join(gaps) + ".")
         console.next_step("rcorn review setup --force")
         return
     # Merge required roles into the installed set, rebuilding the PUT body from
@@ -622,10 +717,10 @@ def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) 
         "target": data.get("target", _RULESET["target"]),
         "enforcement": data.get("enforcement", _RULESET["enforcement"]),
         "bypass_actors": merged,
+        "rules": _merge_checks_rule(rules),
     }
-    for optional in ("conditions", "rules"):
-        if data.get(optional) is not None:
-            body[optional] = data[optional]
+    if data.get("conditions") is not None:
+        body["conditions"] = data["conditions"]
     r = github.run_gh(
         "api", f"repos/{gh_repo}/rulesets/{ruleset_id}", "--method", "PUT",
         "--input", "-", check=False, input_text=json.dumps(body),
@@ -633,7 +728,8 @@ def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) 
     if r.returncode == 0:
         console.success(
             "doc-review ruleset updated — merged the missing maintain/write/admin "
-            "bypass actors (existing actors preserved)"
+            "bypass actors and required status checks (existing configuration "
+            "preserved)"
         )
     else:
         console.warn(
@@ -643,41 +739,53 @@ def _reconcile_ruleset_bypass(gh_repo: str, ruleset_id: object, *, force: bool) 
 
 
 def cmd_review_setup(force: bool = False) -> int:
-    """Install the doc-review CI cleanup workflow and a best-effort ruleset.
+    """Install the doc-review CI workflows (post-merge cleanup, PR status
+    checks) and a best-effort ruleset.
 
     Not mode-gated: this configures the kb repo's automation, it doesn't
-    publish docs. It does commit_kb + suggest a publish for the workflow file.
+    publish docs. It does commit_kb + suggest a publish for the workflow files.
     """
     root = repo_root()
     if root is None:
         return 1
     kb_dir = require_kb_dir(root)
-    from reinicorn.assets import get_asset_path
-    src = get_asset_path(_WORKFLOW_ASSET)
-    if src is None:
-        console.error(f"bundled asset missing: {_WORKFLOW_ASSET}")
-        return 1
-    dest = kb_dir / _WORKFLOW_DEST
     source_repo = reinicorn_source_repo()
     if source_repo is None:
         console.error(
             "cannot derive the Reinicorn source repo from package metadata "
-            "(Project-URL: Repository) — the CI workflow needs it to "
+            "(Project-URL: Repository) — the CI workflows need it to "
             "install Reinicorn"
         )
         return 1
-    template = src.read_text().replace(_REPO_PLACEHOLDER, source_repo)
-    if dest.is_file() and dest.read_text() != template and not force:
-        console.error("workflow file was modified — rerun with --force to overwrite")
-        return 1
-    if not dest.is_file() or dest.read_text() != template:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(template)
-        commit_kb(root, "chore(kb): install Reinicorn doc-review cleanup workflow", kb_dir=kb_dir)
-        console.success(f"workflow installed: kb/{_WORKFLOW_DEST}")
+    from reinicorn.assets import get_asset_path
+    # Resolve and vet every asset before writing any, so a refusal never
+    # leaves the pair half-installed.
+    pending: list[tuple[str, Path, str]] = []
+    for asset, rel in _WORKFLOW_ASSETS:
+        src = get_asset_path(asset)
+        if src is None:
+            console.error(f"bundled asset missing: {asset}")
+            return 1
+        template = src.read_text().replace(_REPO_PLACEHOLDER, source_repo)
+        dest = kb_dir / rel
+        current = dest.read_text() if dest.is_file() else None
+        if current == template:
+            continue
+        if current is not None and not force:
+            console.error(
+                f"workflow file was modified: kb/{rel} — rerun with --force to overwrite"
+            )
+            return 1
+        pending.append((rel, dest, template))
+    if pending:
+        for rel, dest, template in pending:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(template)
+            console.success(f"workflow installed: kb/{rel}")
+        commit_kb(root, "chore(kb): install Reinicorn doc-review workflows", kb_dir=kb_dir)
         console.next_step("rcorn kb publish")
     else:
-        console.info("workflow already up to date")
+        console.info("workflows already up to date")
 
     # Best-effort ruleset (dismiss stale approvals). Reinicorn's own divergence
     # check remains the guardrail floor when this can't be applied.
@@ -702,7 +810,7 @@ def cmd_review_setup(force: bool = False) -> int:
             # ruleset can be missing a required bypass. Verify and, under
             # --force, repair rather than trusting the name.
             applied = True
-            _reconcile_ruleset_bypass(gh_repo, existing_id, force=force)
+            _reconcile_ruleset(gh_repo, existing_id, force=force)
         else:
             r = github.run_gh(
                 "api", f"repos/{gh_repo}/rulesets", "--method", "POST",

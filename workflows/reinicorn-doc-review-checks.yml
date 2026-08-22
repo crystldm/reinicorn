@@ -1,0 +1,78 @@
+# Installed into kb repos by `rcorn review setup`. Do not edit in place —
+# edits are overwritten by the next `rcorn review setup --force`.
+#
+# Two status checks on every kb pull request, both required to merge into
+# main by the reinicorn-doc-review ruleset. The job `name:` values ARE the
+# check contexts the ruleset requires ("Doc lint", "Candidate integrity") —
+# renaming one here without updating the ruleset blocks every merge.
+#
+# Note: Reinicorn is installed from its repo's @main, so these checks always
+# run the latest released lint rules and integrity logic.
+name: Reinicorn doc-review checks
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  doc-lint:
+    name: Doc lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Reinicorn's own checkout is the project root here: `rcorn kb lint`
+      # reads the lint config from <root>/linters and the kb from <root>/kb,
+      # so the PR head is checked out *inside* the Reinicorn checkout and the
+      # stock lint entrypoint works unchanged.
+      #
+      # Reinicorn is installed from a checkout, not `pip install git+...` —
+      # pip's git backend force-inits submodules, which fails on private or
+      # SSH-addressed submodules. While the Reinicorn repo is private, the kb
+      # repo needs a REINICORN_INSTALL_TOKEN secret (fine-grained PAT,
+      # Contents:read on the Reinicorn repo); once public, the runner token
+      # fallback reads it fine.
+      - uses: actions/checkout@v7
+        with:
+          # __REINICORN_REPO__ is substituted by `rcorn review setup` from the
+          # installed package's Repository URL (pyproject [project.urls]).
+          repository: __REINICORN_REPO__
+          ref: main
+          token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: kb
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - run: rcorn kb lint
+
+  candidate-integrity:
+    name: Candidate integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # The check diffs the PR head against its merge-base with main.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/checkout@v7
+        with:
+          repository: __REINICORN_REPO__
+          ref: main
+          token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}
+          path: .reinicorn-src
+      - run: pip install ./.reinicorn-src
+      # head.ref is attacker-controlled (script injection) — env indirection
+      # only, never interpolated into the run script. Non-lane branches are
+      # skipped green by the command itself.
+      - env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: rcorn _review-check "$HEAD_REF"

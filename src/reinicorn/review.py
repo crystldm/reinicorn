@@ -12,12 +12,13 @@ subprocess.CalledProcessError (in practice its GitError subclass).
 
 from __future__ import annotations
 
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from reinicorn.doc_types import DRAFTS_DIR_NAME, DocType, drafts_dir, gated_types
+from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY, DocType, drafts_dir, gated_types
 from reinicorn.frontmatter import (
     FIELD_APPROVED_BY,
     FIELD_REVIEW_PR,
@@ -38,6 +39,28 @@ from reinicorn.git import (
 )
 
 REVIEW_REF_PREFIX = "review/"
+
+_REF_RE = re.compile(
+    rf"^{re.escape(REVIEW_REF_PREFIX)}(?P<scope>[^/]+)/(?P<type>[a-z]+)-(?P<slug>[a-z0-9-]+)$"
+)
+
+
+class ReviewRef(NamedTuple):
+    """The three parts of a lane ref `review/<scope>/<type>-<slug>`."""
+
+    repo_scope: str
+    doc_type: DocType
+    slug: str
+
+
+def parse_review_ref(ref: str) -> ReviewRef | None:
+    """Parse a branch name as a lane ref; None for anything else (including
+    a `review/` branch whose type is not a registered doc type). The one
+    parser every CI entry point shares, so the ref grammar has one home."""
+    m = _REF_RE.match(ref)
+    if m is None or m.group("type") not in REGISTRY:
+        return None
+    return ReviewRef(m.group("scope"), REGISTRY[m.group("type")], m.group("slug"))
 
 
 class GatedDraft(NamedTuple):
@@ -231,11 +254,74 @@ def remote_main_state(
     return show(target.final_rel), show(target.draft_rel)
 
 
+def candidate_matches(candidate: str, draft: str) -> bool:
+    """Does a candidate text equal what `review push` would derive from this
+    draft? Pure text — shared by the merge-time guard and the CI check."""
+    return candidate == candidate_text(draft)
+
+
 def candidate_matches_draft(kb_dir: Path, target: ReviewTarget) -> bool:
     cand = candidate_on_ref(kb_dir, target)
     if cand is None:
         return False
-    return cand == candidate_text(target.draft_path.read_text())
+    return candidate_matches(cand, target.draft_path.read_text())
+
+
+def candidate_integrity_failures(checkout: Path, target: ReviewTarget) -> list[str]:
+    """Verify a review ref checked out at *checkout* (HEAD = PR head, origin =
+    the kb remote) against current origin/main. Returns every violation as an
+    agent-readable line; empty means the candidate is sound.
+
+    The CI twin of the `review merge` guards: exactly one added file at the
+    final path, Status in-review, byte-equal to what the draft on main
+    derives, and the draft still present (a cancelled or landed slug has
+    none — merging would land a ghost). Pure git against FETCH_HEAD; no temp
+    clone, no gh. Raises RuntimeError when main cannot be fetched.
+    """
+    allow = file_transport_args(cwd=checkout)
+    r = run_git(*allow, "fetch", "-q", "origin", "main", check=False, cwd=checkout)
+    if r.returncode != 0:
+        raise RuntimeError("\n".join(explain_failure("fetch kb main", r)))
+
+    def show(ref: str, rel: str) -> str | None:
+        s = run_git("show", f"{ref}:{rel}", check=False, cwd=checkout)
+        return s.stdout if s.returncode == 0 else None
+
+    failures: list[str] = []
+    diff = run_git("diff", "--name-status", "FETCH_HEAD...HEAD", cwd=checkout).stdout
+    if diff.splitlines() != [f"A\t{target.final_rel}"]:
+        failures.append(
+            f"PR must add exactly one file, '{target.final_rel}' — diff vs main:\n"
+            + (diff.rstrip() or "(empty)")
+            + f"\n  fix: rcorn review push {target.slug} rebuilds the ref from the draft"
+        )
+    if show("FETCH_HEAD", target.final_rel) is not None:
+        failures.append(
+            f"'{target.final_rel}' already exists on kb main — the slug landed "
+            "or collides with another doc; close this PR"
+        )
+    draft = show("FETCH_HEAD", target.draft_rel)
+    if draft is None:
+        failures.append(
+            f"draft '{target.draft_rel}' is no longer on kb main — the review "
+            "was cancelled or already landed; close this PR"
+        )
+    cand = show("HEAD", target.final_rel)
+    if cand is None:
+        failures.append(f"candidate missing at '{target.final_rel}' on the PR head")
+    else:
+        status = get(cand, FIELD_STATUS)
+        if status != STATUS_IN_REVIEW:
+            failures.append(
+                f"'{target.final_rel}' has status '{status}', expected "
+                f"'{STATUS_IN_REVIEW}' — fix: rcorn review push {target.slug}"
+            )
+        if draft is not None and not candidate_matches(cand, draft):
+            failures.append(
+                f"candidate drifted from '{target.draft_rel}' on kb main — "
+                f"fix: rcorn review push {target.slug}"
+            )
+    return failures
 
 
 def _finalize_tree(
