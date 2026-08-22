@@ -204,3 +204,83 @@ def test_doc_review_cleanup_workflow_private_reinicorn_install():
     assert "reins" not in "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     ).lower()
+
+
+_CHECKS_WORKFLOW = "workflows/reinicorn-doc-review-checks.yml"
+
+
+def _checks_workflow_text() -> str:
+    path = get_asset_path(_CHECKS_WORKFLOW)
+    assert path is not None and path.is_file()
+    return path.read_text()
+
+
+def test_doc_review_checks_workflow_structure():
+    """Runs on every pull request with one job per required check: "Doc lint"
+    runs the stock `rcorn kb lint` with the PR head checked out into `kb/`
+    inside the Reinicorn checkout; "Candidate integrity" runs
+    `rcorn _review-check` against the PR head at the checkout root."""
+    text = _checks_workflow_text()
+    try:
+        import yaml
+    except ImportError:
+        assert "pull_request:" in text
+        assert "name: Doc lint" in text
+        assert "name: Candidate integrity" in text
+        assert "rcorn kb lint" in text
+        assert 'rcorn _review-check "$HEAD_REF"' in text
+        return
+
+    data = yaml.safe_load(text)
+    assert "pull_request" in data[True]  # 'on:' parses as bool key True (YAML 1.1)
+    jobs = data["jobs"]
+    assert {j["name"] for j in jobs.values()} == {"Doc lint", "Candidate integrity"}
+
+    lint = jobs["doc-lint"]
+    assert any(s.get("run") == "rcorn kb lint" for s in lint["steps"])
+    kb_checkout = [s for s in lint["steps"] if s.get("with", {}).get("path") == "kb"]
+    assert len(kb_checkout) == 1
+    assert kb_checkout[0]["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
+
+    integrity = jobs["candidate-integrity"]
+    check = [s for s in integrity["steps"] if "rcorn _review-check" in str(s.get("run"))]
+    assert len(check) == 1
+    assert check[0]["env"] == {"HEAD_REF": "${{ github.event.pull_request.head.ref }}"}
+    # The integrity check diffs the PR head against main's merge-base — a
+    # shallow checkout has no merge-base to diff against.
+    head_checkout = [s for s in integrity["steps"] if "path" not in s.get("with", {})
+                     and "repository" not in s.get("with", {})
+                     and str(s.get("uses", "")).startswith("actions/checkout")]
+    assert len(head_checkout) == 1
+    assert head_checkout[0]["with"]["fetch-depth"] == 0
+
+
+def test_doc_review_checks_workflow_hardening():
+    """Same two CI hazards as the cleanup workflow, plus read-only scope:
+    head.ref reaches the shell only via env indirection; code is checked out
+    by head.sha (immutable) rather than head.ref; the token needs nothing
+    beyond contents:read — these checks never push."""
+    text = _checks_workflow_text()
+
+    assert "HEAD_REF: ${{ github.event.pull_request.head.ref }}" in text
+    assert 'rcorn _review-check "$HEAD_REF"' in text
+    for line in text.splitlines():
+        if "${{ github.event.pull_request.head.ref }}" in line:
+            assert "run" not in line.split(":")[0], f"head.ref inlined in shell: {line}"
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in text
+    assert "contents: read" in text
+    assert "contents: write" not in text
+    assert "KB_CLEANUP_TOKEN" not in text
+
+
+def test_doc_review_checks_workflow_private_reinicorn_install():
+    """Same install contract as the cleanup workflow: a checkout of the
+    placeholder Reinicorn repo with the documented token fallback, never
+    `pip install git+...`, and no legacy CLI name."""
+    text = _checks_workflow_text()
+
+    code_lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    assert not any("git+" in ln for ln in code_lines)
+    assert "repository: __REINICORN_REPO__" in text
+    assert "token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}" in text
+    assert "reins" not in "\n".join(code_lines).lower()
