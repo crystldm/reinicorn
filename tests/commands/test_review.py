@@ -657,6 +657,7 @@ def test_setup_detects_existing_ruleset(env, monkeypatch, capsys):
         "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
         "bypass_actors": [_role(5), _role(4), _role(2),
                           {"actor_id": 99, "actor_type": "Team", "bypass_mode": "always"}],
+        "rules": review_cmds._RULESET["rules"],
     })
     assert review_cmds.cmd_review_setup() == 0
     out = capsys.readouterr().out
@@ -681,7 +682,8 @@ def test_setup_detects_outdated_ruleset_without_force(env, monkeypatch, capsys):
 
 def test_setup_force_repairs_outdated_ruleset(env, monkeypatch, capsys):
     """--force merges the missing maintain role into the installed set without
-    dropping unrelated user-added actors."""
+    dropping unrelated user-added actors, and appends the required status
+    checks rule without touching the user's existing rules."""
     _gh_ok(monkeypatch)
     captured = {}
     _ruleset_gh(monkeypatch, captured=captured, detail={
@@ -696,8 +698,15 @@ def test_setup_force_repairs_outdated_ruleset(env, monkeypatch, capsys):
     assert "ruleset updated" in out
     roles = {a["actor_id"] for a in captured["body"]["bypass_actors"]}
     assert roles == {2, 4, 5, 99}  # required merged in, user Team preserved
-    # user-customized rules/conditions round-trip untouched
-    assert captured["body"]["rules"] == [{"type": "pull_request", "parameters": {"custom": True}}]
+    # user-customized rules/conditions round-trip untouched; the checks rule
+    # is added alongside them
+    assert captured["body"]["rules"] == [
+        {"type": "pull_request", "parameters": {"custom": True}},
+        review_cmds._STATUS_CHECKS_RULE,
+    ]
+    assert captured["body"]["conditions"] == {
+        "ref_name": {"include": ["refs/heads/main"], "exclude": []}
+    }
 
 
 def test_setup_force_replaces_mismatched_bypass_mode(env, monkeypatch, capsys):
@@ -867,6 +876,147 @@ def test_setup_no_solo_warning_when_multiple_collaborators(env, monkeypatch, cap
     monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
     assert review_cmds.cmd_review_setup() == 0
     assert "solo repo" not in capsys.readouterr().out
+
+
+# ── setup: status checks ─────────────────────────────────────
+
+
+_CHECKS_WF = "reinicorn-doc-review-checks.yml"
+
+
+def test_setup_installs_checks_workflow(env, monkeypatch):
+    """Both workflows land together, with the source repo substituted."""
+    monkeypatch.setattr(review_cmds.github, "gh_available", lambda: False)
+    assert review_cmds.cmd_review_setup() == 0
+    wf = env / "kb" / ".github" / "workflows" / _CHECKS_WF
+    assert wf.is_file()
+    text = wf.read_text()
+    assert 'rcorn _review-check "$HEAD_REF"' in text
+    assert "rcorn kb lint" in text
+    assert "__REINICORN_REPO__" not in text
+
+
+def test_setup_refuses_clobber_of_checks_workflow(env, monkeypatch, capsys):
+    """A hand-edited checks workflow is refused without --force, the refusal
+    names the file (two assets — "a workflow" is not enough), and --force
+    restores the template."""
+    monkeypatch.setattr(review_cmds.github, "gh_available", lambda: False)
+    review_cmds.cmd_review_setup()
+    wf = env / "kb" / ".github" / "workflows" / _CHECKS_WF
+    wf.write_text(wf.read_text() + "# user edit\n")
+    assert review_cmds.cmd_review_setup() == 1
+    assert _CHECKS_WF in capsys.readouterr().out
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    assert "# user edit" not in wf.read_text()
+
+
+def test_ruleset_requires_both_checks():
+    """PRs into kb main need both contexts green; non-strict, so a candidate
+    need not be rebased onto the latest main for its checks to count."""
+    rules = [
+        r for r in review_cmds._RULESET["rules"]
+        if r["type"] == "required_status_checks"
+    ]
+    assert len(rules) == 1
+    params = rules[0]["parameters"]
+    assert [c["context"] for c in params["required_status_checks"]] == [
+        "Doc lint", "Candidate integrity",
+    ]
+    assert params["strict_required_status_checks_policy"] is False
+
+
+def test_checks_workflow_job_names_are_the_required_contexts():
+    """GitHub reports a job under its `name:`, and the ruleset requires
+    contexts by name — a mismatch blocks every review PR forever."""
+    from reinicorn.assets import get_asset_path
+    path = get_asset_path(f"workflows/{_CHECKS_WF}")
+    assert path is not None
+    names = re.findall(r"^\s+name: (.+)$", path.read_text(), flags=re.M)
+    assert sorted(names) == sorted(review_cmds.REQUIRED_CHECKS)
+
+
+def _all_roles():
+    return [_role(5), _role(4), _role(2)]
+
+
+def test_setup_detects_missing_checks_rule_without_force(env, monkeypatch, capsys):
+    """Bypass roles complete but the ruleset predates the status checks —
+    drift: warn, name the checks, point at --force, never mutate."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": _all_roles(),
+        "rules": [{"type": "pull_request", "parameters": {}}],
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "outdated" in out
+    assert "Doc lint" in out and "Candidate integrity" in out
+    assert "rcorn review setup --force" in out
+
+
+def test_setup_force_adds_checks_rule_preserving_user_rules(env, monkeypatch, capsys):
+    _gh_ok(monkeypatch)
+    captured = {}
+    _ruleset_gh(monkeypatch, captured=captured, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": _all_roles(),
+        "rules": [{"type": "pull_request", "parameters": {"custom": True}}],
+    })
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    assert "ruleset updated" in capsys.readouterr().out
+    assert captured["body"]["rules"] == [
+        {"type": "pull_request", "parameters": {"custom": True}},
+        review_cmds._STATUS_CHECKS_RULE,
+    ]
+    assert {a["actor_id"] for a in captured["body"]["bypass_actors"]} == {2, 4, 5}
+
+
+def test_setup_force_merges_contexts_into_existing_checks_rule(env, monkeypatch, capsys):
+    """An existing required_status_checks rule (one of ours missing, a user
+    context present, strict policy on) gains only the missing context; the
+    user's context, its integration id, and the strict setting survive."""
+    _gh_ok(monkeypatch)
+    captured = {}
+    _ruleset_gh(monkeypatch, captured=captured, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": _all_roles(),
+        "rules": [
+            {"type": "pull_request", "parameters": {}},
+            {"type": "required_status_checks", "parameters": {
+                "strict_required_status_checks_policy": True,
+                "required_status_checks": [
+                    {"context": "Doc lint"},
+                    {"context": "CodeRabbit", "integration_id": 7},
+                ],
+            }},
+        ],
+    })
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    rules = captured["body"]["rules"]
+    assert len(rules) == 2
+    assert rules[0] == {"type": "pull_request", "parameters": {}}
+    checks = rules[1]["parameters"]
+    assert checks["strict_required_status_checks_policy"] is True
+    assert checks["required_status_checks"] == [
+        {"context": "Doc lint"},
+        {"context": "CodeRabbit", "integration_id": 7},
+        {"context": "Candidate integrity"},
+    ]
+
+
+def test_setup_ruleset_rules_non_list(env, monkeypatch, capsys):
+    """rules present but unreadable warns rather than crashing or PUTting."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": _all_roles(),
+        "rules": "not a list",
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "unreadable configuration" in out
+    assert "settings/rules" in out
 
 
 # ── error surfacing ──────────────────────────────────────────
