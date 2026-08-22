@@ -352,7 +352,7 @@ def _dispatch(args: argparse.Namespace) -> int:
 
 _INTERNAL_COMMANDS = {
     "_hook-check", "_post-checkout", "_pre-push", "_post-merge",
-    "_check-path", "_review-cleanup",
+    "_check-path", "_review-cleanup", "_review-check",
 }
 
 
@@ -386,6 +386,10 @@ def _dispatch_internal(argv: list[str]) -> int:
     if cmd == "_review-cleanup":
         from reinicorn.commands.internal.review_cleanup import cmd_review_cleanup
         return cmd_review_cleanup(rest)
+
+    if cmd == "_review-check":
+        from reinicorn.commands.internal.review_check import cmd_review_check
+        return cmd_review_check(rest)
 
     return 1
 
