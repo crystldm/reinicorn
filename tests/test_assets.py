@@ -199,8 +199,12 @@ def test_doc_review_cleanup_workflow_private_reinicorn_install():
     # installed package's Repository URL — no owner/repo hardcoded here.
     assert "repository: __REINICORN_REPO__" in text
     assert "token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}" in text
-    assert "pip install ./.reinicorn-src" in text
-    assert "rcorn _review-cleanup" in text
+    # Run through uv from the checkout; `--project` keeps cwd at the kb root.
+    assert "astral-sh/setup-uv@" in text
+    assert (
+        'uv run --project ./.reinicorn-src rcorn _review-cleanup "$HEAD_REF" "$PR_URL"'
+        in text
+    )
     assert "reins" not in "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     ).lower()

@@ -19,12 +19,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: main
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      # Reinicorn is installed from a checkout, not `pip install git+...` — pip's
-      # git backend force-inits submodules, which fails on the kb submodule
-      # (SSH URL, private repo). actions/checkout leaves submodules alone.
+      # Reinicorn runs from a checkout via uv, never `pip install git+...` —
+      # pip's git backend force-inits submodules, which fails on the kb
+      # submodule (SSH URL, private repo). actions/checkout leaves submodules
+      # alone, and uv resolves the interpreter from requires-python.
       # While the Reinicorn repo is private, the kb repo needs a
       # REINICORN_INSTALL_TOKEN secret (fine-grained PAT, Contents:read on the
       # Reinicorn repo) — the runner's own token is scoped to this kb repo and
@@ -38,7 +36,7 @@ jobs:
           ref: main
           token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}
           path: .reinicorn-src
-      - run: pip install ./.reinicorn-src
+      - uses: astral-sh/setup-uv@v10
       # actions/checkout stores its token in this checkout's LOCAL git config;
       # the fresh temp clone inside _review-cleanup does not inherit local
       # config, so origin must carry an authenticated URL for the clone/push.
@@ -49,8 +47,10 @@ jobs:
       # skip the secret; the runner token fallback pushes fine.
       - run: git remote set-url origin "https://x-access-token:${{ secrets.KB_CLEANUP_TOKEN || github.token }}@github.com/${{ github.repository }}.git"
       # head.ref is attacker-controlled (script injection) — env indirection
-      # only, never interpolated into the run script.
+      # only, never interpolated into the run script. `--project` points uv
+      # at the Reinicorn source without changing the working directory, which
+      # must stay the kb checkout root.
       - env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: rcorn _review-cleanup "$HEAD_REF" "$PR_URL"
+        run: uv run --project ./.reinicorn-src rcorn _review-cleanup "$HEAD_REF" "$PR_URL"
