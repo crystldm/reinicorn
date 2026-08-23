@@ -611,9 +611,11 @@ def _merge_checks_rule(rules: list[dict]) -> list[dict]:
     return merged
 
 
-def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None:
+def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> bool:
     """Repair a same-named ruleset that is missing required bypass actors or
-    the required status checks.
+    the required status checks. Returns True only when the installed ruleset
+    is confirmed to require every REQUIRED_CHECKS context (already, or after
+    a successful repair) — False when it does not or cannot be read.
 
     Name-matching alone is not enough: a ruleset from an earlier Reinicorn
     version can retain the same name while lacking the maintain-role bypass
@@ -633,7 +635,7 @@ def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None
             "doc-review ruleset is installed but its configuration could not be "
             f"read — verify the maintain/write/admin bypass manually at {manual}"
         )
-        return
+        return False
     try:
         data = json.loads(detail.stdout)
     except ValueError:
@@ -643,7 +645,7 @@ def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None
             "doc-review ruleset is installed but returned an unreadable "
             f"configuration — verify the maintain/write/admin bypass at {manual}"
         )
-        return
+        return False
     actors = data.get("bypass_actors")
     if actors is None:
         # GitHub omits bypass_actors unless the token has write access to the
@@ -653,20 +655,20 @@ def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None
             "visible to this token (needs ruleset write access) — verify that "
             f"maintain, write, and admin roles bypass it at {manual}"
         )
-        return
+        return False
     if not isinstance(actors, list) or not all(isinstance(a, dict) for a in actors):
         console.warn(
             "doc-review ruleset is installed but returned an unreadable "
             f"configuration — verify the maintain/write/admin bypass at {manual}"
         )
-        return
+        return False
     rules = data.get("rules") or []
     if not isinstance(rules, list) or not all(isinstance(r, dict) for r in rules):
         console.warn(
             "doc-review ruleset is installed but returned an unreadable "
             f"configuration — verify its rules at {manual}"
         )
-        return
+        return False
     installed = {
         (a.get("actor_id"), a.get("actor_type"), a.get("bypass_mode"))
         for a in actors
@@ -675,7 +677,7 @@ def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None
     missing_checks = [c for c in REQUIRED_CHECKS if c not in _installed_checks(rules)]
     if not missing and not missing_checks:
         console.info("doc-review ruleset already installed")
-        return
+        return True
     if not force:
         gaps = []
         if missing:
@@ -691,7 +693,7 @@ def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None
             )
         console.warn("doc-review ruleset is outdated — it " + "; it ".join(gaps) + ".")
         console.next_step("rcorn review setup --force")
-        return
+        return not missing_checks
     # Merge required roles into the installed set, rebuilding the PUT body from
     # the fetched ruleset so user-customized rules/conditions round-trip intact.
     # Deduplicate by (actor_id, actor_type): required entries replace any
@@ -736,11 +738,12 @@ def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None
             + " and ".join(repaired)
             + " (existing configuration preserved)"
         )
-    else:
-        console.warn(
-            "ruleset update failed (plan/permissions?) — Reinicorn's own "
-            "divergence check remains the guardrail"
-        )
+        return True
+    console.warn(
+        "ruleset update failed (plan/permissions?) — Reinicorn's own "
+        "divergence check remains the guardrail"
+    )
+    return not missing_checks
 
 
 def cmd_review_setup(force: bool = False) -> int:
@@ -798,6 +801,7 @@ def cmd_review_setup(force: bool = False) -> int:
     if gh_repo and _gh_ready():
         import json
         applied = False
+        requires_checks = False
         existing = github.run_gh(
             "api", f"repos/{gh_repo}/rulesets", check=False,
         )
@@ -815,7 +819,7 @@ def cmd_review_setup(force: bool = False) -> int:
             # ruleset can be missing a required bypass. Verify and, under
             # --force, repair rather than trusting the name.
             applied = True
-            _reconcile_ruleset(gh_repo, existing_id, force=force)
+            requires_checks = _reconcile_ruleset(gh_repo, existing_id, force=force)
         else:
             r = github.run_gh(
                 "api", f"repos/{gh_repo}/rulesets", "--method", "POST",
@@ -823,17 +827,20 @@ def cmd_review_setup(force: bool = False) -> int:
             )
             if r.returncode == 0:
                 applied = True
+                requires_checks = True
                 console.success("dismiss-stale-approvals ruleset applied")
             else:
                 console.warn(
                     "ruleset not applied (plan/permissions?) — Reinicorn's own "
                     "divergence check remains the guardrail"
                 )
-        if applied and pending:
+        if requires_checks and pending:
             # The ruleset requires contexts that only the checks workflow
             # reports, and that workflow is committed locally but not yet on
             # kb main — until it is published every review PR shows both
-            # checks pending and cannot merge.
+            # checks pending and cannot merge. Only said when the ruleset is
+            # confirmed to require them — an outdated ruleset left as-is
+            # (no --force) does not block anything yet.
             console.warn(
                 "required checks "
                 + " and ".join(f"'{c}'" for c in REQUIRED_CHECKS)

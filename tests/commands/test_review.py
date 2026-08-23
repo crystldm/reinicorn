@@ -1043,6 +1043,41 @@ def test_setup_warns_checks_pending_until_workflow_published(env, monkeypatch, c
     assert "stay pending" not in capsys.readouterr().out
 
 
+def test_setup_no_pending_warning_when_ruleset_does_not_require_checks(
+    env, monkeypatch, capsys,
+):
+    """Fresh workflow files + an outdated existing ruleset left as-is (no
+    --force): nothing requires the checks yet, so claiming they "stay
+    pending" would be false — only the outdated warning is due."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": _all_roles(),
+        "rules": [{"type": "pull_request", "parameters": {}}],
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "outdated" in out
+    assert "stay pending" not in out
+
+
+def test_setup_pending_warning_when_existing_ruleset_requires_checks(
+    env, monkeypatch, capsys,
+):
+    """An existing ruleset that already requires both checks (even one still
+    missing a bypass role) does block PRs until the workflow is published."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": [_role(5), _role(4)],  # maintain missing → outdated
+        "rules": review_cmds._RULESET["rules"],
+    })
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "outdated" in out
+    assert "stay pending" in out
+
+
 def test_setup_ruleset_rules_non_list(env, monkeypatch, capsys):
     """rules present but unreadable warns rather than crashing or PUTting."""
     _gh_ok(monkeypatch)
