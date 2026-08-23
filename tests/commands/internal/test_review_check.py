@@ -160,4 +160,7 @@ def test_cli_main_dispatches_review_check(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     from reinicorn.cli import main
 
+    # rc 0 is reachable only through cmd_review_check's skip path; the
+    # unmatched fall-through in _dispatch_internal always returns 1.
+    assert main(["_review-check", "feature/not-a-review"]) == 0
     assert main(["_review-check"]) == 1

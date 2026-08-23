@@ -726,10 +726,15 @@ def _reconcile_ruleset(gh_repo: str, ruleset_id: object, *, force: bool) -> None
         "--input", "-", check=False, input_text=json.dumps(body),
     )
     if r.returncode == 0:
+        repaired = []
+        if missing:
+            repaired.append("the missing maintain/write/admin bypass actors")
+        if missing_checks:
+            repaired.append("the required status checks")
         console.success(
-            "doc-review ruleset updated — merged the missing maintain/write/admin "
-            "bypass actors and required status checks (existing configuration "
-            "preserved)"
+            "doc-review ruleset updated — merged "
+            + " and ".join(repaired)
+            + " (existing configuration preserved)"
         )
     else:
         console.warn(
@@ -824,6 +829,18 @@ def cmd_review_setup(force: bool = False) -> int:
                     "ruleset not applied (plan/permissions?) — Reinicorn's own "
                     "divergence check remains the guardrail"
                 )
+        if applied and pending:
+            # The ruleset requires contexts that only the checks workflow
+            # reports, and that workflow is committed locally but not yet on
+            # kb main — until it is published every review PR shows both
+            # checks pending and cannot merge.
+            console.warn(
+                "required checks "
+                + " and ".join(f"'{c}'" for c in REQUIRED_CHECKS)
+                + " stay pending on review PRs until the checks workflow "
+                "reaches kb main"
+            )
+            console.next_step("rcorn kb publish")
         if applied:
             # With the ruleset active, the CI cleanup push to main is rejected
             # for the runner token (no ruleset bypass) — it needs a PAT owned

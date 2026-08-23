@@ -1005,6 +1005,44 @@ def test_setup_force_merges_contexts_into_existing_checks_rule(env, monkeypatch,
     ]
 
 
+def test_setup_force_reports_only_repaired_gaps(env, monkeypatch, capsys):
+    """Bypass roles complete, checks rule missing: the success line names the
+    checks and not the bypass actors it did not touch."""
+    _gh_ok(monkeypatch)
+    _ruleset_gh(monkeypatch, captured={}, detail={
+        "name": "reinicorn-doc-review", "target": "branch", "enforcement": "active",
+        "bypass_actors": _all_roles(),
+        "rules": [{"type": "pull_request", "parameters": {}}],
+    })
+    assert review_cmds.cmd_review_setup(force=True) == 0
+    out = capsys.readouterr().out
+    assert "merged the required status checks" in out
+    assert "bypass actors" not in out
+
+
+def test_setup_warns_checks_pending_until_workflow_published(env, monkeypatch, capsys):
+    """Fresh install: the ruleset requires contexts only the (still
+    unpublished) checks workflow reports — say so next to the ruleset, with
+    the publish step, so an operator who stops here knows why PRs block."""
+    _gh_ok(monkeypatch)
+
+    def fake_run_gh(*args, **kwargs):
+        if "--method" in args:
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(review_cmds.github, "run_gh", fake_run_gh)
+    assert review_cmds.cmd_review_setup() == 0
+    out = capsys.readouterr().out
+    assert "stay pending" in out
+    assert "Doc lint" in out and "Candidate integrity" in out
+    assert out.count("next: rcorn kb publish") == 2  # after install and at the ruleset
+
+    # Second run: workflows already on disk and unchanged — no pending warning.
+    assert review_cmds.cmd_review_setup() == 0
+    assert "stay pending" not in capsys.readouterr().out
+
+
 def test_setup_ruleset_rules_non_list(env, monkeypatch, capsys):
     """rules present but unreadable warns rather than crashing or PUTting."""
     _gh_ok(monkeypatch)
