@@ -44,11 +44,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: kb
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install .
-      - run: rcorn kb lint
+      # uv resolves the interpreter from Reinicorn's requires-python and runs
+      # the checked-out source — the same invocation Reinicorn's own CI uses.
+      - uses: astral-sh/setup-uv@v10
+      - run: uv run rcorn kb lint
 
   candidate-integrity:
     name: Candidate integrity
@@ -60,19 +59,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           # The check diffs the PR head against its merge-base with main.
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - uses: actions/checkout@v7
         with:
           repository: __REINICORN_REPO__
           ref: main
           token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}
           path: .reinicorn-src
-      - run: pip install ./.reinicorn-src
+      - uses: astral-sh/setup-uv@v10
       # head.ref is attacker-controlled (script injection) — env indirection
       # only, never interpolated into the run script. Non-lane branches are
-      # skipped green by the command itself.
+      # skipped green by the command itself. `--project` points uv at the
+      # Reinicorn source without changing the working directory, which must
+      # stay the kb checkout root.
       - env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: rcorn _review-check "$HEAD_REF"
+        run: uv run --project ./.reinicorn-src rcorn _review-check "$HEAD_REF"

@@ -237,7 +237,7 @@ def test_doc_review_checks_workflow_structure():
     assert {j["name"] for j in jobs.values()} == {"Doc lint", "Candidate integrity"}
 
     lint = jobs["doc-lint"]
-    assert any(s.get("run") == "rcorn kb lint" for s in lint["steps"])
+    assert any(s.get("run") == "uv run rcorn kb lint" for s in lint["steps"])
     kb_checkout = [s for s in lint["steps"] if s.get("with", {}).get("path") == "kb"]
     assert len(kb_checkout) == 1
     assert kb_checkout[0]["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"
@@ -246,6 +246,11 @@ def test_doc_review_checks_workflow_structure():
     check = [s for s in integrity["steps"] if "rcorn _review-check" in str(s.get("run"))]
     assert len(check) == 1
     assert check[0]["env"] == {"HEAD_REF": "${{ github.event.pull_request.head.ref }}"}
+    # `--project` (not `--directory`): the command must run with cwd at the
+    # kb checkout root, with uv merely pointed at the Reinicorn source.
+    assert check[0]["run"] == (
+        'uv run --project ./.reinicorn-src rcorn _review-check "$HEAD_REF"'
+    )
     # The integrity check diffs the PR head against main's merge-base — a
     # shallow checkout has no merge-base to diff against.
     head_checkout = [s for s in integrity["steps"] if "path" not in s.get("with", {})
@@ -274,13 +279,16 @@ def test_doc_review_checks_workflow_hardening():
 
 
 def test_doc_review_checks_workflow_private_reinicorn_install():
-    """Same install contract as the cleanup workflow: a checkout of the
+    """Same source contract as the cleanup workflow — a checkout of the
     placeholder Reinicorn repo with the documented token fallback, never
-    `pip install git+...`, and no legacy CLI name."""
+    `pip install git+...` — run through uv (the project's toolchain; no
+    pip, no setup-python), and no legacy CLI name."""
     text = _checks_workflow_text()
 
     code_lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
     assert not any("git+" in ln for ln in code_lines)
     assert "repository: __REINICORN_REPO__" in text
     assert "token: ${{ secrets.REINICORN_INSTALL_TOKEN || github.token }}" in text
+    assert not any("pip " in ln or "setup-python" in ln for ln in code_lines)
+    assert "astral-sh/setup-uv@" in text
     assert "reins" not in "\n".join(code_lines).lower()
