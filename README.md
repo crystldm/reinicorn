@@ -86,7 +86,7 @@ reinicorn/
 ├── linters/                # Stack-agnostic kb lint framework and rules
 ├── platform-instructions/  # Per-platform pointer files (claude, cursor, copilot)
 ├── templates/              # AGENTS.md template laid down by init
-├── workflows/              # CI workflow installed by `rcorn review setup`
+├── workflows/              # kb-repo CI workflows installed by `rcorn review setup`
 ├── upgrades/               # Version-to-version upgrade notes
 ├── kb/                     # The shared knowledgebase (gitignored clone)
 └── tests/                  # Test suite
@@ -170,10 +170,16 @@ The kb checkout never leaves `main`. The review branch exists only on the
 remote, so reviewers get a full-file GitHub diff with inline comments while
 your working copy stays put. Merging (from the CLI or the GitHub UI) flips the
 draft to `approved` at its canonical `specs/<slug>.md` path, and `rcorn review
-setup` installs a small CI workflow so a browser merge finishes the cleanup on
-its own. `gh` is optional at every step; without it, reinicorn pushes the
-branch and hands you the PR link to open yourself. `rcorn kb lint` warns when
-a plan builds on a spec that never got approved.
+setup` installs two small CI workflows in the kb repo: one so a browser merge
+finishes the cleanup on its own, and one that puts two real status checks on
+every kb PR — **Doc lint** (`rcorn kb lint` against the PR) and **Candidate
+integrity** (the PR adds exactly its one doc, still in sync with the draft on
+main). The `reinicorn-doc-review` ruleset requires both before a merge into
+kb main; direct `rcorn kb publish` pushes are unaffected. Rerun `rcorn review
+setup --force` after upgrading to pick up new workflow versions. `gh` is
+optional at every step; without it, reinicorn pushes the branch and hands you
+the PR link to open yourself. `rcorn kb lint` warns when a plan builds on a
+spec that never got approved.
 
 ## The CLI
 
@@ -207,7 +213,7 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn retro create` | Create retro for current branch |
 | `rcorn retro show [branch] [--full]` | Show retro doc |
 | `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
-| `rcorn review setup` | Install kb-repo CI cleanup workflow + ruleset |
+| `rcorn review setup [--force]` | Install kb-repo CI workflows (cleanup + status checks) and the ruleset |
 | `rcorn principle add "title"` | Append a golden principle |
 | `rcorn skills install <name>` | Install a skill-set adapter |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |

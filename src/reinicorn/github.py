@@ -151,7 +151,8 @@ def gh_pr_merge(repo: str, number: int) -> None:
     run_gh(
         "pr", "merge", str(number), "--repo", repo, "--squash",
         error_hint=(
-            "The PR may be unmergeable (approvals dismissed, branch "
+            "The PR may be unmergeable (approvals dismissed, required status "
+            "checks red or pending, branch "
             "protection, or conflicts) — check the PR page."
         ),
     )
