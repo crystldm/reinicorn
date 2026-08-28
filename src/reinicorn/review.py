@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY, DocType, drafts_dir, gated_types
+from reinicorn.doc_types import DRAFTS_DIR_NAME, DocType, drafts_dir, gated_types, registry
 from reinicorn.frontmatter import (
     FIELD_APPROVED_BY,
     FIELD_REVIEW_PR,
@@ -58,9 +58,9 @@ def parse_review_ref(ref: str) -> ReviewRef | None:
     a `review/` branch whose type is not a registered doc type). The one
     parser every CI entry point shares, so the ref grammar has one home."""
     m = _REF_RE.match(ref)
-    if m is None or m.group("type") not in REGISTRY:
+    if m is None or m.group("type") not in registry():
         return None
-    return ReviewRef(m.group("scope"), REGISTRY[m.group("type")], m.group("slug"))
+    return ReviewRef(m.group("scope"), registry()[m.group("type")], m.group("slug"))
 
 
 class GatedDraft(NamedTuple):

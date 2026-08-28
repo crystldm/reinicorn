@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from reinicorn import console, frontmatter
-from reinicorn.doc_types import REGISTRY
+from reinicorn.doc_types import registry
 from reinicorn.git import repo_root, run_git
 from reinicorn.kb import get_kb_dir
 from reinicorn.mode import hook_check
@@ -37,7 +37,7 @@ def _archive_stale_plans(root: Path) -> None:
     for repo_dir in sorted(resolved.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
             continue
-        active_dir = repo_dir / REGISTRY["plan"].dir_path / "active"
+        active_dir = repo_dir / registry()["plan"].dir_path / "active"
         if not active_dir.is_dir():
             continue
 

@@ -9,7 +9,6 @@ from pathlib import Path
 from reinicorn import console, frontmatter
 from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.doc_types import (
-    REGISTRY,
     Addressing,
     CreateMode,
     DocType,
@@ -17,6 +16,7 @@ from reinicorn.doc_types import (
     drafts_dir,
     get_doc_dir,
     get_protected_map,
+    registry,
 )
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.kb import (
@@ -70,7 +70,7 @@ def _provenance(
 
 def _typed_dir(doc_type: str, repo_dir: Path) -> Path:
     """Directory a new doc of this type is created in (drafts annex when gated)."""
-    if REGISTRY[doc_type].gated:
+    if registry()[doc_type].gated:
         return drafts_dir(doc_type, repo_dir)
     return get_doc_dir(doc_type, repo_dir)
 
@@ -85,14 +85,14 @@ def _slug_target(doc_type: str, repo_dir: Path, slug: str) -> Path:
     review merged", so drafting over a landed slug would corrupt the lane's
     state.
     """
-    fname = REGISTRY[doc_type].filename.format(slug=slug)
+    fname = registry()[doc_type].filename.format(slug=slug)
     target = _typed_dir(doc_type, repo_dir) / fname
     if target.is_file():
         raise FileExistsError(
             f"'{slug}' already exists at {target} — "
             "edit it, or pick a new title"
         )
-    if REGISTRY[doc_type].gated:
+    if registry()[doc_type].gated:
         final = get_doc_dir(doc_type, repo_dir) / fname
         if final.is_file():
             raise FileExistsError(
@@ -126,7 +126,7 @@ def _branch_target(dt: DocType, repo_dir: Path, branch: str) -> Path:
     """Branch-addressed target. Retro rides with an active plan when one
     exists (spec non-goal: this coupling stays code; identity check against
     the registry row keeps type knowledge out of string comparisons)."""
-    if dt is REGISTRY["retro"]:
+    if dt is registry()["retro"]:
         active_dir = branch_doc_path("plan", repo_dir, branch).parent
         if active_dir.is_dir():
             return active_dir / Path(dt.filename).name
@@ -190,12 +190,12 @@ def _create_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
 
 def cmd_doc_create(doc_type: str, title: str = "") -> int:
     """Create a kb doc of any registry type — the one generic entry point."""
-    dt = REGISTRY.get(doc_type)
+    dt = registry().get(doc_type)
     if dt is None:
         console.error(f"Unknown doc type '{doc_type}'.")
         return 1
 
-    if dt is REGISTRY["plan"]:
+    if dt is registry()["plan"]:
         console.error(
             f"Use '{dt.create_hint}' instead — plan creation in "
             "commands/plan.py runs lifecycle logic (templates, ticket, "
@@ -283,26 +283,26 @@ def cmd_doc_check_path(file_path: str) -> int:
     protected = get_protected_map()
 
     # exec-plans are special: plan.md and retro.md are protected
-    if subdir == REGISTRY["plan"].dir_path:
+    if subdir == registry()["plan"].dir_path:
         filename = parts[-1]
-        plan_filename = REGISTRY["plan"].filename.rsplit("/", 1)[-1]  # "plan.md"
-        retro_filename = REGISTRY["retro"].filename.rsplit("/", 1)[-1]  # "retro.md"
+        plan_filename = registry()["plan"].filename.rsplit("/", 1)[-1]  # "plan.md"
+        retro_filename = registry()["retro"].filename.rsplit("/", 1)[-1]  # "retro.md"
         if filename == plan_filename:
             console.error(
-                f"Use '{REGISTRY['plan'].create_hint}' instead of "
+                f"Use '{registry()['plan'].create_hint}' instead of "
                 "writing kb docs directly."
             )
             return 2
         elif filename == retro_filename:
             console.error(
-                f"Use '{REGISTRY['retro'].create_hint}' instead of "
+                f"Use '{registry()['retro'].create_hint}' instead of "
                 "writing kb docs directly."
             )
             return 2
         return 0
 
     if subdir in protected:
-        dt = REGISTRY[protected[subdir]]
+        dt = registry()[protected[subdir]]
         console.error(
             f"Use '{dt.create_hint}' instead of writing kb docs directly."
         )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from reinicorn.config import skills_dir
-from reinicorn.doc_types import REGISTRY
+from reinicorn.doc_types import registry
 from reinicorn.skillset.adapter import AdapterError
 
 if TYPE_CHECKING:
@@ -28,21 +28,21 @@ _HEADER = (
 
 
 def render_wiring(wiring: dict[str, WiringEntry] | None) -> tuple[str, list[str]]:
-    """Render the skillset wiring table: one row per `REGISTRY` doc type.
+    """Render the skillset wiring table: one row per registry doc type.
 
-    `REGISTRY` is the row source — *wiring* only fills in the "Invoke
+    The effective registry is the row source — *wiring* only fills in the "Invoke
     first" column, it never adds rows. A *wiring* key present in
-    `REGISTRY` renders its skills, comma-space-joined; a key absent from
-    `REGISTRY` is skipped (and reported in the returned list) when its
+    the registry renders its skills, comma-space-joined; a key absent from
+    the registry is skipped (and reported in the returned list) when its
     entry is `optional`, and otherwise raises `AdapterError` naming the
-    unknown key and listing `REGISTRY`'s actual keys.
+    unknown key and listing the registry's actual keys.
 
     Returns `(markdown, skipped_optional_keys)`.
     """
     active: dict[str, WiringEntry] = {}
     skipped: list[str] = []
     for key, entry in (wiring or {}).items():
-        if key in REGISTRY:
+        if key in registry():
             active[key] = entry
             continue
         if entry.optional:
@@ -50,7 +50,7 @@ def render_wiring(wiring: dict[str, WiringEntry] | None) -> tuple[str, list[str]
             continue
         raise AdapterError(
             f"Wiring key '{key}' is not a registered doc type.\n"
-            f"  Registered doc types: {sorted(REGISTRY)}.\n"
+            f"  Registered doc types: {sorted(registry())}.\n"
             f"  How to fix: fix the typo in the adapter's wiring block, or "
             f"mark this entry 'optional: true' if '{key}' is expected to be "
             f"absent from this repo's registry."
@@ -58,7 +58,7 @@ def render_wiring(wiring: dict[str, WiringEntry] | None) -> tuple[str, list[str]
 
     rows = [
         f"| {dt.key} | {_create_command(dt)} | {_skills_cell(active.get(dt.key))} |"
-        for dt in REGISTRY.values()
+        for dt in registry().values()
     ]
     return _HEADER + "\n".join(rows) + "\n", skipped
 

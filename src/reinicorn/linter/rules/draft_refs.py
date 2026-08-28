@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.doc_types import REGISTRY
+from reinicorn.corpus import iter_docs
+from reinicorn.doc_types import registry
 from reinicorn.linter.rules.base import LintRule
 from reinicorn.linter.spec_refs import (
-    REF_RE,
-    SPEC_DIR_NAME,
     declared_spec,
     is_not_applicable,
     is_spec_path,
+    ref_re,
     resolve_ref,
+    spec_dir_name,
     tracked_paths,
     unapproved_reason,
 )
@@ -39,11 +41,20 @@ class DraftRefsRule(LintRule):
         except RuntimeError as e:
             return [f"{KB_DIR_NAME}:1 — cannot enumerate tracked kb paths: {e}"]
 
-        active_glob = f"*/{REGISTRY['plan'].dir_path}/active/*/plan.md"
-        for plan in sorted(kb.glob(active_glob)):
-            rel = plan.relative_to(project_root)
-            scope = plan.relative_to(kb).parts[0]
-            text = plan.read_text()
+        plan_dt = registry(project_root).get("plan")
+        if plan_dt is None:
+            return diagnostics
+        # Path-matched, not type-matched: a plan.md with broken frontmatter
+        # must still be checked, and completed plans must not be.
+        active_rel = f"{plan_dt.dir_path}/{plan_dt.filename.replace('{branch}', '*')}"
+        for doc in iter_docs(kb):
+            if not fnmatch(
+                str(doc.path.relative_to(kb / doc.scope)), active_rel
+            ):
+                continue
+            rel = doc.path.relative_to(project_root)
+            scope = doc.scope
+            text = doc.path.read_text()
 
             # Report each offending doc once per plan. A spec named in the
             # spec: field and again in prose is one violation, not two.
@@ -91,7 +102,7 @@ class DraftRefsRule(LintRule):
         if not is_spec_path(res.path):
             return [
                 f"{rel}:1 — 'spec: {value}' resolves to '{res.path}', which "
-                f"is not a spec; name a doc under '{SPEC_DIR_NAME}/' or 'N/A'"
+                f"is not a spec; name a doc under '{spec_dir_name()}/' or 'N/A'"
             ]
 
         seen.add(res.path)
@@ -112,6 +123,7 @@ class DraftRefsRule(LintRule):
         """
         diagnostics: list[str] = []
         in_fence = False
+        prose_ref_re = ref_re()
 
         for n, line in enumerate(text.splitlines(), 1):
             # Fenced blocks hold illustrative example paths, not real
@@ -122,7 +134,7 @@ class DraftRefsRule(LintRule):
             if in_fence:
                 continue
 
-            for ref in REF_RE.findall(line):
+            for ref in prose_ref_re.findall(line):
                 res = resolve_ref(ref, scope, tracked)
                 if res.path is None or res.path in seen:
                     continue

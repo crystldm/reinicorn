@@ -6,7 +6,8 @@ import re
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.doc_types import REGISTRY
+from reinicorn.corpus import iter_branch_dirs
+from reinicorn.doc_types import registry
 from reinicorn.frontmatter import FIELD_SPEC
 from reinicorn.linter.rules.base import LintRule
 from reinicorn.linter.spec_refs import declared_spec
@@ -25,54 +26,47 @@ class PlanStructureRule(LintRule):
             return []
 
         diagnostics: list[str] = []
+        plan_dt = registry(project_root).get("plan")
+        if plan_dt is None:
+            return []
+        doc_name = plan_dt.filename.rsplit("/", 1)[-1]
 
-        for repo_dir in sorted(kb.iterdir()):
-            if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
+        for _scope, plan_dir in iter_branch_dirs(kb, plan_dt):
+            branch_name = plan_dir.name
+            plan_file = plan_dir / doc_name
+            rel_plan = plan_file.relative_to(project_root)
+
+            if not plan_file.is_file():
+                diagnostics.append(
+                    f"{rel_plan}:1 — Missing {doc_name} in active exec plan "
+                    f"'{branch_name}'."
+                )
                 continue
-            active_dir = repo_dir / REGISTRY["plan"].dir_path / "active"
-            if not active_dir.is_dir():
-                continue
 
-            for plan_dir in sorted(active_dir.iterdir()):
-                if not plan_dir.is_dir():
-                    continue
+            content = plan_file.read_text()
+            lines = content.splitlines()
 
-                branch_name = plan_dir.name
-                plan_file = plan_dir / "plan.md"
-                prefix = f"{KB_DIR_NAME}/{repo_dir.name}/exec-plans/active/{branch_name}"
-                rel_plan = f"{prefix}/plan.md"
+            heading_lines = [
+                i + 1 for i, line in enumerate(lines)
+                if line.strip().startswith("##")
+            ]
+            last_heading = heading_lines[-1] if heading_lines else 1
 
-                if not plan_file.is_file():
+            for section in plan_dt.required_sections:
+                pattern = r'(?mi)^\s*##\s+' + re.escape(section).replace(r'\ ', r'\s+')
+                if not re.search(pattern, content):
                     diagnostics.append(
-                        f"{rel_plan}:1 — Missing plan.md in active exec plan "
-                        f"'{branch_name}'."
+                        f"{rel_plan}:{last_heading} — Missing '## {section}' section."
                     )
-                else:
-                    content = plan_file.read_text()
-                    lines = content.splitlines()
 
-                    heading_lines = [
-                        i + 1 for i, line in enumerate(lines)
-                        if line.strip().startswith("##")
-                    ]
-                    last_heading = heading_lines[-1] if heading_lines else 1
-
-                    plan_dt = REGISTRY["plan"]
-                    for section in plan_dt.required_sections:
-                        pattern = r'(?mi)^\s*##\s+' + re.escape(section).replace(r'\ ', r'\s+')
-                        if not re.search(pattern, content):
-                            diagnostics.append(
-                                f"{rel_plan}:{last_heading} — Missing '## {section}' section."
-                            )
-
-                    # Structural presence only. Whether the value resolves to an
-                    # approved doc is kb/draft-refs' job, and that rule diagnoses
-                    # a missing field independently so the gate never depends on
-                    # this rule's severity.
-                    if declared_spec(content) is None:
-                        diagnostics.append(
-                            f"{rel_plan}:1 — Missing '{FIELD_SPEC}:' frontmatter field "
-                            "(path to the spec this plan implements, or 'N/A')."
-                        )
+            # Structural presence only. Whether the value resolves to an
+            # approved doc is kb/draft-refs' job, and that rule diagnoses
+            # a missing field independently so the gate never depends on
+            # this rule's severity.
+            if declared_spec(content) is None:
+                diagnostics.append(
+                    f"{rel_plan}:1 — Missing '{FIELD_SPEC}:' frontmatter field "
+                    "(path to the spec this plan implements, or 'N/A')."
+                )
 
         return diagnostics

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, kb_scope
-from reinicorn.doc_types import REGISTRY
+from reinicorn.doc_types import registry
 from reinicorn.git import (
     GitFailure,
     classify_result,
@@ -290,7 +290,7 @@ def branch_dir_name(branch: str) -> str:
 
 def branch_doc_path(doc_type: str, repo_dir: Path, branch: str) -> Path:
     """Full path of a branch-addressed doc (plan/retro) inside a repo scope dir."""
-    dt = REGISTRY[doc_type]
+    dt = registry()[doc_type]
     return repo_dir / dt.dir_path / dt.filename.format(branch=sanitize_branch(branch))
 
 
@@ -300,7 +300,7 @@ def plan_dir(kb: Path, branch: str) -> Path:
 
 def active_plan_names(kb_dir: Path, slug: str) -> list[str]:
     """Return sorted active plan directory names for the given repo scope."""
-    active = kb_dir / slug / REGISTRY["plan"].dir_path / "active"
+    active = kb_dir / slug / registry()["plan"].dir_path / "active"
     if not active.is_dir():
         return []
     return sorted(d.name for d in active.iterdir() if d.is_dir())
@@ -359,7 +359,7 @@ def overlapping_branches(
     for repo_dir in sorted(resolved.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
             continue
-        active_dir = repo_dir / REGISTRY["plan"].dir_path / "active"
+        active_dir = repo_dir / registry()["plan"].dir_path / "active"
         if not active_dir.is_dir():
             continue
         for entry in sorted(active_dir.iterdir()):

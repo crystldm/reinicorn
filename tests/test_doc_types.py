@@ -193,7 +193,7 @@ def test_registry_rejects_gated_non_slug_row():
 
     import pytest
 
-    from reinicorn.doc_types import _validate_registry
+    from reinicorn.doc_types import _validate_rows
     bad = DocType(
         key="phantom", dir_path="phantoms", filename="active/{branch}/doc.md",
         protected=True,
@@ -201,7 +201,7 @@ def test_registry_rejects_gated_non_slug_row():
         addressing=Addressing.BRANCH, gated=True,
     )
     with patch.dict(REGISTRY, {"phantom": bad}), pytest.raises(ValueError, match="phantom"):
-        _validate_registry()
+        _validate_rows(REGISTRY, "test")
 
 
 def test_plan_precedes_retro_for_shared_dir():
