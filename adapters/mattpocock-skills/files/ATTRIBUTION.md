@@ -30,7 +30,7 @@ The adapted skills listed above are distributed under the terms of the MIT
 License from the upstream [skills](https://github.com/mattpocock/skills)
 project, reproduced in full below.
 
-```
+```text
 MIT License
 
 Copyright (c) 2026 Matt Pocock

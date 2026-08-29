@@ -24,5 +24,11 @@ authenticated — use it, not the web UI.
 - Ticket (child of the map): `gh issue create --parent <map-number> --label wayfinder:<type> ...`.
 - Claim a ticket: `gh issue edit <number> --add-assignee @me`.
 - Blocking edge: `gh issue edit <blocked-number> --add-blocked-by <blocker-number>`.
-- Frontier query: `gh issue list --json number,title,assignees,blockedBy,parent`,
-  filtered to open, unassigned, `blockedBy` empty, `parent` the map issue.
+- Frontier query (open, unassigned, unblocked children of the map):
+
+  ```bash
+  gh issue list --state open --json number,title,assignees,blockedBy,parent \
+    --jq '[.[] | select(.parent.number == <map-number>
+      and (.assignees | length) == 0
+      and .blockedBy.totalCount == 0)]'
+  ```
