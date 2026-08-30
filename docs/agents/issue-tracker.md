@@ -27,8 +27,8 @@ authenticated — use it, not the web UI.
 - Frontier query (open, unassigned, unblocked children of the map):
 
   ```bash
-  gh issue list --state open --json number,title,assignees,blockedBy,parent \
+  gh issue list --state open --limit 500 --json number,title,assignees,blockedBy,parent \
     --jq '[.[] | select(.parent.number == <map-number>
       and (.assignees | length) == 0
-      and .blockedBy.totalCount == 0)]'
+      and ([.blockedBy.nodes[] | select(.state == "OPEN")] | length) == 0)]'
   ```
