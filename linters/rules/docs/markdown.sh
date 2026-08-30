@@ -11,7 +11,13 @@
 set -uo pipefail
 
 PROJECT_ROOT="${1:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
 RUMDL_CONFIG="$PROJECT_ROOT/.rumdl.toml"
+
+if [ ! -e "$RUMDL_CONFIG" ]; then
+  echo ".rumdl.toml not found at project root — skipping."
+  exit 0
+fi
 
 # Resolve the runner: installed rumdl, else the project env via uv.
 # --project keeps uv resolving the same env when cwd is the kb pass.
@@ -48,7 +54,7 @@ lint_tree() {
   out=$("${RUNNER[@]}" check --output-format concise -c "$RUMDL_CONFIG" "$target" 2>&1)
   rc=$?
   while IFS= read -r line; do
-    if [[ "$line" =~ ^([^:]+):([0-9]+):[0-9]+:\ (\[MD[0-9]+\]\ .+)$ ]]; then
+    if [[ "$line" =~ ^(.+):([0-9]+):[0-9]+:\ (\[MD[0-9]+\]\ .+)$ ]]; then
       echo "${BASH_REMATCH[1]}:${BASH_REMATCH[2]} — ${BASH_REMATCH[3]}"
       matched=1
       FAILED=1
@@ -58,6 +64,9 @@ lint_tree() {
   # config, crash) — surface it instead of silently passing.
   if [ "$rc" -ne 0 ] && [ "$matched" -eq 0 ]; then
     echo "${target}: rumdl failed (exit $rc)"
+    echo "$out" | tail -5 | while IFS= read -r out_line; do
+      echo "  $out_line"
+    done
     FAILED=1
   fi
 }

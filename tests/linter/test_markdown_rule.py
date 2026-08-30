@@ -95,3 +95,27 @@ def test_tool_absent_skips_with_hint(tmp_path: Path):
     result = run_rule(root, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     assert result.returncode == 0
     assert "rumdl not found — skipping. Install with: pip install rumdl" in result.stdout
+
+
+def test_kb_clone_is_linted_with_project_config(tmp_path: Path):
+    """kb/ must be linted with the project's .rumdl.toml, not rumdl defaults —
+    MD013 (line length) and MD036 (bold lead-in) are disabled by config."""
+    root = make_project(tmp_path)
+    (root / ".gitignore").write_text("kb/\n")
+    kb = root / "kb"
+    kb.mkdir()
+    subprocess.run(["git", "init", "-q", str(kb)], check=True)
+    (kb / "style.md").write_text(HOUSE_STYLE)
+    result = run_rule(root)
+    assert "[MD013]" not in result.stdout
+    assert "[MD036]" not in result.stdout
+
+
+def test_colon_in_path_is_still_reported(tmp_path: Path):
+    """A greedy path match is required so a colon in the filename doesn't
+    truncate the path capture group and drop the violation."""
+    root = make_project(tmp_path)
+    (root / "we:ird.md").write_text(BAD_FENCE)
+    result = run_rule(root)
+    assert result.returncode == 1
+    assert "we:ird.md:5 — [MD040]" in result.stdout
