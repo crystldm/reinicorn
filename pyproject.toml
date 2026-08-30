@@ -45,6 +45,7 @@ only-include = [
     "hooks",
     "editor-hooks",
     "linters",
+    ".rumdl.toml",
     "adapters",
     "upgrades",
     "platform-instructions",

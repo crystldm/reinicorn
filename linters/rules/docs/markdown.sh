@@ -19,6 +19,8 @@ if [ ! -e "$RUMDL_CONFIG" ]; then
   exit 0
 fi
 
+cd "$PROJECT_ROOT" || exit 1
+
 # Resolve the runner: installed rumdl, else the project env via uv.
 # --project keeps uv resolving the same env when cwd is the kb pass.
 if command -v rumdl &>/dev/null; then
@@ -29,8 +31,6 @@ else
   echo "rumdl not found — skipping. Install with: pip install rumdl"
   exit 0
 fi
-
-cd "$PROJECT_ROOT" || exit 1
 
 FAILED=0
 

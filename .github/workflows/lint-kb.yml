@@ -39,6 +39,12 @@ jobs:
           set +e
           output=$(uv run rcorn kb lint 2>&1)
           exit_code=$?
+          # GitHub caps a PR comment body at 65536 chars; truncate defensively
+          # so the failure-comment step below never 422s on a large report.
+          byte_len=$(printf '%s' "$output" | wc -c)
+          if [ "$byte_len" -gt 60000 ]; then
+            output="$(printf '%s' "$output" | head -c 60000)"$'\n'"…output truncated — run 'rcorn kb lint' locally for the full report"
+          fi
           echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
           {
             echo "output<<LINT_EOF"

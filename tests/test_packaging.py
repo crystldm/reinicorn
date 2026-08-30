@@ -40,6 +40,7 @@ REQUIRED_PREFIXES = (
     "hooks/",
     "editor-hooks/",
     "linters/",
+    ".rumdl.toml",
     "adapters/",
     "templates/AGENTS.md",
 )
