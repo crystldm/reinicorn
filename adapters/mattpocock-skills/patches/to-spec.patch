@@ -1,0 +1,22 @@
+diff --git a/skills/engineering/to-spec/SKILL.md b/skills/engineering/to-spec/SKILL.md
+index 3fd6495..60c0884 100644
+--- a/skills/engineering/to-spec/SKILL.md
++++ b/skills/engineering/to-spec/SKILL.md
+@@ -6,7 +6,7 @@ disable-model-invocation: true
+ 
+ This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user — just synthesize what you already know.
+ 
+-The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
++In a Reinicorn-managed repo, specs are review-gated kb docs: create them with `rcorn spec create "<title>"`. See `docs/agents/issue-tracker.md` for the tracker contract.
+ 
+ ## Process
+ 
+@@ -16,7 +16,7 @@ The issue tracker and triage label vocabulary should have been provided to you 
+ 
+ Check with the user that these seams match their expectations.
+ 
+-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
++3. Create the spec doc with `rcorn spec create "<title>"`, write the spec body into the created file using the template below, then publish it with `rcorn kb publish`.
+ 
+ <spec-template>
+ 
