@@ -266,7 +266,7 @@ def test_init_with_local_flag(existing_repo: Path, tmp_path: Path):
 
 
 def test_init_copies_lint_config(existing_repo: Path, seeded_bare: Path, tmp_path: Path):
-    """init should copy linters/.lint-config.json to target repo."""
+    """init should copy linters/.lint-config.json and .rumdl.toml to target repo."""
     r_root = tmp_path / "r_root"
     r_root.mkdir()
     template = r_root / "templates" / "AGENTS.md"
@@ -275,6 +275,7 @@ def test_init_copies_lint_config(existing_repo: Path, seeded_bare: Path, tmp_pat
     lint_dir = r_root / "linters"
     lint_dir.mkdir()
     (lint_dir / ".lint-config.json").write_text('{"rules": []}')
+    (r_root / ".rumdl.toml").write_text("[global]\n")
 
     with patch("reinicorn.commands.init.reinicorn_root", return_value=r_root), \
          patch("reinicorn.commands.init.get_asset_path") as mock_asset, \
@@ -287,6 +288,7 @@ def test_init_copies_lint_config(existing_repo: Path, seeded_bare: Path, tmp_pat
 
     assert result == 0
     assert (existing_repo / "linters" / ".lint-config.json").is_file()
+    assert (existing_repo / ".rumdl.toml").exists()
 
 
 def test_copy_skills_honours_configured_skills_dir(tmp_path: Path) -> None:

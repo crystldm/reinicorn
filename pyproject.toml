@@ -68,6 +68,7 @@ packages = ["src/reinicorn"]
 "hooks" = "reinicorn/_data/hooks"
 "editor-hooks" = "reinicorn/_data/editor-hooks"
 "linters" = "reinicorn/_data/linters"
+".rumdl.toml" = "reinicorn/_data/.rumdl.toml"
 "upgrades" = "reinicorn/_data/upgrades"
 "platform-instructions" = "reinicorn/_data/platform-instructions"
 "workflows" = "reinicorn/_data/workflows"
