@@ -638,7 +638,7 @@ def _install_session_hook(target_dir: Path) -> None:
 
 
 def _copy_lint_config(target_dir: Path) -> None:
-    """Copy linters/ directory to the target repo."""
+    """Copy linters/ directory and the markdown lint config to the target repo."""
     lint_src = get_asset_path("linters")
     if lint_src is None:
         return
@@ -647,6 +647,12 @@ def _copy_lint_config(target_dir: Path) -> None:
     shutil.copytree(lint_src, lint_dest, dirs_exist_ok=True)
     console.success("Copied linters/ config")
     print()
+
+    rumdl_src = get_asset_path(".rumdl.toml")
+    if rumdl_src is not None:
+        shutil.copy(rumdl_src, target_dir / ".rumdl.toml")
+        console.success("Copied .rumdl.toml")
+        print()
 
 
 def _print_full_summary(

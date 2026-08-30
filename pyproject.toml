@@ -45,6 +45,7 @@ only-include = [
     "hooks",
     "editor-hooks",
     "linters",
+    ".rumdl.toml",
     "adapters",
     "upgrades",
     "platform-instructions",
@@ -68,6 +69,7 @@ packages = ["src/reinicorn"]
 "hooks" = "reinicorn/_data/hooks"
 "editor-hooks" = "reinicorn/_data/editor-hooks"
 "linters" = "reinicorn/_data/linters"
+".rumdl.toml" = "reinicorn/_data/.rumdl.toml"
 "upgrades" = "reinicorn/_data/upgrades"
 "platform-instructions" = "reinicorn/_data/platform-instructions"
 "workflows" = "reinicorn/_data/workflows"
@@ -107,6 +109,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.0.0",
     "ruff>=0.16.2",
+    "rumdl>=0.2.44",
     "pyright>=1.1.411",
     "pyyaml>=6.0.3",
     "bashlex>=0.18",
