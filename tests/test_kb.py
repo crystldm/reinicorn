@@ -7,18 +7,22 @@ from unittest.mock import patch
 
 import pytest
 
+from reinicorn.doc_types import REGISTRY
 from reinicorn.git import run_git
 from reinicorn.kb import (
-    active_plan_names,
     branch_changed_files,
-    check_overlap,
     commit_kb,
     ensure_kb_on_main,
     get_kb_dir,
-    overlap_line,
-    plan_dir,
     repo_kb_dir,
     require_kb_dir,
+)
+from reinicorn.staging import (
+    STAGE_ACTIVE,
+    active_branch_names,
+    branch_dir,
+    check_overlap,
+    overlap_line,
 )
 
 
@@ -71,9 +75,11 @@ def test_require_kb_dir_error_names_both_paths(tmp_path, capsys):
     assert "rcorn init" in out
 
 
-def test_plan_dir(kb_repo: Path):
-    with patch("reinicorn.kb.kb_scope", return_value="testproject"):
-        result = plan_dir(kb_repo / "kb", "feature/foo")
+def test_branch_dir(kb_repo: Path):
+    result = branch_dir(
+        kb_repo / "kb" / "testproject", REGISTRY["plan"], "feature/foo",
+        STAGE_ACTIVE,
+    )
     expected = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-foo"
     assert result == expected
 
@@ -132,15 +138,15 @@ def test_check_overlap_no_overlap_returns_false(kb_repo: Path, capsys):
 
 def test_overlap_line_positive_wording(kb_repo: Path):
     overlaps = [("branch-b", {"shared.py"}), ("branch-c", {"other.py"})]
-    with patch("reinicorn.kb.overlapping_branches", return_value=overlaps):
+    with patch("reinicorn.staging.overlapping_branches", return_value=overlaps):
         result = overlap_line("branch-a", kb_repo)
     assert result == "overlap: 2 branch(es) — see rcorn kb status"
 
 
 def test_overlap_line_none_for_no_basis_and_empty(kb_repo: Path):
-    with patch("reinicorn.kb.overlapping_branches", return_value=None):
+    with patch("reinicorn.staging.overlapping_branches", return_value=None):
         assert overlap_line("branch-a", kb_repo) == "overlap: none"
-    with patch("reinicorn.kb.overlapping_branches", return_value=[]):
+    with patch("reinicorn.staging.overlapping_branches", return_value=[]):
         assert overlap_line("branch-a", kb_repo) == "overlap: none"
 
 
@@ -149,11 +155,11 @@ def test_active_plan_names_sorted(kb_repo: Path):
     (active / "zeta").mkdir(parents=True)
     (active / "alpha").mkdir(parents=True)
     (active / "not-a-dir.md").write_text("x")
-    assert active_plan_names(kb_repo / "kb", "testproject") == ["alpha", "zeta"]
+    assert active_branch_names(kb_repo / "kb", "testproject") == ["alpha", "zeta"]
 
 
 def test_active_plan_names_missing_scope(kb_repo: Path):
-    assert active_plan_names(kb_repo / "kb", "no-such-project") == []
+    assert active_branch_names(kb_repo / "kb", "no-such-project") == []
 
 
 def test_repo_kb_dir_creates_directory(kb_repo: Path):

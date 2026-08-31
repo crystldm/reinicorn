@@ -34,6 +34,9 @@ def _row_yaml(dt: DocType) -> str:
             value = value.value
         elif f.name == "extra_meta":
             value = dict(value)
+        elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+            # Relations render in their overlay shape ({field, type, status}).
+            value = dataclasses.asdict(value)
         elif isinstance(value, tuple):
             value = list(value)
         entry[f.name] = value

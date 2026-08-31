@@ -5,7 +5,6 @@ from __future__ import annotations
 from reinicorn import console
 from reinicorn.git import current_branch, repo_root
 from reinicorn.kb import (
-    check_overlap,
     commit_kb,
     ensure_kb_on_main,
     push_main_with_retry,
@@ -13,6 +12,7 @@ from reinicorn.kb import (
     require_kb_dir,
 )
 from reinicorn.mode import can_publish, get_mode
+from reinicorn.staging import check_overlap
 
 
 def cmd_publish() -> int:

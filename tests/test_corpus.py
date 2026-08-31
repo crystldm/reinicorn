@@ -70,8 +70,13 @@ def test_doc_path_slug(tmp_path):
 
 
 def test_doc_path_branch_sanitizes(tmp_path):
-    p = doc_path(tmp_path, REGISTRY["plan"], "feat/x")
+    p = doc_path(tmp_path, REGISTRY["plan"], "feat/x", stage="active")
     assert p == tmp_path / "exec-plans" / "active" / "feat-x" / "plan.md"
+
+
+def test_doc_path_staged_requires_stage(tmp_path):
+    with pytest.raises(ValueError, match="stage"):
+        doc_path(tmp_path, REGISTRY["plan"], "feat/x")
 
 
 def test_doc_path_singleton(tmp_path):
@@ -81,7 +86,7 @@ def test_doc_path_singleton(tmp_path):
 
 def test_doc_path_missing_ident_raises(tmp_path):
     with pytest.raises(ValueError, match="branch"):
-        doc_path(tmp_path, REGISTRY["plan"])
+        doc_path(tmp_path, REGISTRY["plan"], stage="active")
     with pytest.raises(ValueError, match="slug"):
         doc_path(tmp_path, REGISTRY["spec"])
 
@@ -93,23 +98,24 @@ def test_doc_path_refuses_creation_only_placeholders(tmp_path):
         doc_path(tmp_path, REGISTRY["idea"], "some-slug")
 
 
-def test_doc_path_matches_kb_branch_doc_path(tmp_path, monkeypatch):
-    """Parity: corpus.doc_path and kb.branch_doc_path agree on plan paths."""
-    from reinicorn.kb import branch_doc_path
+def test_closer_target_parity_with_stage_layout(tmp_path):
+    """The closer's path lands beside its closee at the closee's stage."""
+    from reinicorn.staging import closer_target
 
-    monkeypatch.chdir(tmp_path)
-    for branch in ("plain", "feat/slash"):
-        assert doc_path(tmp_path, REGISTRY["plan"], branch) == branch_doc_path(
-            "plan", tmp_path, branch
-        )
-        assert doc_path(tmp_path, REGISTRY["retro"], branch) == branch_doc_path(
-            "retro", tmp_path, branch
-        )
+    active = tmp_path / "exec-plans" / "active" / "feat-slash"
+    active.mkdir(parents=True)
+    assert closer_target(
+        REGISTRY["retro"], tmp_path, "feat/slash"
+    ) == active / "retro.md"
+    # No closee dir at all: a retro without a plan is a closed branch.
+    assert closer_target(
+        REGISTRY["retro"], tmp_path, "feat/none"
+    ) == tmp_path / "exec-plans" / "completed" / "feat-none" / "retro.md"
 
 
 def test_iter_branch_dirs_includes_empty_dirs(tmp_path):
     kb = _seed_kb(tmp_path)
-    dirs = list(iter_branch_dirs(kb, REGISTRY["plan"]))
+    dirs = list(iter_branch_dirs(kb, REGISTRY["plan"], "active"))
     names = [(scope, d.name) for scope, d in dirs]
     assert ("myrepo", "br") in names
     assert ("myrepo", "empty-dir") in names

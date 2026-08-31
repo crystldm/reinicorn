@@ -38,7 +38,8 @@ class FrontmatterRule(LintRule):
                 )
                 continue
             diagnostics.extend(
-                f"{rel}:1 — {error}" for error in frontmatter.validate(doc.meta)
+                f"{rel}:1 — {error}"
+                for error in frontmatter.validate(doc.meta, project_root)
             )
 
         return diagnostics

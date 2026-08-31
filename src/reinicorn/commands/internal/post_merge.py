@@ -1,14 +1,15 @@
-"""rcorn _post-merge — archive stale plans after merge."""
+"""rcorn _post-merge — archive stale branch docs after merge."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from reinicorn import console, frontmatter
-from reinicorn.doc_types import registry
+from reinicorn.doc_types import closable_types
 from reinicorn.git import repo_root, run_git
 from reinicorn.kb import get_kb_dir
 from reinicorn.mode import hook_check
+from reinicorn.staging import STAGE_ACTIVE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,57 +23,68 @@ def cmd_post_merge() -> int:
     if root is None:
         return 0
 
-    _archive_stale_plans(root)
+    _archive_stale_docs(root)
 
     return 0
 
 
-def _archive_stale_plans(root: Path) -> None:
-    """Archive active plans whose remote branches no longer exist."""
+def _archive_stale_docs(root: Path) -> None:
+    """Archive active docs of every closable type whose remote branches no
+    longer exist."""
     resolved = get_kb_dir(root)
     if resolved is None:
         return
 
-    # Iterate over all repo-scoped dirs
+    # Iterate over all repo-scoped dirs, and every closable type in each
     for repo_dir in sorted(resolved.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
             continue
-        active_dir = repo_dir / registry()["plan"].dir_path / "active"
-        if not active_dir.is_dir():
-            continue
+        for dt in closable_types():
+            active_dir = repo_dir / dt.dir_path / STAGE_ACTIVE
+            if not active_dir.is_dir():
+                continue
 
-        live_branches = _live_remote_branches(root)
-        if live_branches is None:
-            return  # error querying remote — don't archive anything
+            live_branches = _live_remote_branches(root)
+            if live_branches is None:
+                return  # error querying remote — don't archive anything
 
-        for entry in sorted(active_dir.iterdir()):
-            if not entry.is_dir() or entry.name.startswith("."):
-                continue
-            if not any(entry.glob("*.md")):
-                continue
-            # Compare the exact branch from frontmatter. Comparing sanitized
-            # directory names instead is lossy and many-to-one — `/` and `\`
-            # both become `-` — so a deleted `feature/mvp` plan looked alive
-            # whenever an unrelated `feature-mvp` branch existed.
-            meta, _ = frontmatter.read(entry / "plan.md")
-            branch = str(meta.get("branch") or "").strip()
-            # Archiving is destructive, so anything short of a usable ref means
-            # "cannot verify", never "gone". A malformed or multi-line value
-            # would otherwise match nothing in live_branches and be read as a
-            # deleted branch.
-            if not _usable_ref(branch, root):
-                continue
-            if branch in live_branches:
-                continue
-            # No remote branch maps to this dir — archive the plan
-            from reinicorn.commands.plan import cmd_plan_complete
-            try:
-                cmd_plan_complete(entry.name, repo_scope=repo_dir.name)
-            except Exception as e:
-                # Broad on purpose: a post-merge hook must not fail the merge.
-                # Report and keep going — one unarchivable plan must not stop
-                # the rest, and it must not vanish without a word either.
-                console.warn(f"Could not archive plan '{entry.name}': {e}")
+            doc_name = dt.filename.rsplit("/", 1)[-1]
+            for entry in sorted(active_dir.iterdir()):
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                if not any(entry.glob("*.md")):
+                    continue
+                # Compare the exact branch from frontmatter. Comparing
+                # sanitized directory names instead is lossy and many-to-one
+                # — `/` and `\` both become `-` — so a deleted `feature/mvp`
+                # doc looked alive whenever an unrelated `feature-mvp`
+                # branch existed.
+                meta, _ = frontmatter.read(entry / doc_name)
+                branch = str(meta.get("branch") or "").strip()
+                # Archiving is destructive, so anything short of a usable ref
+                # means "cannot verify", never "gone". A malformed or
+                # multi-line value would otherwise match nothing in
+                # live_branches and be read as a deleted branch.
+                if not _usable_ref(branch, root):
+                    continue
+                if branch in live_branches:
+                    continue
+                # No remote branch maps to this dir — archive the doc
+                from reinicorn.commands.doc_lifecycle import (
+                    cmd_lifecycle_complete,
+                )
+                try:
+                    cmd_lifecycle_complete(
+                        dt.key, entry.name, repo_scope=repo_dir.name,
+                    )
+                except Exception as e:
+                    # Broad on purpose: a post-merge hook must not fail the
+                    # merge. Report and keep going — one unarchivable doc
+                    # must not stop the rest, and it must not vanish without
+                    # a word either.
+                    console.warn(
+                        f"Could not archive {dt.key} '{entry.name}': {e}"
+                    )
 
 
 def _usable_ref(branch: str, root: Path) -> bool:

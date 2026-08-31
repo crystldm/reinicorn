@@ -11,14 +11,16 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from reinicorn.doc_types import DRAFTS_DIR_NAME, registry
-from reinicorn.linter.spec_refs import SPEC_PLACEHOLDER
+from reinicorn.doc_types import DRAFTS_DIR_NAME, closable_types, registry
+from reinicorn.refs import dependency_placeholder
+from reinicorn.staging import STAGE_ACTIVE, STAGE_COMPLETED
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 # Structural dirs that aren't doc types but are part of the standard layout.
 _STRUCTURAL_DIRS = ("architecture",)
+_TEMPLATE_DIR_NAME = "_template"
 
 
 def generate_seed_tree(root: Path, repo_slug: str) -> None:
@@ -47,10 +49,10 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
         (scope / d).mkdir(parents=True, exist_ok=True)
         (scope / d / ".gitkeep").touch()
 
-    # Exec-plan sub-dirs (active, completed, _template)
-    plan_dir = registry()["plan"].dir_path
-    for sub in ("active", "completed", "_template"):
-        (scope / plan_dir / sub).mkdir(parents=True, exist_ok=True)
+    # Stage sub-dirs for every closable type (active, completed, _template)
+    for dt in closable_types():
+        for sub in (STAGE_ACTIVE, STAGE_COMPLETED, _TEMPLATE_DIR_NAME):
+            (scope / dt.dir_path / sub).mkdir(parents=True, exist_ok=True)
 
     # Golden principles (blank template)
     (scope / "golden-principles.md").write_text(
@@ -70,43 +72,56 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
     # Scope README is team-owned after creation, so preserve every lexical entry.
     readme = scope / "README.md"
     if not os.path.lexists(readme):
+        closable = {dt.key for dt in closable_types()}
+        rows = ["| Architecture | `architecture/` |"]
+        for dt in registry().values():
+            if dt.readme_label is None:
+                continue
+            if dt.dir_path == ".":
+                location = dt.filename
+            elif dt.key in closable:
+                location = f"{dt.dir_path}/{STAGE_ACTIVE}/"
+            else:
+                location = f"{dt.dir_path}/"
+            rows.append(f"| {dt.readme_label} | `{location}` |")
+        rows.append("| Quality scores | `quality-scores.md` |")
         readme.write_text(
             f"# {repo_slug} knowledge base\n\n"
             "This file is the canonical map for humans and agents.\n\n"
             "| Topic | Location |\n|---|---|\n"
-            "| Golden principles | `golden-principles.md` |\n"
-            "| Architecture | `architecture/` |\n"
-            f"| Approved specs | `{registry()['spec'].dir_path}/` |\n"
-            f"| Product requirements | `{registry()['prd'].dir_path}/` |\n"
-            f"| Active plans | `{plan_dir}/active/` |\n"
-            "| Quality scores | `quality-scores.md` |\n"
-            f"| Technical debt | `{registry()['debt'].dir_path}/` |\n\n"
+            + "\n".join(rows) + "\n\n"
             "Use `rcorn kb sync` before work and `rcorn kb publish` after KB changes.\n"
             "Create protected documents only through their `rcorn <type> create` command.\n"
         )
 
-    # Exec plan template — sections from the registry
-    template = scope / plan_dir / "_template"
-    plan_dt = registry()["plan"]
-    sections = "\n\n".join(f"## {s}" for s in plan_dt.required_sections)
-    # Placeholders are substituted by plan.py at create time. `branch` is a
-    # real field now, so the orphan sweep reads the exact ref instead of
-    # comparing sanitized directory names.
-    (template / "plan.md").write_text(
-        "---\n"
-        "type: plan\n"
-        "title: 'Execution Plan: [Branch Name]'\n"
-        "slug: '[Branch Name]'\n"
-        "lifecycle: active\n"
-        "status: planning\n"
-        "created: [date]\n"
-        "author: '[developer or agent]'\n"
-        "branch: '[Branch Name]'\n"
-        "ticket: '[TICKET-ID or N/A]'\n"
-        f"spec: '{SPEC_PLACEHOLDER}'\n"
-        "---\n\n"
-        "# Execution Plan: [Branch Name]\n\n"
-        f"{sections}\n"
-    )
+    # Lifecycle templates — one per closable type, sections from the registry
+    for dt in closable_types():
+        template = scope / dt.dir_path / _TEMPLATE_DIR_NAME
+        doc_name = dt.filename.rsplit("/", 1)[-1]
+        sections = "\n\n".join(f"## {s}" for s in dt.required_sections)
+        rel = dt.depends_on
+        dep_line = (
+            f"{rel.field}: '{dependency_placeholder(rel)}'\n"
+            if rel is not None else ""
+        )
+        # Placeholders are substituted by doc_lifecycle at create time.
+        # `branch` is a real field, so the orphan sweep reads the exact ref
+        # instead of comparing sanitized directory names.
+        (template / doc_name).write_text(
+            "---\n"
+            f"type: {dt.key}\n"
+            f"title: '{dt.key.capitalize()}: [Branch Name]'\n"
+            "slug: '[Branch Name]'\n"
+            "lifecycle: active\n"
+            f"status: {dt.create_status}\n"
+            "created: [date]\n"
+            "author: '[developer or agent]'\n"
+            "branch: '[Branch Name]'\n"
+            "ticket: '[TICKET-ID or N/A]'\n"
+            f"{dep_line}"
+            "---\n\n"
+            f"# {dt.key.capitalize()}: [Branch Name]\n\n"
+            f"{sections}\n"
+        )
     # Root .gitignore
     (root / ".gitignore").write_text("# Generated files\ngenerated/\n")

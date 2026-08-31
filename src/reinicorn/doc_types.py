@@ -63,6 +63,33 @@ class CreateMode(Enum):
 
 
 @dataclass(frozen=True)
+class DependsOn:
+    """This type's docs must reference an approved doc of another type.
+
+    The doc's `field:` frontmatter must resolve to a tracked doc of `type`
+    with `status`, or be the N/A sentinel. Read by the `kb/draft-refs` lint
+    and the pre-push dependency gate (refs.py).
+    """
+
+    field: str
+    type: str
+    status: str
+
+
+@dataclass(frozen=True)
+class Closes:
+    """This type is the closer of another (e.g. retro closes plan).
+
+    Implies: the closer is created inside the closee's dir, `<closee>
+    complete` moves the stage dir with both docs, and — when `required` —
+    the closee cannot complete without a filled closer (staging.py).
+    """
+
+    type: str
+    required: bool = False
+
+
+@dataclass(frozen=True)
 class DocType:
     """Metadata for a single kb document type."""
 
@@ -91,6 +118,9 @@ class DocType:
     # `id` is auto-added to `fields` for rows with a {seq} filename.
     fields: tuple[str, ...] = ()
     required_fields: tuple[str, ...] = ()
+    # Declarative relations (spec: process-as-config §2). None = behavior off.
+    depends_on: DependsOn | None = None
+    closes: Closes | None = None
 
     @property
     def create_hint(self) -> str:
@@ -196,7 +226,7 @@ REGISTRY: dict[str, DocType] = {
     "plan": DocType(
         key="plan",
         dir_path="exec-plans",
-        filename="active/{branch}/plan.md",
+        filename="{stage}/{branch}/plan.md",
         protected=True,
         help_text="Execution plan operations",
         template_body="",  # fallback plan.md is frontmatter + H1 only
@@ -207,11 +237,12 @@ REGISTRY: dict[str, DocType] = {
         required_sections=("Goal", "Acceptance Criteria", "Tasks"),
         fields=("branch", "ticket", "spec", "retro"),
         required_fields=("branch",),
+        depends_on=DependsOn(field="spec", type="spec", status="approved"),
     ),
     "retro": DocType(
         key="retro",
         dir_path="exec-plans",
-        filename="completed/{branch}/retro.md",
+        filename="retro.md",
         protected=True,
         help_text="Retrospective operations",
         template_body="{sections}",
@@ -225,6 +256,7 @@ REGISTRY: dict[str, DocType] = {
         ),
         fields=("branch", "plan"),
         required_fields=("branch",),
+        closes=Closes(type="plan", required=False),
     ),
     "principle": DocType(
         key="principle",
@@ -263,15 +295,44 @@ _PLACEHOLDER_RE = re.compile(r"\{(\w+)(?::[^}]*)?\}")
 # Placeholders each addressing mode may (and must) use in `filename`.
 _ALLOWED_PLACEHOLDERS = {
     Addressing.SLUG: frozenset({"slug", "username", "seq"}),
-    Addressing.BRANCH: frozenset({"branch"}),
+    Addressing.BRANCH: frozenset({"branch", "stage"}),
     Addressing.SINGLETON: frozenset(),
 }
 _IDENTITY_PLACEHOLDER = {Addressing.SLUG: "slug", Addressing.BRANCH: "branch"}
+# Relation values in the overlay are mappings coerced into these dataclasses.
+_RELATION_FIELDS: dict[str, type] = {"depends_on": DependsOn, "closes": Closes}
 
 
 def filename_placeholders(dt: DocType) -> frozenset[str]:
     """Placeholder names used in the row's filename pattern."""
     return frozenset(_PLACEHOLDER_RE.findall(dt.filename))
+
+
+_PLACEHOLDER_FULL_RE = re.compile(r"\{(\w+)(?::[^}]*)?\}")
+
+
+def filename_regex(filename: str) -> re.Pattern[str]:
+    """The filename pattern's own regex: {seq} captures digits, every other
+    placeholder matches one path segment."""
+    out: list[str] = []
+    pos = 0
+    for m in _PLACEHOLDER_FULL_RE.finditer(filename):
+        out.append(re.escape(filename[pos:m.start()]))
+        out.append(r"(?P<seq>\d+)" if m.group(1) == "seq" else r"[^/]+")
+        pos = m.end()
+    out.append(re.escape(filename[pos:]))
+    return re.compile("".join(out))
+
+
+def seq_display_id(filename: str, seq: int) -> str:
+    """The display id a {seq} filename stamps into the doc's `id` field:
+    the pattern's seq-bearing basename prefix, formatted
+    ("RFC-{seq:04}-{slug}.md" at 7 → "RFC-0007")."""
+    for m in _PLACEHOLDER_FULL_RE.finditer(filename):
+        if m.group(1) == "seq":
+            prefix = filename[: m.end()].rsplit("/", 1)[-1]
+            return prefix.format(seq=seq)
+    raise ValueError(f"no {{seq}} placeholder in '{filename}'")
 
 
 def _coerce(source: str, key: str, name: str, value: Any) -> Any:
@@ -291,6 +352,30 @@ def _coerce(source: str, key: str, name: str, value: Any) -> Any:
             raise bad(
                 f"one of {[m.value for m in enum_cls]}"
             ) from None
+    if name in _RELATION_FIELDS:
+        if value is None:
+            return None  # explicit null clears an inherited relation
+        rel_cls = _RELATION_FIELDS[name]
+        rel_fields = {f.name for f in dataclasses.fields(rel_cls)}
+        rel_required = {
+            f.name for f in dataclasses.fields(rel_cls)
+            if f.default is dataclasses.MISSING
+        }
+        if (
+            not isinstance(value, dict)
+            or not set(value) <= rel_fields
+            or not rel_required <= set(value)
+        ):
+            raise bad(
+                f"a mapping with key(s) {sorted(rel_required)} "
+                f"(optional: {sorted(rel_fields - rel_required)}) or null"
+            )
+        for k, v in value.items():
+            annotated = rel_cls.__dataclass_fields__[k].type
+            expected = bool if annotated == "bool" else str
+            if not isinstance(v, expected):
+                raise bad(f"{expected.__name__} for '{k}', got {v!r}")
+        return rel_cls(**value)
     if name == "extra_meta":
         if not isinstance(value, dict) or not all(
             isinstance(k, str) and isinstance(v, str) for k, v in value.items()
@@ -393,10 +478,81 @@ def _validate_rows(rows: dict[str, DocType], source: str) -> None:
             identity is not None
             and identity not in used
             and dt.create_mode is not CreateMode.APPEND
+            and dt.closes is None  # a closer's path derives from its closee
         ):
             raise DocTypesError(
                 f"{where}: filename '{dt.filename}' must contain "
                 f"'{{{identity}}}' for addressing '{dt.addressing.value}'"
+            )
+
+    _validate_relations(rows, source)
+
+
+def _validate_relations(rows: dict[str, DocType], source: str) -> None:
+    """Relation invariants (spec: process-as-config §1/§2).
+
+    Runs after disabled rows are dropped, so disabling a related group is
+    atomic; only an *enabled* row pointing at a missing/disabled target is
+    an error.
+    """
+    closers: dict[str, str] = {}  # closee key -> closer key
+    for dt in rows.values():
+        where = f"{source}: doc_types.{dt.key}"
+        if dt.depends_on is not None:
+            rel = dt.depends_on
+            if rel.type not in rows:
+                raise DocTypesError(
+                    f"{where}: depends_on targets '{rel.type}', which is "
+                    "not in the effective registry (missing or disabled) — "
+                    "clear the relation or disable this row too"
+                )
+            if rel.field not in dt.fields:
+                raise DocTypesError(
+                    f"{where}: depends_on.field '{rel.field}' is not a "
+                    f"declared field of this row (fields: {list(dt.fields)})"
+                )
+        if dt.closes is None:
+            continue
+        target = rows.get(dt.closes.type)
+        if target is None:
+            raise DocTypesError(
+                f"{where}: closes targets '{dt.closes.type}', which is not "
+                "in the effective registry (missing or disabled) — clear "
+                "the relation or disable this row too"
+            )
+        if (
+            dt.addressing is not Addressing.BRANCH
+            or target.addressing is not Addressing.BRANCH
+        ):
+            raise DocTypesError(
+                f"{where}: closes pairs must both be branch-addressed "
+                f"('{dt.key}' is '{dt.addressing.value}', "
+                f"'{target.key}' is '{target.addressing.value}')"
+            )
+        if "/" in dt.filename or filename_placeholders(dt):
+            raise DocTypesError(
+                f"{where}: a closer's filename must be a bare name with no "
+                f"placeholders or '/', got '{dt.filename}' — its path "
+                "derives from the closee's dir"
+            )
+        prior = closers.setdefault(dt.closes.type, dt.key)
+        if prior != dt.key:
+            raise DocTypesError(
+                f"{where}: '{dt.closes.type}' already has closer "
+                f"'{prior}' — at most one enabled closer per closee"
+            )
+    for closee_key in closers:
+        closee = rows[closee_key]
+        if closee.closes is not None:
+            raise DocTypesError(
+                f"{source}: doc_types.{closee_key}: a closer cannot itself "
+                "be closable (closes chains are depth one)"
+            )
+        if not closee.filename.startswith("{stage}/"):
+            raise DocTypesError(
+                f"{source}: doc_types.{closee_key}: a closable type's "
+                "filename must be '{stage}/{branch}/<name>', got "
+                f"'{closee.filename}'"
             )
 
 
@@ -423,7 +579,14 @@ def _apply_overlay(
                 f"got {entry!r}"
             )
         entry = dict(entry)
-        if entry.pop("disabled", False):
+        disabled = entry.pop("disabled", False)
+        if not isinstance(disabled, bool):
+            # A truthy string like "false" must not silently drop the row.
+            raise DocTypesError(
+                f"{source}: doc_types.{key}.disabled — expected a boolean, "
+                f"got {disabled!r}"
+            )
+        if disabled:
             if entry:
                 raise DocTypesError(
                     f"{source}: doc_types.{key} sets disabled: true — "
@@ -526,6 +689,23 @@ def overlay_schema() -> dict[str, Any]:
     def field_schema(name: str) -> dict[str, Any]:
         if name in _ENUM_FIELDS:
             return {"enum": [m.value for m in _ENUM_FIELDS[name]]}
+        if name in _RELATION_FIELDS:
+            rel_cls = _RELATION_FIELDS[name]
+            rel_fields = dataclasses.fields(rel_cls)
+            return {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "required": [
+                    f.name for f in rel_fields
+                    if f.default is dataclasses.MISSING
+                ],
+                "properties": {
+                    f.name: {
+                        "type": "boolean" if f.type == "bool" else "string"
+                    }
+                    for f in rel_fields
+                },
+            }
         if name == "extra_meta":
             return {"type": "object", "additionalProperties": {"type": "string"}}
         if name in ("required_sections", "fields", "required_fields"):
@@ -605,3 +785,32 @@ def drafts_dir(key: str, repo_dir: Path) -> Path:
 def gated_types() -> list[DocType]:
     """All review-gated doc types (drafts lifecycle applies)."""
     return [dt for dt in registry().values() if dt.gated]
+
+
+# --- Relation graph queries ------------------------------------------------
+# These replace literal per-type registry lookups: a relation with no match
+# returns None/empty and the caller skips, which is how a registry with no
+# `closes` row gets no closer behavior at all.
+
+
+def closer_of(dt: DocType, root: Path | None = None) -> DocType | None:
+    """The row that closes *dt*, or None when nothing does."""
+    for row in registry(root).values():
+        if row.closes is not None and row.closes.type == dt.key:
+            return row
+    return None
+
+
+def closable_types(root: Path | None = None) -> list[DocType]:
+    """Rows something closes (they carry the {stage} lifecycle), in registry
+    order."""
+    rows = registry(root)
+    closed = {
+        row.closes.type for row in rows.values() if row.closes is not None
+    }
+    return [dt for dt in rows.values() if dt.key in closed]
+
+
+def dependencies_of(dt: DocType) -> DependsOn | None:
+    """The row's declared dependency relation, or None."""
+    return dt.depends_on

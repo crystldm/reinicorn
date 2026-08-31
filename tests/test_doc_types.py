@@ -67,7 +67,7 @@ def test_registry_entries_match_spec_table():
     """Verify specific registry values match the spec table."""
     plan = REGISTRY["plan"]
     assert plan.dir_path == "exec-plans"
-    assert plan.filename == "active/{branch}/plan.md"
+    assert plan.filename == "{stage}/{branch}/plan.md"
     assert plan.protected is True
     assert "Goal" in plan.required_sections
     assert "Acceptance Criteria" in plan.required_sections
@@ -89,7 +89,7 @@ def test_registry_entries_match_spec_table():
 
     retro = REGISTRY["retro"]
     assert retro.dir_path == "exec-plans"
-    assert retro.filename == "completed/{branch}/retro.md"
+    assert retro.filename == "retro.md"
 
     principle = REGISTRY["principle"]
     assert principle.dir_path == "."

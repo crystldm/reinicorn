@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from reinicorn.commands.doc_create import cmd_doc_create
-from reinicorn.commands.plan import cmd_plan_complete
+from reinicorn.commands.doc_lifecycle import cmd_lifecycle_complete
 from reinicorn.git import run_git
 
 
@@ -43,7 +43,7 @@ def test_plan_complete_warns_on_empty_retro(submodule_repo: Path, monkeypatch, c
     monkeypatch.chdir(submodule_repo)
     cmd_doc_create("retro", "")
     capsys.readouterr()  # discard create output
-    assert cmd_plan_complete() == 0
+    assert cmd_lifecycle_complete("plan") == 0
     out = capsys.readouterr().out
     assert "retro" in out.lower()
     assert "rcorn retro create" in out
@@ -60,7 +60,7 @@ def test_plan_complete_quiet_on_filled_retro(submodule_repo: Path, monkeypatch, 
         )
     )
     capsys.readouterr()
-    assert cmd_plan_complete() == 0
+    assert cmd_lifecycle_complete("plan") == 0
     out = capsys.readouterr().out
     assert "No retro captured" not in out
     # retro traveled with the plan dir

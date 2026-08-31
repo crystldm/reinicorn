@@ -8,10 +8,10 @@ import pytest
 
 from reinicorn.git import run_git
 from reinicorn.linter.rules.cross_links import CrossLinksRule
+from reinicorn.linter.rules.doc_structure import DocStructureRule
 from reinicorn.linter.rules.docs_freshness import DocsFreshnessRule
 from reinicorn.linter.rules.draft_refs import DraftRefsRule
 from reinicorn.linter.rules.frontmatter import FrontmatterRule
-from reinicorn.linter.rules.plan_structure import PlanStructureRule
 from tests.conftest import doc_text
 
 
@@ -76,7 +76,7 @@ class TestDocsFreshness:
 
 class TestPlanStructure:
     def test_no_active_plans_pass(self, kb_repo: Path):
-        rule = PlanStructureRule()
+        rule = DocStructureRule()
         assert rule.run(kb_repo) == []
 
     def test_valid_plan_passes(self, kb_repo: Path):
@@ -89,7 +89,7 @@ class TestPlanStructure:
                  "- Done\n\n## Tasks\n- [ ] thing\n",
         ))
 
-        rule = PlanStructureRule()
+        rule = DocStructureRule()
         assert rule.run(kb_repo) == []
 
     def test_missing_sections_detected(self, kb_repo: Path):
@@ -101,7 +101,7 @@ class TestPlanStructure:
             body="\n# Plan\n\nNo required sections.\n",
         ))
 
-        rule = PlanStructureRule()
+        rule = DocStructureRule()
         diags = rule.run(kb_repo)
         assert len(diags) == 3  # Goal, Acceptance Criteria, Tasks
 
@@ -115,7 +115,7 @@ class TestPlanStructure:
                  "## Acceptance Criteria\n- Done\n\n## Tasks\n- [ ] thing\n",
         ))
 
-        diags = PlanStructureRule().run(kb_repo)
+        diags = DocStructureRule().run(kb_repo)
         assert len(diags) == 1
         assert "Missing 'spec:' frontmatter field" in diags[0]
 

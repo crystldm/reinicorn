@@ -11,9 +11,11 @@ from pathlib import Path
 
 from reinicorn import __version__, console
 from reinicorn.config import kb_scope
+from reinicorn.doc_types import closable_types
 from reinicorn.git import current_branch, repo_root
-from reinicorn.kb import active_plan_names, branch_dir_name, get_kb_dir, overlap_line
+from reinicorn.kb import branch_dir_name, get_kb_dir
 from reinicorn.kb_remote import configured_kb_remote_url
+from reinicorn.staging import active_branch_names, overlap_line
 
 
 def _bin_path() -> str:
@@ -47,16 +49,20 @@ def cmd_home() -> int:
     branch = current_branch()
     print(f"branch: {branch or 'detached'}")
 
-    plans = active_plan_names(kb_dir, kb_scope(root))
-    print(f"plans: {len(plans)} active in this repo scope")
+    names = active_branch_names(kb_dir, kb_scope(root))
+    closable = closable_types()
+    label = closable[0].key if closable else "doc"
+    print(f"{label}s: {len(names)} active in this repo scope")
 
     current = branch_dir_name(branch) if branch else ""
     if branch:
         print(overlap_line(branch, root))
-    if current and current in plans:
-        print(f"plan: {current} (this branch)")
-        console.next_step("rcorn plan show", "rcorn kb status")
+    if current and current in names:
+        print(f"{label}: {current} (this branch)")
+        console.next_step(f"rcorn {label} show", "rcorn kb status")
+    elif closable:
+        print(f"{label}: none for this branch")
+        console.next_step(closable[0].create_hint, "rcorn kb status")
     else:
-        print("plan: none for this branch")
-        console.next_step("rcorn plan create", "rcorn kb status")
+        console.next_step("rcorn kb status")
     return 0

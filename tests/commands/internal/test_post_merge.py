@@ -2,11 +2,11 @@
 
 The real contract (see src/reins/commands/internal/post_merge.py) is not
 "branch merged into HEAD" but "branch still has a live origin/* ref":
-_archive_stale_plans() diffs each active/<branch>/ dir against the set of
+_archive_stale_docs() diffs each active/<branch>/ dir against the set of
 remote-tracking branches (git branch -r --list 'origin/*'). A dir with no
 matching origin/* ref is treated as stale (its remote branch was deleted,
 e.g. via GitHub's "delete branch on merge") and gets archived to completed/
-via plan.cmd_plan_complete(). A dir that still has a live origin/* ref is
+via plan.cmd_lifecycle_complete(). A dir that still has a live origin/* ref is
 left alone. If querying the remote errors out, nothing is archived.
 
 cmd_post_merge() takes no arguments (invoked from the hook as

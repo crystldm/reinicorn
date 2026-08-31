@@ -128,18 +128,18 @@ def cmd_post_checkout(args: list[str]) -> int:
         m = re.search(ticket_pattern, branch)
         ticket_id = m.group(0) if m else ""
 
+        from reinicorn.doc_types import closable_types
+
+        closable = closable_types(root)
         print()
         if ticket_id:
             print(f"reinicorn: new branch '{branch}' (ticket: {ticket_id})")
-            print(
-                f"  Run 'rcorn plan create' to set up an execution plan "
-                f"with {ticket_id} context."
-            )
         else:
             print(f"reinicorn: new branch '{branch}'")
+        for dt in closable:
+            context = f"with {ticket_id} context" if ticket_id else "for this work"
             print(
-                "  Run 'rcorn plan create' to set up an execution plan "
-                "for this work."
+                f"  Run '{dt.create_hint}' to set up a {dt.key} {context}."
             )
         print()
 

@@ -8,9 +8,16 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console, frontmatter
 from reinicorn.config import kb_scope
-from reinicorn.doc_types import DRAFTS_DIR_NAME, drafts_dir, registry
+from reinicorn.corpus import doc_path
+from reinicorn.doc_types import (
+    DRAFTS_DIR_NAME,
+    drafts_dir,
+    filename_placeholders,
+    registry,
+)
 from reinicorn.git import current_branch, repo_root
-from reinicorn.kb import branch_dir_name, branch_doc_path, require_kb_dir
+from reinicorn.kb import branch_dir_name, require_kb_dir
+from reinicorn.staging import STAGE_ACTIVE, STAGES, closer_target
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,7 +44,7 @@ def _doc_files(
     include_drafts adds the annex explicitly for gated types.
     """
     dt = registry()[doc_type]
-    pattern = re.sub(r"\{\w+\}", "*", dt.filename)
+    pattern = re.sub(r"\{\w+(?::[^}]*)?\}", "*", dt.filename)
     files = sorted((repo_dir / dt.dir_path).glob(pattern))
     if not include_drafts:
         files = [f for f in files if f.parent.name != DRAFTS_DIR_NAME]
@@ -62,10 +69,24 @@ def cmd_doc_show(
     repo_dir = _repo_dir()
     if repo_dir is None:
         return 1
-    matches = {
-        f.stem: f for f in _doc_files(doc_type, repo_dir, include_drafts)
-    }
+    files = _doc_files(doc_type, repo_dir, include_drafts)
+    matches = {f.stem: f for f in files}
     target = matches.get(slug)
+    if target is None and "seq" in filename_placeholders(registry()[doc_type]):
+        # {seq} rows resolve by the stamped `id` too. Numbering is
+        # best-effort-unique (spec §1), so a duplicated id is reported, not
+        # silently picked from.
+        id_hits = [
+            f for f in files if frontmatter.read(f)[0].get("id") == slug
+        ]
+        if len(id_hits) == 1:
+            target = id_hits[0]
+        elif len(id_hits) > 1:
+            console.error(
+                f"id '{slug}' is ambiguous — it matches: "
+                + ", ".join(str(f) for f in id_hits)
+            )
+            return 1
     if target is None:
         console.error(f"no {doc_type} named '{slug}'")
         if matches:
@@ -114,9 +135,13 @@ def cmd_doc_list(doc_type: str, include_drafts: bool = False) -> int:
     return 0
 
 
-def _branch_doc_pattern(doc_type: str) -> str:
+def _branch_doc_pattern(doc_type: str, stage: str = STAGE_ACTIVE) -> str:
     """Glob matching every branch's doc of a branch-addressed type."""
-    return registry()[doc_type].filename.replace("{branch}", "*")
+    return (
+        registry()[doc_type].filename
+        .replace("{stage}", stage)
+        .replace("{branch}", "*")
+    )
 
 
 def _missing_branch_doc(doc_type: str, branch: str, branches: set[str]) -> int:
@@ -144,9 +169,10 @@ def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
     if not branch:
         console.error("no branch given and none checked out")
         return 1
-    target = branch_doc_path(doc_type, repo_dir, branch)
+    dt = registry()[doc_type]
+    stage = STAGE_ACTIVE if "stage" in filename_placeholders(dt) else None
+    target = doc_path(repo_dir, dt, branch, stage=stage)
     if not target.is_file():
-        dt = registry()[doc_type]
         branches = {
             f.parent.name
             for f in (repo_dir / dt.dir_path).glob(_branch_doc_pattern(doc_type))
@@ -159,11 +185,11 @@ def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
 def cmd_branch_show(
     doc_type: str, branch: str | None = None, full: bool = False,
 ) -> int:
-    """Show a branch-addressed doc. Retro checks the active plan dir first
-    (retro rides with an active plan until archive; identity check against
-    the registry row keeps type knowledge out of string comparisons)."""
+    """Show a branch-addressed doc. A closer rides in its closee's dir at
+    whatever stage the closee currently lives in (graph lookup, not a
+    type-name special case)."""
     dt = registry()[doc_type]
-    if dt is not registry()["retro"]:
+    if dt.closes is None:
         return _branch_doc_show(doc_type, branch, full)
     repo_dir = _repo_dir()
     if repo_dir is None:
@@ -172,20 +198,19 @@ def cmd_branch_show(
     if not branch:
         console.error("no branch given and none checked out")
         return 1
-    active = branch_doc_path("plan", repo_dir, branch).parent / "retro.md"
-    target = active if active.is_file() else branch_doc_path(doc_type, repo_dir, branch)
+    target = closer_target(dt, repo_dir, branch)
     if not target.is_file():
-        active_pattern = str(
-            PurePosixPath(_branch_doc_pattern("plan")).with_name("retro.md")
-        )
-        # Each pattern globs under its own type's dir so the lookup can't
-        # silently break if plan and retro ever stop sharing a dir_path.
-        globs = (
-            (repo_dir / dt.dir_path, _branch_doc_pattern(doc_type)),
-            (repo_dir / registry()["plan"].dir_path, active_pattern),
-        )
+        closee = registry()[dt.closes.type]
         branches = {
-            f.parent.name for root, pattern in globs for f in root.glob(pattern)
+            f.parent.name
+            for stage in STAGES
+            for f in (repo_dir / closee.dir_path).glob(
+                str(
+                    PurePosixPath(
+                        _branch_doc_pattern(closee.key, stage)
+                    ).with_name(dt.filename)
+                )
+            )
         }
         return _missing_branch_doc(doc_type, branch, branches)
     _print_doc(target, doc_type, branch_dir_name(branch), full)

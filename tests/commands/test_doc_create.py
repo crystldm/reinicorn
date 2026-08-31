@@ -352,7 +352,7 @@ def test_phantom_type_creates_with_no_other_change(kb_repo: Path):
 
 
 def test_doc_create_refuses_plan_type(kb_repo: Path, capsys):
-    """Plan creation has lifecycle logic in cmd_plan_create; the generic
+    """Plan creation has lifecycle logic in cmd_lifecycle_create; the generic
     path must refuse it rather than silently overwrite an active plan."""
     from reinicorn.commands.doc_create import cmd_doc_create
     p1, p2, p3, p4 = _create_env(kb_repo)
@@ -364,3 +364,108 @@ def test_doc_create_refuses_plan_type(kb_repo: Path, capsys):
     out = capsys.readouterr().out
     assert "error:" in out
     assert "rcorn plan create" in out
+
+
+# --- {seq} allocation (spec: process-as-config §1) ---
+
+
+_RFC_OVERLAY = (
+    "doc_types:\n"
+    "  rfc:\n"
+    "    dir_path: rfcs\n"
+    "    filename: 'RFC-{seq:04}-{slug}.md'\n"
+    "    addressing: slug\n"
+)
+
+
+def _rfc_repo(tmp_path: Path) -> Path:
+    from reinicorn.git import run_git
+
+    root = tmp_path / "repo"
+    scope_dir = root / "kb" / "myscope"
+    scope_dir.mkdir(parents=True)
+    (root / "kb" / ".git").mkdir()
+    run_git("init", "-q", "-b", "main", str(root))
+    (root / ".reinicorn-config").write_text("REINICORN_KB_SCOPE=myscope\n")
+    (scope_dir / "doc-types.yaml").write_text(_RFC_OVERLAY)
+    return root
+
+
+def test_seq_allocates_max_plus_one(tmp_path, monkeypatch):
+    from reinicorn.commands.doc_create import _next_seq
+    from reinicorn.doc_types import registry
+
+    root = _rfc_repo(tmp_path)
+    monkeypatch.chdir(root)
+    repo_dir = root / "kb" / "myscope"
+    rfc = registry(root)["rfc"]
+    assert _next_seq(rfc, repo_dir) == 1
+    (repo_dir / "rfcs").mkdir()
+    (repo_dir / "rfcs" / "RFC-0007-older.md").write_text("x")
+    (repo_dir / "rfcs" / "not-an-rfc.md").write_text("x")
+    assert _next_seq(rfc, repo_dir) == 8
+
+
+def test_seq_create_formats_once_and_stamps_id(tmp_path, monkeypatch, capsys):
+    from reinicorn.commands.doc_create import cmd_doc_create
+
+    root = _rfc_repo(tmp_path)
+    monkeypatch.chdir(root)
+    with patch(
+        "reinicorn.commands.doc_create.repo_root", return_value=root
+    ), patch("reinicorn.commands.doc_create.commit_kb"), patch(
+        "reinicorn.commands.doc_create.run_git"
+    ) as mock_git:
+        mock_git.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Test User\n"
+        )
+        assert cmd_doc_create("rfc", "Use Postgres") == 0
+
+    target = root / "kb" / "myscope" / "rfcs" / "RFC-0001-use-postgres.md"
+    assert target.is_file()
+    meta = fm.parse(target.read_text())[0]
+    assert meta["id"] == "RFC-0001"
+
+
+def test_seq_show_resolves_id_and_slug(tmp_path, monkeypatch, capsys):
+    from reinicorn.commands.doc_create import cmd_doc_create
+    from reinicorn.commands.doc_show import cmd_doc_show
+
+    root = _rfc_repo(tmp_path)
+    monkeypatch.chdir(root)
+    with patch(
+        "reinicorn.commands.doc_create.repo_root", return_value=root
+    ), patch("reinicorn.commands.doc_create.commit_kb"), patch(
+        "reinicorn.commands.doc_create.run_git"
+    ) as mock_git:
+        mock_git.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="Test User\n"
+        )
+        assert cmd_doc_create("rfc", "Use Postgres") == 0
+    capsys.readouterr()
+
+    with patch("reinicorn.commands.doc_show.repo_root", return_value=root):
+        assert cmd_doc_show("rfc", "RFC-0001-use-postgres") == 0
+        by_slug = capsys.readouterr().out
+        assert cmd_doc_show("rfc", "RFC-0001") == 0
+        by_id = capsys.readouterr().out
+    assert "Use Postgres" in by_slug
+    assert "Use Postgres" in by_id
+
+
+def test_seq_show_reports_ambiguous_id(tmp_path, monkeypatch, capsys):
+    from reinicorn.commands.doc_show import cmd_doc_show
+
+    root = _rfc_repo(tmp_path)
+    monkeypatch.chdir(root)
+    rfcs = root / "kb" / "myscope" / "rfcs"
+    rfcs.mkdir()
+    for slug in ("one", "two"):
+        (rfcs / f"RFC-0001-{slug}.md").write_text(
+            f"---\ntype: rfc\nid: RFC-0001\nslug: RFC-0001-{slug}\n---\n\n# {slug}\n"
+        )
+    with patch("reinicorn.commands.doc_show.repo_root", return_value=root):
+        assert cmd_doc_show("rfc", "RFC-0001") == 1
+    out = capsys.readouterr().out
+    assert "ambiguous" in out
+    assert "RFC-0001-one" in out and "RFC-0001-two" in out

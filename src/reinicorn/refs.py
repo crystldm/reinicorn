@@ -1,7 +1,11 @@
-"""Resolve doc references against the kb's git-tracked paths.
+"""The `depends_on` behavior's shared logic: resolve doc references against
+the kb's git-tracked paths.
 
-Shared by the ``kb/draft-refs`` lint rule and the ``_pre-push`` approval gate so
-the two can never disagree about whether a reference is approved.
+Shared by the ``kb/draft-refs`` lint rule and the ``_pre-push`` dependency
+gate so the two can never disagree about whether a reference is approved.
+Nothing here knows any doc type by name: which frontmatter field is read,
+and which type it must resolve to, come from the row's `DependsOn` relation
+(spec: process-as-config §2).
 
 Resolution is against git, not the filesystem — but the two callers ask about
 different revisions, because they answer different questions:
@@ -30,9 +34,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
+from reinicorn.doc_types import DRAFTS_DIR_NAME, registry
 from reinicorn.frontmatter import (
-    FIELD_SPEC,
     FIELD_STATUS,
     STATUS_DRAFT,
     STATUS_IN_REVIEW,
@@ -43,34 +46,47 @@ from reinicorn.git import explain_failure, run_git
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Placeholder text the plan template ships with; a plan still carrying it has
-# not declared anything. YAML may also parse an unquoted `[...]` placeholder
-# into a list, which `declared_spec` treats the same way. The constant lives
-# beside the regex that must treat it as undeclared, so the create paths that
-# stamp it and the gate that rejects it share one definition.
-SPEC_PLACEHOLDER = "[kb path to the spec this implements, or N/A]"
-SPEC_PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
+    from reinicorn.doc_types import DependsOn
+
+# A doc whose dependency field still carries a template placeholder has not
+# declared anything. YAML may also parse an unquoted `[...]` placeholder into
+# a list, which `declared_dependency` treats the same way. The renderer and
+# the matcher live side by side so the create paths that stamp the
+# placeholder and the gate that rejects it share one definition.
+PLACEHOLDER_RE = re.compile(r"^\[.*\]$")
+
+
+def dependency_placeholder(rel: DependsOn) -> str:
+    """Template text a new doc's dependency field ships with."""
+    return f"[kb path to the {rel.type} this implements, or N/A]"
+
 
 # Explicit opt-out. Case-insensitive so "n/a" and "N/A" both count.
-SPEC_NOT_APPLICABLE = "n/a"
+NOT_APPLICABLE = "n/a"
 _NOT_APPLICABLE_RE = re.compile(
-    rf"{re.escape(SPEC_NOT_APPLICABLE)}(?:$|\s)", re.IGNORECASE
-)
-
-SPEC_DIR_NAME = REGISTRY["spec"].dir_path
-
-# Anchor the prose matcher on a known doc-type directory rather than on the "kb/"
-# prefix. That accepts all three path styles while bounding false positives to
-# strings that actually look like doc references.
-_DOC_DIRS = "|".join(
-    re.escape(d)
-    for d in sorted({dt.dir_path for dt in REGISTRY.values() if dt.dir_path != "."})
-)
-REF_RE = re.compile(
-    rf"(?<![\w/])(?:{KB_DIR_NAME}/)?(?:[\w.-]+/)*(?:{_DOC_DIRS})/[\w./-]+\.md"
+    rf"{re.escape(NOT_APPLICABLE)}(?:$|\s)", re.IGNORECASE
 )
 
 _UNAPPROVED_STATUSES = frozenset({STATUS_DRAFT, STATUS_IN_REVIEW})
+
+
+def ref_re(root: Path | None = None) -> re.Pattern[str]:
+    """Prose matcher for doc references, from the effective registry.
+
+    Anchored on a known doc-type directory rather than on the "kb/" prefix.
+    That accepts all three path styles while bounding false positives to
+    strings that actually look like doc references. Callers hold the result
+    in a local rather than recompiling per line.
+    """
+    doc_dirs = "|".join(
+        re.escape(d)
+        for d in sorted(
+            {dt.dir_path for dt in registry(root).values() if dt.dir_path != "."}
+        )
+    )
+    return re.compile(
+        rf"(?<![\w/])(?:{KB_DIR_NAME}/)?(?:[\w.-]+/)*(?:{doc_dirs})/[\w./-]+\.md"
+    )
 
 
 @dataclass(frozen=True)
@@ -96,9 +112,9 @@ def tracked_paths(kb_dir: Path) -> frozenset[str]:
     resolve against, and callers treat that as "no references resolve".
 
     A genuine git failure raises instead. Returning an empty set there would
-    make every declared spec look unresolved, which reads as a policy violation:
-    the push gate would block with a misleading message and never reach its
-    documented loud fail-open path.
+    make every declared dependency look unresolved, which reads as a policy
+    violation: the push gate would block with a misleading message and never
+    reach its documented loud fail-open path.
     """
     r = run_git("ls-files", "-z", check=False, cwd=kb_dir)
     if r.returncode == 0:
@@ -126,7 +142,7 @@ def tracked_paths_at(kb_dir: Path, rev: str) -> frozenset[str]:
     The committed truth: a staged-but-uncommitted doc, a worktree edit, or
     anything newer than ``rev`` is invisible here. A failure raises — ``rev``
     comes from a gitlink the caller just resolved, so an unlistable tree is an
-    internal error for the gate's loud fail-open path, not "every spec
+    internal error for the gate's loud fail-open path, not "every dependency
     unresolved".
     """
     r = run_git("ls-tree", "-r", "--name-only", "-z", rev, check=False, cwd=kb_dir)
@@ -170,8 +186,8 @@ def resolve_ref(ref: str, scope: str, tracked: frozenset[str]) -> Resolution:
     3. scope-relative    — ``specs/x.md`` -> ``<scope>/specs/x.md``.
 
     The drafts fallback runs only after every exact form misses, so a reference
-    to a genuinely approved ``specs/x.md`` still resolves to the approved doc
-    even when a same-named draft is tracked too.
+    to a genuinely approved doc still resolves to the approved doc even when a
+    same-named draft is tracked too.
     """
     ref = ref.strip().strip("`")
     if not ref:
@@ -196,19 +212,20 @@ def resolve_ref(ref: str, scope: str, tracked: frozenset[str]) -> Resolution:
     return Resolution()
 
 
-def is_spec_path(path: str) -> bool:
-    """True when a resolved kb path lives under the spec doc-type directory.
+def path_in_dir(path: str, dir_path: str) -> bool:
+    """True when a resolved kb path lives under the doc-type dir *dir_path*.
 
-    The field names a *spec*, but any tracked doc resolves just as well, and a
-    plan.md or README.md carries no review status — so `unapproved_reason` finds
-    nothing to object to and the reference sails through. Checking the doc type
-    is what stops the gate from accepting a doc that was never in the lane.
+    The relation names a target *type*, but any tracked doc resolves just as
+    well, and a plan.md or README.md carries no review status — so
+    `unapproved_reason` finds nothing to object to and the reference sails
+    through. Checking the directory is what stops the gate from accepting a
+    doc that was never in the lane.
 
-    Drafts count as specs. `specs/drafts/x.md` is a real spec at an earlier
-    stage, and reporting it as *unapproved* is far more useful than rejecting it
-    as the wrong kind of document.
+    Drafts count. `specs/drafts/x.md` is a real doc of the type at an
+    earlier stage, and reporting it as *unapproved* is far more useful than
+    rejecting it as the wrong kind of document.
     """
-    return SPEC_DIR_NAME in path.split("/")[:-1]
+    return dir_path in path.split("/")[:-1]
 
 
 def unapproved_reason(
@@ -245,24 +262,24 @@ def unapproved_reason(
     return None
 
 
-def declared_spec(text: str) -> str | None:
-    """The plan's declared ``spec:`` value, or None when absent/placeholder.
+def declared_dependency(text: str, rel: DependsOn) -> str | None:
+    """The doc's declared dependency value, or None when absent/placeholder.
 
     A non-string value is a placeholder too: YAML parses an unquoted
     ``[kb path …]`` template stub as a list, and no real reference is anything
     but a string.
     """
-    value = get(text, FIELD_SPEC)
+    value = get(text, rel.field)
     if value is None or not isinstance(value, str):
         return None
     value = value.strip()
-    if not value or SPEC_PLACEHOLDER_RE.match(value):
+    if not value or PLACEHOLDER_RE.match(value):
         return None
     return value
 
 
 def is_not_applicable(value: str) -> bool:
-    """True when the plan declares that it implements no spec.
+    """True when the doc declares that it has no dependency.
 
     A trailing rationale counts: "N/A (fixes two ideas)" is a better
     declaration than a bare "N/A", and a gate that rejects it only teaches

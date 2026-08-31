@@ -49,7 +49,6 @@ STATUS_APPROVED = "approved"
 # Frontmatter keys the review lane stamps. Named because the lane reads and
 # writes them by constant, exactly as it did for the legacy bold labels.
 FIELD_STATUS = "status"
-FIELD_SPEC = "spec"
 FIELD_LIFECYCLE = "lifecycle"
 FIELD_REVIEW_PR = "review_pr"
 FIELD_APPROVED_BY = "approved_by"
@@ -87,14 +86,16 @@ EXCLUDED_FILENAMES = frozenset({
 EXCLUDED_DIRS = frozenset({"_template", "by-category", "references"})
 
 
-def _extra_fields(doc_type: str | None) -> tuple[str, ...]:
+def _extra_fields(
+    doc_type: str | None, root: Path | None = None,
+) -> tuple[str, ...]:
     """Per-type fields, plus the review stamps when the type is review-gated.
 
     The single derivation shared by the allow-list and the serialization
     order — computing it twice would let a future gating change make
     `validate` and `dumps` disagree about which keys are legal.
     """
-    dt = registry().get(doc_type or "")
+    dt = registry(root).get(doc_type or "")
     if dt is None:
         return ()
     if dt.gated:
@@ -102,8 +103,11 @@ def _extra_fields(doc_type: str | None) -> tuple[str, ...]:
     return dt.fields
 
 
-def _allowed_keys(doc_type: str | None) -> set[str]:
-    return set(CORE_ORDER) | set(TRAILING_ORDER) | set(_extra_fields(doc_type))
+def _allowed_keys(doc_type: str | None, root: Path | None = None) -> set[str]:
+    return (
+        set(CORE_ORDER) | set(TRAILING_ORDER)
+        | set(_extra_fields(doc_type, root))
+    )
 
 
 def _key_order(meta: dict[str, Any]) -> list[str]:
@@ -199,8 +203,13 @@ def set_meta(text: str, updates: dict[str, Any]) -> str:
     return dumps(meta, body)
 
 
-def validate(meta: dict[str, Any]) -> list[str]:
-    """Required-field, enum, and type checks. Empty list means valid."""
+def validate(meta: dict[str, Any], root: Path | None = None) -> list[str]:
+    """Required-field, enum, and type checks. Empty list means valid.
+
+    *root* selects whose effective registry judges the doc — the lint rule
+    passes its project root so validation cannot read another project's
+    overlay when the working directory differs.
+    """
     if not meta:
         return ["no frontmatter block found"]
 
@@ -211,7 +220,7 @@ def validate(meta: dict[str, Any]) -> list[str]:
         if meta.get(field) in (None, ""):
             errors.append(f"missing required field '{field}'")
 
-    reg = registry()
+    reg = registry(root)
     if doc_type is not None and doc_type not in reg:
         errors.append(
             f"'type' must be one of {sorted(reg)}, got '{doc_type}'"
@@ -255,7 +264,7 @@ def validate(meta: dict[str, Any]) -> list[str]:
                 f"'{doc_type}' docs require '{field}'"
             )
 
-    allowed = _allowed_keys(doc_type)
+    allowed = _allowed_keys(doc_type, root)
     for key in sorted(set(meta) - allowed):
         errors.append(f"unknown field '{key}' for type '{doc_type}'")
 
