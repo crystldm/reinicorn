@@ -7,7 +7,7 @@ import importlib
 import sys
 
 from reinicorn import __version__
-from reinicorn.doc_types import REGISTRY, Addressing, CreateMode, TitleSource
+from reinicorn.doc_types import Addressing, CreateMode, DocTypesError, TitleSource, registry
 from reinicorn.identity import CLI_NAME, PRODUCT_NAME
 
 
@@ -27,7 +27,7 @@ def _build_parser() -> argparse.ArgumentParser:
         """Returns {key: subparsers action} so bespoke verbs (plan's
         lifecycle) can attach without reflecting over argparse internals."""
         groups: dict = {}
-        for dt in REGISTRY.values():
+        for dt in registry().values():
             g = sub.add_parser(dt.key, help=dt.help_text)
             gs = g.add_subparsers(dest=f"{dt.key}_command")
             gs.required = True
@@ -123,6 +123,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "setup", help="Set up the kb repo for the review lane"
     )
     review_setup_p.add_argument("--force", action="store_true", help="Re-apply setup")
+
+    # ── Doc-types group (the process-as-config surface) ─────
+    dtypes_p = sub.add_parser(
+        "doc-types", help="Doc-type registry operations (effective process)"
+    )
+    dtypes_sub = dtypes_p.add_subparsers(dest="doc-types_command")
+    dtypes_sub.required = True
+    dtypes_show_p = dtypes_sub.add_parser(
+        "show", help="Print the effective registry (defaults + overlay)"
+    )
+    dtypes_show_p.add_argument(
+        "--schema", action="store_true",
+        help="Emit a JSON Schema for doc-types.yaml instead",
+    )
 
     # ── Kb group ────────────────────────────────────────────
     kb_p = sub.add_parser("kb", help="Kb operations (sync, publish, status, lint, ...)")
@@ -233,7 +247,7 @@ def _doc_dispatch_rows() -> dict:
     registry-driven-doc-types stage 2). Hand-wired rows merged into
     _DISPATCH after this override plan's create/status/complete."""
     rows: dict = {}
-    for dt in REGISTRY.values():
+    for dt in registry().values():
         key = dt.key
         if dt.title_source is TitleSource.TITLE:
             rows[(key, dt.create_verb)] = (
@@ -274,8 +288,10 @@ def _doc_dispatch_rows() -> dict:
 # Maps (noun, verb) -> handler taking the parsed args Namespace and returning an
 # exit code. Top-level nouns with no sub-verb use a None verb. Each handler lazily
 # imports its command so importing this module stays cheap.
+# Registry-generated rows merge in at dispatch time (not import time): the
+# effective registry may read a kb overlay, and a broken overlay must fail
+# closed through main's DocTypesError handler, not as an import crash.
 _DISPATCH = {
-    **_doc_dispatch_rows(),
     # Plan lifecycle verbs stay hand-wired; create overrides the generated
     # row (cmd_doc_create refuses "plan" — lifecycle logic lives in plan.py).
     ("plan", "create"): lambda _: _load("plan", "cmd_plan_create")(),
@@ -298,6 +314,9 @@ _DISPATCH = {
     ),
     ("review", "status"): lambda _: _load("review", "cmd_review_status")(),
     ("review", "setup"): lambda a: _load("review", "cmd_review_setup")(force=a.force),
+    ("doc-types", "show"): lambda a: _load("doc_types_cmd", "cmd_doc_types_show")(
+        schema=a.schema
+    ),
     ("kb", "sync"): lambda _: _load("sync", "cmd_sync")(),
     ("kb", "publish"): lambda _: _load("publish", "cmd_publish")(),
     ("kb", "status"): lambda a: _load("status", "cmd_status")(
@@ -339,10 +358,15 @@ _DISPATCH = {
 }
 
 
+def _dispatch_table() -> dict:
+    """The effective dispatch table: generated rows, hand-wired overrides."""
+    return {**_doc_dispatch_rows(), **_DISPATCH}
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     cmd = args.command
     verb = getattr(args, f"{cmd}_command", None)
-    handler = _DISPATCH.get((cmd, verb))
+    handler = _dispatch_table().get((cmd, verb))
     if handler is None:
         # Unreachable when argparse `required=True` is set on every subgroup.
         # If we get here, a verb was added to the parser without a table entry.
@@ -405,7 +429,15 @@ def main(argv: list[str] | None = None) -> int:
         except SystemExit as e:
             return e.code if isinstance(e.code, int) else 1
 
-    parser = _build_parser()
+    try:
+        parser = _build_parser()
+    except DocTypesError as e:
+        # A broken doc-types.yaml fails closed for every command (the
+        # parser itself is generated from the registry) — with the file
+        # and offending key, not a traceback.
+        from reinicorn import console
+        console.error(str(e))
+        return 1
 
     if not argv:
         # home-view note: bare `reinicorn` shows live state (axi principle 8:
@@ -424,6 +456,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return _dispatch(args)
+    except DocTypesError as e:
+        from reinicorn import console
+        console.error(str(e))
+        return 1
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
     except KeyboardInterrupt:

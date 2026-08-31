@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from reinicorn import __version__
-from reinicorn.cli import _DISPATCH, _build_parser, main
+from reinicorn.cli import _build_parser, _dispatch_table, main
 
 
 def test_help_returns_zero(capsys):
@@ -96,7 +96,7 @@ def test_every_parser_verb_has_a_dispatch_entry():
         verbs = _subparser_choices(group)
         # Nouns with no verbs (init, update, feedback) dispatch as (noun, None).
         pairs = [(noun, None)] if verbs is None else [(noun, v) for v in verbs]
-        missing.extend(p for p in pairs if p not in _DISPATCH)
+        missing.extend(p for p in pairs if p not in _dispatch_table())
     assert not missing, f"parser verbs without _DISPATCH entries: {missing}"
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_get, kb_scope
-from reinicorn.doc_types import REGISTRY
+from reinicorn.doc_types import registry
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.hooks_health import hook_issues
 from reinicorn.identity import STALE_THRESHOLD_KEY
@@ -42,7 +42,7 @@ def cmd_status(compact: bool = False) -> int:
     for repo_dir in sorted(kb_dir.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
             continue
-        active_dir = repo_dir / REGISTRY["plan"].dir_path / "active"
+        active_dir = repo_dir / registry()["plan"].dir_path / "active"
         if active_dir.is_dir():
             plan_dirs.extend(d for d in active_dir.iterdir() if d.is_dir())
 
@@ -120,9 +120,9 @@ def cmd_status(compact: bool = False) -> int:
     for repo_dir in sorted(kb_dir.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
             continue
-        debt_file = repo_dir / REGISTRY["debt"].dir_path / "index.md"
+        debt_file = repo_dir / registry()["debt"].dir_path / "index.md"
         if debt_file.is_file():
-            debt_path = f"{KB_DIR_NAME}/{repo_dir.name}/{REGISTRY['debt'].dir_path}/index.md"
+            debt_path = f"{KB_DIR_NAME}/{repo_dir.name}/{registry()['debt'].dir_path}/index.md"
             console.info(f"Tech debt: see {debt_path}")
             break
     print()

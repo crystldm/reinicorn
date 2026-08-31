@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from reinicorn.doc_types import REGISTRY
+from reinicorn.doc_types import OVERLAY_FILENAME, registry
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -66,22 +66,10 @@ CORE_REQUIRED = (
 # Serialized last: the aggregation/mining substrate.
 TRAILING_ORDER = ("tags", "related")
 
-# Per-type fields, keyed by doc_types.REGISTRY key. `type:` uses the registry
-# key itself (`plan`, `debt`) rather than a second vocabulary, so enum
-# validation is `meta["type"] in REGISTRY`.
-PER_TYPE: dict[str, tuple[str, ...]] = {
-    "plan": ("branch", "ticket", "spec", "retro"),
-    "retro": ("branch", "plan"),
-    "idea": ("promoted_to",),
-    "spec": ("supersedes", "superseded_by", "implemented_by"),
-    "prd": ("supersedes", "superseded_by", "implemented_by"),
-    "debt": ("id", "category", "severity", "remediation"),
-    "principle": (),
-}
-PER_TYPE_REQUIRED: dict[str, tuple[str, ...]] = {
-    "plan": ("branch",),
-    "retro": ("branch",),
-}
+# Per-type fields live on the registry rows (`DocType.fields` /
+# `required_fields`), overlay-aware. `type:` uses the registry key itself
+# (`plan`, `debt`) rather than a second vocabulary, so enum validation is
+# `meta["type"] in registry()`.
 # Review-lane stamps, allowed only on review-gated types.
 REVIEW_FIELDS = ("review_pr", "approved_by", "review_cancelled")
 
@@ -89,11 +77,11 @@ REVIEW_FIELDS = ("review_pr", "approved_by", "review_cancelled")
 # provenance. One list, shared by the migration and the lint rule.
 EXCLUDED_FILENAMES = frozenset({
     "README.md", "index.md", "ATTRIBUTION.md", "quality-scores.md",
-    "cleanup-queue.md", "progress.md", "decisions.md",
+    "cleanup-queue.md", "progress.md", "decisions.md", OVERLAY_FILENAME,
 })
 # Directories holding aggregates rather than authored docs. `by-category`
 # rolls tech-debt items up per category (## High → ### SEC-08 …) and
-# `references` holds how-tos that no REGISTRY type claims — neither has an
+# `references` holds how-tos that no registry type claims — neither has an
 # author or a lifecycle, and the spec's Non-Goals rule out inventing a type
 # for them. Verified against the corpus 2026-07-27.
 EXCLUDED_DIRS = frozenset({"_template", "by-category", "references"})
@@ -106,10 +94,12 @@ def _extra_fields(doc_type: str | None) -> tuple[str, ...]:
     order — computing it twice would let a future gating change make
     `validate` and `dumps` disagree about which keys are legal.
     """
-    per_type = PER_TYPE.get(doc_type or "", ())
-    if doc_type in REGISTRY and REGISTRY[doc_type].gated:
-        return (*per_type, *REVIEW_FIELDS)
-    return per_type
+    dt = registry().get(doc_type or "")
+    if dt is None:
+        return ()
+    if dt.gated:
+        return (*dt.fields, *REVIEW_FIELDS)
+    return dt.fields
 
 
 def _allowed_keys(doc_type: str | None) -> set[str]:
@@ -221,9 +211,10 @@ def validate(meta: dict[str, Any]) -> list[str]:
         if meta.get(field) in (None, ""):
             errors.append(f"missing required field '{field}'")
 
-    if doc_type is not None and doc_type not in REGISTRY:
+    reg = registry()
+    if doc_type is not None and doc_type not in reg:
         errors.append(
-            f"'type' must be one of {sorted(REGISTRY)}, got '{doc_type}'"
+            f"'type' must be one of {sorted(reg)}, got '{doc_type}'"
         )
 
     lifecycle = meta.get("lifecycle")
@@ -257,7 +248,8 @@ def validate(meta: dict[str, Any]) -> list[str]:
         ):
             errors.append(f"'{field}' must be a list of strings")
 
-    for field in PER_TYPE_REQUIRED.get(doc_type or "", ()):
+    required = reg[doc_type].required_fields if doc_type in reg else ()
+    for field in required:
         if meta.get(field) in (None, ""):
             errors.append(
                 f"'{doc_type}' docs require '{field}'"

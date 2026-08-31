@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn import frontmatter
 from reinicorn.config import KB_DIR_NAME
+from reinicorn.corpus import iter_docs
 from reinicorn.linter.rules.base import LintRule
 
 if TYPE_CHECKING:
@@ -28,27 +29,16 @@ class FrontmatterRule(LintRule):
             return []
 
         diagnostics: list[str] = []
-        for path in sorted(kb.rglob("*.md")):
-            # Scope dirs starting with "." or "_" hold generated or shared
-            # material, not authored docs.
-            rel_parts = path.relative_to(kb).parts
-            if rel_parts and rel_parts[0].startswith((".", "_")):
-                continue
-            if rel_parts and rel_parts[0] == "generated":
-                continue
-            if not frontmatter.is_doc(path):
-                continue
-
-            rel = path.relative_to(project_root)
-            meta, _ = frontmatter.read(path)
-            if not meta:
+        for doc in iter_docs(kb):
+            rel = doc.path.relative_to(project_root)
+            if not doc.meta:
                 diagnostics.append(
                     f"{rel}:1 — No frontmatter block. Create docs with "
                     f"'rcorn <type> create' so the schema is applied."
                 )
                 continue
             diagnostics.extend(
-                f"{rel}:1 — {error}" for error in frontmatter.validate(meta)
+                f"{rel}:1 — {error}" for error in frontmatter.validate(doc.meta)
             )
 
         return diagnostics

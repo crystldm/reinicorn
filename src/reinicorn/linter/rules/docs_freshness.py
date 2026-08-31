@@ -6,7 +6,7 @@ import time
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.doc_types import REGISTRY
+from reinicorn.doc_types import registry
 from reinicorn.linter.rules.base import LintRule
 
 if TYPE_CHECKING:
@@ -30,7 +30,7 @@ def _key_docs(project_root: Path) -> list[str]:
             f"{prefix}/golden-principles.md",
             f"{prefix}/quality-scores.md",
         ])
-        for dt in REGISTRY.values():
+        for dt in registry(project_root).values():
             if dt.index_file:
                 docs.append(f"{prefix}/{dt.dir_path}/{dt.index_file}")
         design_md = repo_dir / "DESIGN.md"

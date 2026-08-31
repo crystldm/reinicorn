@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch as mock_patch
 
 import pytest
 
 from reinicorn.doc_types import REGISTRY, Addressing, DocType
-from reinicorn.skillset import wiring as wiring_mod
 from reinicorn.skillset.adapter import AdapterError, WiringEntry
 from reinicorn.skillset.wiring import render_wiring, write_wiring
 
@@ -92,14 +92,9 @@ def test_render_wiring_row_order_is_registry_insertion_order() -> None:
     assert keys_in_doc == list(REGISTRY)
 
 
-def test_render_wiring_phantom_type_gets_row_with_no_wiring(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    copied = dict(REGISTRY)
-    copied["phantom"] = PHANTOM
-    monkeypatch.setattr(wiring_mod, "REGISTRY", copied)
-
-    markdown, skipped = render_wiring(None)
+def test_render_wiring_phantom_type_gets_row_with_no_wiring() -> None:
+    with mock_patch.dict(REGISTRY, {"phantom": PHANTOM}):
+        markdown, skipped = render_wiring(None)
     assert skipped == []
     assert '| phantom | `rcorn phantom create "<title>"` | — |' in markdown
 

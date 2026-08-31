@@ -2,7 +2,7 @@
 
 Creates the standard kb directory structure with empty templates,
 ready to be committed and pushed as the initial kb content.
-Derives directory structure from the doc_types REGISTRY — no hard-coded paths.
+Derives directory structure from the effective doc-type registry — no hard-coded paths.
 Does NOT copy reinicorn's own kb content.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
+from reinicorn.doc_types import DRAFTS_DIR_NAME, registry
 from reinicorn.linter.spec_refs import SPEC_PLACEHOLDER
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
 
     # Create dirs from the registry (unique dir_paths, skip ".")
     seen_dirs: set[str] = set()
-    for dt in REGISTRY.values():
+    for dt in registry().values():
         if dt.dir_path != "." and dt.dir_path not in seen_dirs:
             seen_dirs.add(dt.dir_path)
             (scope / dt.dir_path).mkdir(parents=True, exist_ok=True)
@@ -48,7 +48,7 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
         (scope / d / ".gitkeep").touch()
 
     # Exec-plan sub-dirs (active, completed, _template)
-    plan_dir = REGISTRY["plan"].dir_path
+    plan_dir = registry()["plan"].dir_path
     for sub in ("active", "completed", "_template"):
         (scope / plan_dir / sub).mkdir(parents=True, exist_ok=True)
 
@@ -76,18 +76,18 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
             "| Topic | Location |\n|---|---|\n"
             "| Golden principles | `golden-principles.md` |\n"
             "| Architecture | `architecture/` |\n"
-            f"| Approved specs | `{REGISTRY['spec'].dir_path}/` |\n"
-            f"| Product requirements | `{REGISTRY['prd'].dir_path}/` |\n"
+            f"| Approved specs | `{registry()['spec'].dir_path}/` |\n"
+            f"| Product requirements | `{registry()['prd'].dir_path}/` |\n"
             f"| Active plans | `{plan_dir}/active/` |\n"
             "| Quality scores | `quality-scores.md` |\n"
-            f"| Technical debt | `{REGISTRY['debt'].dir_path}/` |\n\n"
+            f"| Technical debt | `{registry()['debt'].dir_path}/` |\n\n"
             "Use `rcorn kb sync` before work and `rcorn kb publish` after KB changes.\n"
             "Create protected documents only through their `rcorn <type> create` command.\n"
         )
 
     # Exec plan template — sections from the registry
     template = scope / plan_dir / "_template"
-    plan_dt = REGISTRY["plan"]
+    plan_dt = registry()["plan"]
     sections = "\n\n".join(f"## {s}" for s in plan_dt.required_sections)
     # Placeholders are substituted by plan.py at create time. `branch` is a
     # real field now, so the orphan sweep reads the exact ref instead of

@@ -35,6 +35,20 @@ def doc_text(body: str = "\n## Problem\n\nbody\n", **meta) -> str:
 os.environ["GIT_ALLOW_PROTOCOL"] = "file:ext:https:http:ssh:git"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_registry():
+    """Each test sees the registry as this test's cwd/patches define it.
+
+    `doc_types.registry()` memoizes per process; tests chdir between tmp
+    repos and patch the defaults dict, so a warm cache would leak one
+    test's effective registry into the next.
+    """
+    from reinicorn.doc_types import _reset_registry_cache
+    _reset_registry_cache()
+    yield
+    _reset_registry_cache()
+
+
 def _git_init(path: Path) -> None:
     """Init a git repo with test user config."""
     run_git("init", "-q", "-b", "main", str(path))

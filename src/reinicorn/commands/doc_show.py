@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console, frontmatter
 from reinicorn.config import kb_scope
-from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY, drafts_dir
+from reinicorn.doc_types import DRAFTS_DIR_NAME, drafts_dir, registry
 from reinicorn.git import current_branch, repo_root
 from reinicorn.kb import branch_dir_name, branch_doc_path, require_kb_dir
 
@@ -36,7 +36,7 @@ def _doc_files(
     component, like idea's */*.md, do descend into subdirectories);
     include_drafts adds the annex explicitly for gated types.
     """
-    dt = REGISTRY[doc_type]
+    dt = registry()[doc_type]
     pattern = re.sub(r"\{\w+\}", "*", dt.filename)
     files = sorted((repo_dir / dt.dir_path).glob(pattern))
     if not include_drafts:
@@ -72,8 +72,8 @@ def cmd_doc_show(
             console.info(f"valid slugs: {', '.join(sorted(matches))}")
         else:
             print(f"{doc_type}s: 0 found")
-            console.next_step(REGISTRY[doc_type].create_hint)
-        if REGISTRY[doc_type].gated and not include_drafts and any(
+            console.next_step(registry()[doc_type].create_hint)
+        if registry()[doc_type].gated and not include_drafts and any(
             f.stem == slug
             for f in _doc_files(doc_type, repo_dir, include_drafts=True)
         ):
@@ -100,7 +100,7 @@ def cmd_doc_list(doc_type: str, include_drafts: bool = False) -> int:
     files = _doc_files(doc_type, repo_dir, include_drafts)
     if not files:
         print(f"{doc_type}s: 0 found")
-        console.next_step(REGISTRY[doc_type].create_hint)
+        console.next_step(registry()[doc_type].create_hint)
         return 0
     print(f"{doc_type}s: {len(files)} total")
     for f in files:
@@ -116,7 +116,7 @@ def cmd_doc_list(doc_type: str, include_drafts: bool = False) -> int:
 
 def _branch_doc_pattern(doc_type: str) -> str:
     """Glob matching every branch's doc of a branch-addressed type."""
-    return REGISTRY[doc_type].filename.replace("{branch}", "*")
+    return registry()[doc_type].filename.replace("{branch}", "*")
 
 
 def _missing_branch_doc(doc_type: str, branch: str, branches: set[str]) -> int:
@@ -128,7 +128,7 @@ def _missing_branch_doc(doc_type: str, branch: str, branches: set[str]) -> int:
     """
     console.error(f"no {doc_type} for branch '{branch}'")
     if branch == current_branch():
-        console.next_step(REGISTRY[doc_type].create_hint)
+        console.next_step(registry()[doc_type].create_hint)
     elif branches:
         console.info(f"branches with a {doc_type}: {', '.join(sorted(branches))}")
     else:
@@ -146,7 +146,7 @@ def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
         return 1
     target = branch_doc_path(doc_type, repo_dir, branch)
     if not target.is_file():
-        dt = REGISTRY[doc_type]
+        dt = registry()[doc_type]
         branches = {
             f.parent.name
             for f in (repo_dir / dt.dir_path).glob(_branch_doc_pattern(doc_type))
@@ -162,8 +162,8 @@ def cmd_branch_show(
     """Show a branch-addressed doc. Retro checks the active plan dir first
     (retro rides with an active plan until archive; identity check against
     the registry row keeps type knowledge out of string comparisons)."""
-    dt = REGISTRY[doc_type]
-    if dt is not REGISTRY["retro"]:
+    dt = registry()[doc_type]
+    if dt is not registry()["retro"]:
         return _branch_doc_show(doc_type, branch, full)
     repo_dir = _repo_dir()
     if repo_dir is None:
@@ -182,7 +182,7 @@ def cmd_branch_show(
         # silently break if plan and retro ever stop sharing a dir_path.
         globs = (
             (repo_dir / dt.dir_path, _branch_doc_pattern(doc_type)),
-            (repo_dir / REGISTRY["plan"].dir_path, active_pattern),
+            (repo_dir / registry()["plan"].dir_path, active_pattern),
         )
         branches = {
             f.parent.name for root, pattern in globs for f in root.glob(pattern)

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.doc_types import REGISTRY
+from reinicorn.corpus import iter_docs
+from reinicorn.doc_types import registry
 from reinicorn.linter.rules.base import LintRule
 from reinicorn.linter.spec_refs import (
     REF_RE,
@@ -39,11 +41,20 @@ class DraftRefsRule(LintRule):
         except RuntimeError as e:
             return [f"{KB_DIR_NAME}:1 — cannot enumerate tracked kb paths: {e}"]
 
-        active_glob = f"*/{REGISTRY['plan'].dir_path}/active/*/plan.md"
-        for plan in sorted(kb.glob(active_glob)):
-            rel = plan.relative_to(project_root)
-            scope = plan.relative_to(kb).parts[0]
-            text = plan.read_text()
+        plan_dt = registry(project_root).get("plan")
+        if plan_dt is None:
+            return diagnostics
+        # Path-matched, not type-matched: a plan.md with broken frontmatter
+        # must still be checked, and completed plans must not be.
+        active_rel = f"{plan_dt.dir_path}/{plan_dt.filename.replace('{branch}', '*')}"
+        for doc in iter_docs(kb):
+            if not fnmatch(
+                str(doc.path.relative_to(kb / doc.scope)), active_rel
+            ):
+                continue
+            rel = doc.path.relative_to(project_root)
+            scope = doc.scope
+            text = doc.path.read_text()
 
             # Report each offending doc once per plan. A spec named in the
             # spec: field and again in prose is one violation, not two.

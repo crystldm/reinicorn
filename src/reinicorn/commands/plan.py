@@ -8,7 +8,7 @@ from datetime import date
 
 from reinicorn import console, frontmatter
 from reinicorn.config import config_get, kb_scope
-from reinicorn.doc_types import REGISTRY
+from reinicorn.doc_types import registry
 from reinicorn.frontmatter import set_meta
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.identity import TICKET_PATTERN_KEY
@@ -74,7 +74,7 @@ def cmd_plan_create() -> int:
     m = re.search(ticket_pattern, branch)
     ticket_id = m.group(0) if m else ""
 
-    template_dir = kb_dir / kb_scope(root) / REGISTRY["plan"].dir_path / "_template"
+    template_dir = kb_dir / kb_scope(root) / registry()["plan"].dir_path / "_template"
     if template_dir.is_dir():
         for tmpl in sorted(template_dir.glob("*.md")):
             meta, body = frontmatter.parse(tmpl.read_text())
@@ -123,7 +123,7 @@ def cmd_plan_create() -> int:
     else:
         from reinicorn.commands.doc_create import render_doc
         (pdir / "plan.md").write_text(render_doc(
-            REGISTRY["plan"], f"Execution Plan: {branch}", author,
+            registry()["plan"], f"Execution Plan: {branch}", author,
             extra={
                 "slug": pdir.name,
                 "branch": branch,
