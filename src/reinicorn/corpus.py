@@ -70,7 +70,8 @@ def iter_docs(kb: Path, scope: str | None = None) -> Iterator[Doc]:
             if not frontmatter.is_doc(path):
                 continue
             meta, body = frontmatter.read(path)
-            dt = reg.get(meta.get("type")) if meta else None
+            doc_type = meta.get("type") if meta else None
+            dt = reg.get(doc_type) if isinstance(doc_type, str) else None
             yield Doc(
                 path=path, scope=scope_dir.name, dt=dt, meta=meta, body=body,
             )
