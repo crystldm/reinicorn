@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
-from reinicorn.doc_types import DRAFTS_DIR_NAME, registry
+from reinicorn.doc_types import DRAFTS_DIR_NAME, REGISTRY
 from reinicorn.frontmatter import (
     FIELD_SPEC,
     FIELD_STATUS,
@@ -57,29 +57,18 @@ _NOT_APPLICABLE_RE = re.compile(
     rf"{re.escape(SPEC_NOT_APPLICABLE)}(?:$|\s)", re.IGNORECASE
 )
 
-def spec_dir_name() -> str:
-    """The spec type's directory name, from the effective registry."""
-    return registry()["spec"].dir_path
+SPEC_DIR_NAME = REGISTRY["spec"].dir_path
 
-
-def ref_re() -> re.Pattern[str]:
-    """Prose matcher for doc references, from the effective registry.
-
-    Anchored on a known doc-type directory rather than on the "kb/" prefix.
-    That accepts all three path styles while bounding false positives to
-    strings that actually look like doc references. A function, not a
-    module constant, so an overlay's dirs are matched too; callers hold the
-    result in a local rather than recompiling per line.
-    """
-    doc_dirs = "|".join(
-        re.escape(d)
-        for d in sorted(
-            {dt.dir_path for dt in registry().values() if dt.dir_path != "."}
-        )
-    )
-    return re.compile(
-        rf"(?<![\w/])(?:{KB_DIR_NAME}/)?(?:[\w.-]+/)*(?:{doc_dirs})/[\w./-]+\.md"
-    )
+# Anchor the prose matcher on a known doc-type directory rather than on the "kb/"
+# prefix. That accepts all three path styles while bounding false positives to
+# strings that actually look like doc references.
+_DOC_DIRS = "|".join(
+    re.escape(d)
+    for d in sorted({dt.dir_path for dt in REGISTRY.values() if dt.dir_path != "."})
+)
+REF_RE = re.compile(
+    rf"(?<![\w/])(?:{KB_DIR_NAME}/)?(?:[\w.-]+/)*(?:{_DOC_DIRS})/[\w./-]+\.md"
+)
 
 _UNAPPROVED_STATUSES = frozenset({STATUS_DRAFT, STATUS_IN_REVIEW})
 
@@ -219,7 +208,7 @@ def is_spec_path(path: str) -> bool:
     stage, and reporting it as *unapproved* is far more useful than rejecting it
     as the wrong kind of document.
     """
-    return spec_dir_name() in path.split("/")[:-1]
+    return SPEC_DIR_NAME in path.split("/")[:-1]
 
 
 def unapproved_reason(

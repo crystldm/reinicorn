@@ -10,12 +10,12 @@ from reinicorn.corpus import iter_docs
 from reinicorn.doc_types import registry
 from reinicorn.linter.rules.base import LintRule
 from reinicorn.linter.spec_refs import (
+    REF_RE,
+    SPEC_DIR_NAME,
     declared_spec,
     is_not_applicable,
     is_spec_path,
-    ref_re,
     resolve_ref,
-    spec_dir_name,
     tracked_paths,
     unapproved_reason,
 )
@@ -102,7 +102,7 @@ class DraftRefsRule(LintRule):
         if not is_spec_path(res.path):
             return [
                 f"{rel}:1 — 'spec: {value}' resolves to '{res.path}', which "
-                f"is not a spec; name a doc under '{spec_dir_name()}/' or 'N/A'"
+                f"is not a spec; name a doc under '{SPEC_DIR_NAME}/' or 'N/A'"
             ]
 
         seen.add(res.path)
@@ -123,7 +123,6 @@ class DraftRefsRule(LintRule):
         """
         diagnostics: list[str] = []
         in_fence = False
-        prose_ref_re = ref_re()
 
         for n, line in enumerate(text.splitlines(), 1):
             # Fenced blocks hold illustrative example paths, not real
@@ -134,7 +133,7 @@ class DraftRefsRule(LintRule):
             if in_fence:
                 continue
 
-            for ref in prose_ref_re.findall(line):
+            for ref in REF_RE.findall(line):
                 res = resolve_ref(ref, scope, tracked)
                 if res.path is None or res.path in seen:
                     continue

@@ -13,12 +13,12 @@ from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.git import explain_failure, run_git
 from reinicorn.kb import branch_doc_path, get_kb_dir
 from reinicorn.linter.spec_refs import (
+    SPEC_DIR_NAME,
     declared_spec,
     doc_text_at,
     is_not_applicable,
     is_spec_path,
     resolve_ref,
-    spec_dir_name,
     tracked_paths_at,
     unapproved_reason,
 )
@@ -139,7 +139,7 @@ def _check_plan(
         return _block(
             plan_path,
             f"'spec: {value}' resolves to '{res.path}', which is not a spec",
-            f"Name a doc under '{spec_dir_name()}/', or 'N/A' if there is none.",
+            f"Name a doc under '{SPEC_DIR_NAME}/', or 'N/A' if there is none.",
         )
 
     reason = unapproved_reason(res.path, kb_dir, rev=rev)
