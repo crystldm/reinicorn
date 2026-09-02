@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 
 from reinicorn import console
 from reinicorn.assets import get_asset_path
@@ -12,16 +11,13 @@ from reinicorn.git import repo_root
 from reinicorn.manifest import sha256_file
 from reinicorn.skillset.adapter import COMMIT_RE, AdapterError, load_adapter
 from reinicorn.skillset.installer import install_adapter, update_adapter
-from reinicorn.skillset.lockfile import read_lock
+from reinicorn.skillset.lockfile import SKILLSET_LOCK_PATH, read_lock
+from reinicorn.skillset.restore import (
+    locked_adapter,
+    resolve_adapter_dir,
+    restore_from_lock,
+)
 from reinicorn.skillset.wiring import wiring_doc_path
-
-
-def _resolve_adapter_dir(name_or_path: str) -> Path | None:
-    """An existing directory path wins; otherwise a bundled adapter by name."""
-    candidate = Path(name_or_path)
-    if candidate.is_dir():
-        return candidate
-    return get_asset_path(f"adapters/{name_or_path}")
 
 
 def _bundled_adapter_names() -> list[str]:
@@ -31,9 +27,17 @@ def _bundled_adapter_names() -> list[str]:
     return sorted(p.name for p in adapters_dir.iterdir() if p.is_dir())
 
 
-def cmd_skills_install(name_or_path: str) -> int:
-    """Install a bundled or local-path skill-set adapter into this repo."""
-    adapter_dir = _resolve_adapter_dir(name_or_path)
+def cmd_skills_install(name_or_path: str | None) -> int:
+    """Install a bundled or local-path skill-set adapter into this repo.
+
+    With no adapter named, restore the one the committed lockfile records —
+    the fresh-clone and new-worktree case, where the lock is in git and the
+    (possibly gitignored) skill files are not.
+    """
+    if name_or_path is None:
+        return _install_from_lock()
+
+    adapter_dir = resolve_adapter_dir(name_or_path)
     if adapter_dir is None:
         names = _bundled_adapter_names()
         listing = ", ".join(names) if names else "(none bundled)"
@@ -71,6 +75,45 @@ def cmd_skills_install(name_or_path: str) -> int:
         )
         for rel in preserved:
             console.info(f"  {rel}")
+    return 0
+
+
+def _install_from_lock() -> int:
+    """`rcorn skills install` with no argument: bring back what the lock records."""
+    root = repo_root()
+    if root is None:
+        return 1
+
+    lock = read_lock(root)
+    if lock is None:
+        names = _bundled_adapter_names()
+        listing = ", ".join(names) if names else "(none bundled)"
+        console.error(
+            f"No adapter named, and no lockfile to restore from "
+            f"({root / SKILLSET_LOCK_PATH} is missing).\n"
+            f"  Without an argument, install restores the adapter a committed "
+            f"lockfile records; this project has none.\n"
+            f"  How to fix: name the adapter to install — a bundled name "
+            f"({listing}) or a path to an adapter directory."
+        )
+        return 1
+
+    try:
+        restored = restore_from_lock(root, lock)
+    except AdapterError as e:
+        console.error(str(e))
+        return 1
+
+    if restored:
+        console.success(
+            f"Restored {len(restored)} file(s) of '{lock.adapter}' @ "
+            f"{lock.commit[:12]}."
+        )
+    else:
+        console.success(
+            f"'{lock.adapter}' @ {lock.commit[:12]} is complete — nothing to restore."
+        )
+    console.info(f"Wiring doc: {wiring_doc_path(root)}")
     return 0
 
 
@@ -113,7 +156,7 @@ def _lookup_annotation(adapter_name: str, commit: str) -> str | None:
     of the same name) can be re-resolved; a lockfile carries no annotation
     of its own, so an unresolvable or drifted-pin adapter simply omits it.
     """
-    adapter_dir = _resolve_adapter_dir(adapter_name)
+    adapter_dir = resolve_adapter_dir(adapter_name)
     if adapter_dir is None:
         return None
     try:
@@ -147,33 +190,16 @@ def cmd_skills_update(ref: str | None = None, force: bool = False) -> int:
         )
         return 1
 
-    adapter_dir = _resolve_adapter_dir(lock.adapter)
-    if adapter_dir is None:
-        console.error(
-            f"Adapter '{lock.adapter}' is not a bundled adapter, and no "
-            f"directory named '{lock.adapter}' was found here.\n"
-            f"  Reinicorn cannot re-resolve a local-path adapter's source "
-            f"automatically — the lockfile only records its name.\n"
-            f"  How to fix: run 'rcorn skills install <path-to-{lock.adapter}>' "
-            f"again to update it."
-        )
-        return 1
-
     try:
-        adapter = load_adapter(adapter_dir)
+        # Without --ref, `locked_adapter` re-applies the lock's pinned commit
+        # (clearing the annotation when the adapter's own pin has moved on).
+        adapter = locked_adapter(lock)
         if ref is not None:
             adapter = replace(
                 adapter,
                 source=replace(
                     adapter.source, commit=ref, annotation=f"cli --ref {ref}"
                 ),
-            )
-        else:
-            # Without --ref, re-apply the lock's pinned commit, clearing the
-            # annotation if the resolved adapter's commit differs from the lock's pin.
-            annotation = adapter.source.annotation if adapter.source.commit == lock.commit else ""
-            adapter = replace(
-                adapter, source=replace(adapter.source, commit=lock.commit, annotation=annotation)
             )
         preserved = update_adapter(adapter, root, force=force)
     except AdapterError as e:

@@ -82,3 +82,66 @@ def test_init_kb_refuses_malicious_remote_url(tmp_path: Path, monkeypatch, capsy
     out = capsys.readouterr().out
     assert "Refusing" in out
     assert "ext::" in out
+
+
+# --- Restore adapter files on a fresh checkout --------------------------------
+
+
+def _lock_demo_adapter_in(repo: Path, tmp_path: Path) -> Path:
+    from reinicorn.skillset import installer
+    from reinicorn.skillset.adapter import load_adapter
+
+    adapter_dir = repo / "demo"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter.yaml").write_text(
+        "name: demo\n"
+        "source:\n"
+        "  repo: acme/skills\n"
+        "  commit: 0123456789abcdef0123456789abcdef01234567\n"
+        "  annotation: v1.0.0\n"
+        "skills:\n"
+        "  skills/alpha: alpha\n"
+        "wiring:\n"
+        "  spec: [alpha]\n"
+    )
+    installer.install_adapter(load_adapter(adapter_dir), repo, cache_dir=tmp_path / "cache")
+    return repo / ".agents" / "skills" / "alpha" / "scratch.md"
+
+
+def test_post_checkout_restores_missing_adapter_files(
+    kb_clone_repo: Path, tmp_path: Path, fake_skillset_fetch, monkeypatch
+) -> None:
+    """A new clone or worktree has the committed lock and no skill files."""
+
+    scratch = _lock_demo_adapter_in(kb_clone_repo, tmp_path)
+    scratch.unlink()
+    monkeypatch.chdir(kb_clone_repo)
+
+    with patch(
+        "reinicorn.commands.internal.post_checkout.hook_check", return_value=True,
+    ):
+        assert cmd_post_checkout(["", "", "1"]) == 0
+
+    assert scratch.is_file()
+
+
+def test_post_checkout_restore_failure_never_fails_the_checkout(
+    kb_clone_repo: Path, tmp_path: Path, fake_skillset_fetch, monkeypatch, capsys
+) -> None:
+    from reinicorn.skillset import restore
+
+    scratch = _lock_demo_adapter_in(kb_clone_repo, tmp_path)
+    scratch.unlink()
+    monkeypatch.chdir(kb_clone_repo)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(restore, "fetch_source", boom)
+    with patch(
+        "reinicorn.commands.internal.post_checkout.hook_check", return_value=True,
+    ):
+        assert cmd_post_checkout(["", "", "1"]) == 0
+
+    assert not scratch.exists()
+    assert "unexpected" in capsys.readouterr().out

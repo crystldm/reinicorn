@@ -42,7 +42,11 @@ rcorn skills install superpowers
 ```
 
 This installs a methodology skill set (adapter); see `rcorn skills status`
-and `rcorn skills list` for what's installed and what's bundled.
+and `rcorn skills list` for what's installed and what's bundled. Commit the
+resulting `.reinicorn/skillset-lock.json` — teammates' clones and new
+worktrees restore the skill files from it (on `rcorn init`, `rcorn update`,
+checkout, or `rcorn skills install` with no argument), whether or not the
+files themselves are committed.
 
 ## Populate AGENTS.md
 
@@ -90,7 +94,7 @@ loop, including doc review.
 | `rcorn <type> create "<title>"` | Create a kb doc (spec, prd, retro, etc.) |
 | `rcorn idea create "<text>"` | Capture an idea |
 | `rcorn kb lint` | Run kb lint rules |
-| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills install [<name>]` | Install a skill-set adapter; no name restores the one the lockfile records |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn update` | Sync local assets with installed version |

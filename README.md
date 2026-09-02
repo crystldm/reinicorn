@@ -215,7 +215,7 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
 | `rcorn review setup [--force]` | Install kb-repo CI workflows (cleanup + status checks) and the ruleset |
 | `rcorn principle add "title"` | Append a golden principle |
-| `rcorn skills install <name>` | Install a skill-set adapter |
+| `rcorn skills install [<name>]` | Install a skill-set adapter; no name restores the one the lockfile records |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
 | `rcorn mode enable\|disable\|incognito\|status` | Mode toggles |
@@ -254,6 +254,17 @@ docs through `rcorn` instead of its own conventions:
 `rcorn skills list` shows bundled adapters, and `rcorn skills status` reports
 what's installed. You can also point `rcorn skills install` at your own
 adapter definition to wire up a house skill set.
+
+An install records what it did in `.reinicorn/skillset-lock.json` — the
+adapter, its pinned commit, and a hash of every file it wrote. **Commit the
+lockfile.** It is the project's declared methodology, the same way
+`uv.lock` declares its dependencies; the installed skill files themselves
+can be committed or gitignored (this repo gitignores them). A fresh clone or
+new worktree that has the lock but not the files gets them back
+automatically — `rcorn update`, `rcorn init`, and the post-checkout hook
+all restore from the lock, and `rcorn skills install` with no argument does
+it on demand. Restore writes only what is missing and never touches a file
+that exists.
 
 Whichever skill set (if any) is installed, `using-reinicorn`'s generated
 wiring doc
