@@ -79,7 +79,7 @@ class DraftRefsRule(LintRule):
             seen: set[str] = set()
 
             diagnostics.extend(self._check_declared(
-                text, hit, rel, doc.scope, kb, tracked, seen,
+                text, hit, rel, doc.scope, kb, tracked, seen, project_root,
             ))
             diagnostics.extend(self._check_prose(
                 text, prose_re, rel, doc.scope, kb, tracked, seen,
@@ -89,7 +89,7 @@ class DraftRefsRule(LintRule):
 
     def _check_declared(
         self, text: str, dt: DocType, rel: Path, scope: str, kb: Path,
-        tracked: frozenset[str], seen: set[str],
+        tracked: frozenset[str], seen: set[str], project_root: Path,
     ) -> list[str]:
         """Validate the declared dependency frontmatter field.
 
@@ -121,7 +121,9 @@ class DraftRefsRule(LintRule):
                 "path (typo, uncommitted doc, or a path outside the kb)"
             ]
 
-        target_dir = registry()[dep.type].dir_path
+        # The project's registry, like `run` — cwd-resolved lookup could
+        # judge this kb by another checkout's overlay.
+        target_dir = registry(project_root)[dep.type].dir_path
         if not path_in_dir(res.path, target_dir):
             return [
                 f"{rel}:1 — '{dep.field}: {value}' resolves to '{res.path}', "

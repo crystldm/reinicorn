@@ -225,7 +225,14 @@ def path_in_dir(path: str, dir_path: str) -> bool:
     earlier stage, and reporting it as *unapproved* is far more useful than
     rejecting it as the wrong kind of document.
     """
-    return dir_path in path.split("/")[:-1]
+    parents = path.split("/")[:-1]
+    want = dir_path.split("/")
+    # Contiguous component match, so a nested dir_path such as
+    # "architecture/specs" is found and "specs" does not match "my-specs".
+    return any(
+        parents[i:i + len(want)] == want
+        for i in range(len(parents) - len(want) + 1)
+    )
 
 
 def unapproved_reason(

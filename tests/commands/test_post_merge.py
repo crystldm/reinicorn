@@ -159,3 +159,29 @@ def test_malformed_branch_value_is_not_archived(kb_repo: Path):
         _archive_stale_docs(kb_repo)
 
     assert active.is_dir()
+
+
+def test_failed_remote_query_archives_nothing(kb_repo: Path):
+    """`git branch -r` failing with check=False returns normally; an empty
+    result must read as "cannot verify", never as "every branch is gone"."""
+    active = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-live"
+    active.mkdir(parents=True)
+    (active / "plan.md").write_text(doc_text(
+        type="plan", title="Plan", slug="feature-live",
+        status="in-progress", branch="feature/live",
+        body="\n# Plan\n",
+    ))
+
+    with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git, \
+         patch("reinicorn.kb.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo):
+        mock_git.return_value.returncode = 128
+        mock_git.return_value.stdout = ""
+        mock_git.return_value.stderr = "fatal: not a git repository"
+        _archive_stale_docs(kb_repo)
+
+    assert (active / "plan.md").is_file()
+    assert not (
+        kb_repo / "kb" / "testproject" / "exec-plans" / "completed" / "feature-live"
+    ).exists()

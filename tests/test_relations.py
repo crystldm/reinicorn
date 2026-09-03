@@ -325,3 +325,65 @@ def test_defaults_unchanged_by_relation_machinery(tmp_path):
     effective = registry(root)
     assert "quest" not in effective and "wrap" not in effective
     assert [dt.key for dt in closable_types(root)] == ["plan"]
+
+
+def test_closee_title_source_must_be_none(tmp_path):
+    """The lifecycle create derives the title from the branch; a parser that
+    demanded one the command then ignored would lie to the user."""
+    root = _repo_with_overlay(
+        tmp_path,
+        "doc_types:\n"
+        "  plan:\n"
+        "    title_source: title\n",
+    )
+    with pytest.raises(DocTypesError, match="title_source: none"):
+        registry(root)
+
+
+def test_repeated_seq_placeholder_fails(tmp_path):
+    root = _repo_with_overlay(
+        tmp_path,
+        "doc_types:\n"
+        "  rfc:\n"
+        "    dir_path: rfcs\n"
+        "    filename: 'RFC-{seq}-{seq}-{slug}.md'\n"
+        "    addressing: slug\n",
+    )
+    with pytest.raises(DocTypesError, match="repeats"):
+        registry(root)
+
+
+def test_phantom_dashboards_label_branch_by_present_type(
+    tmp_path, monkeypatch, capsys,
+):
+    """A branch whose only active doc is the second closable type is
+    reported as that type, with a `show` hint that resolves."""
+    root = _repo_with_overlay(tmp_path, PHANTOM_PAIR)
+    monkeypatch.chdir(root)
+    active = root / "kb" / "myscope" / "quests" / "active" / "feat-x"
+    active.mkdir(parents=True)
+    (active / "quest.md").write_text("# Quest\n")
+
+    from reinicorn.commands.home import cmd_home
+    from reinicorn.commands.status import cmd_status
+
+    with patch("reinicorn.commands.status.repo_root", return_value=root), \
+         patch("reinicorn.commands.status.current_branch", return_value="feat/x"), \
+         patch("reinicorn.commands.status.kb_scope", return_value="myscope"), \
+         patch("reinicorn.commands.status.overlap_line", return_value="overlap: none"):
+        assert cmd_status(compact=True) == 0
+    out = capsys.readouterr().out
+    assert "quest present" in out
+    assert "plans: 0 active" in out
+    assert "quests: 1 active" in out
+    assert "next: rcorn quest show" in out
+    assert "rcorn plan show" not in out
+
+    with patch("reinicorn.commands.home.repo_root", return_value=root), \
+         patch("reinicorn.commands.home.current_branch", return_value="feat/x"), \
+         patch("reinicorn.commands.home.kb_scope", return_value="myscope"), \
+         patch("reinicorn.commands.home.overlap_line", return_value="overlap: none"):
+        assert cmd_home() == 0
+    out = capsys.readouterr().out
+    assert "quest: feat-x (this branch)" in out
+    assert "next: rcorn quest show" in out

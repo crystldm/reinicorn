@@ -220,6 +220,7 @@ def test_spec_placeholder_is_what_the_gate_treats_as_undeclared():
 
 def test_plan_status_no_plan(kb_repo: Path, capsys):
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
          patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
          patch("reinicorn.commands.doc_lifecycle.current_branch", return_value="feature/no-plan"):
         result = cmd_lifecycle_status("plan")

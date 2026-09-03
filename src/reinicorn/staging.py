@@ -19,6 +19,7 @@ from reinicorn.git import repo_root
 from reinicorn.kb import branch_changed_files, branch_dir_name, get_kb_dir
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
 STAGE_ACTIVE = "active"
@@ -69,16 +70,28 @@ def closer_target(closer_dt: DocType, repo_dir: Path, branch: str) -> Path:
     return branch_dir(repo_dir, closee, branch, stage) / closer_dt.filename
 
 
-def active_branch_names(kb_dir: Path, scope: str) -> list[str]:
+def active_branch_names(
+    kb_dir: Path, scope: str, types: Iterable[DocType] | None = None,
+) -> list[str]:
     """Sorted branch-dir names with an active-stage doc dir in *scope*,
-    across every closable type."""
+    across every closable type (or just *types*)."""
     names: set[str] = set()
-    for dt in closable_types():
+    for dt in closable_types() if types is None else types:
         base = kb_dir / scope / dt.dir_path / STAGE_ACTIVE
         if not base.is_dir():
             continue
         names.update(d.name for d in base.iterdir() if d.is_dir())
     return sorted(names)
+
+
+def active_type_of(scope_dir: Path, branch: str) -> DocType | None:
+    """The first closable type with an active-stage dir for *branch* in
+    *scope_dir*, or None. Dashboards label the branch by the type that is
+    actually present, not by whichever closable row comes first."""
+    for dt in closable_types():
+        if branch_dir(scope_dir, dt, branch, STAGE_ACTIVE).is_dir():
+            return dt
+    return None
 
 
 def overlapping_branches(

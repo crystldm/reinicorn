@@ -111,6 +111,10 @@ def _live_remote_branches(root: Path) -> set[str] | None:
             "branch", "-r", "--list", "origin/*",
             cwd=root, check=False,
         )
+        if result.returncode != 0:
+            # check=False returns normally on failure; an empty set here
+            # would read as "every branch is gone" and archive everything.
+            return None
         branches: set[str] = set()
         for line in result.stdout.strip().splitlines():
             name = line.strip().removeprefix("origin/")

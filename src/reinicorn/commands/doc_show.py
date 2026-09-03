@@ -17,7 +17,7 @@ from reinicorn.doc_types import (
 )
 from reinicorn.git import current_branch, repo_root
 from reinicorn.kb import branch_dir_name, require_kb_dir
-from reinicorn.staging import STAGE_ACTIVE, STAGES, closer_target
+from reinicorn.staging import STAGE_ACTIVE, STAGES, closer_target, stage_of
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -170,7 +170,13 @@ def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
         console.error("no branch given and none checked out")
         return 1
     dt = registry()[doc_type]
-    stage = STAGE_ACTIVE if "stage" in filename_placeholders(dt) else None
+    # A staged doc is shown at whatever stage it currently lives in, so a
+    # completed branch's doc stays readable — the closer already does this.
+    stage = (
+        stage_of(repo_dir, dt, branch) or STAGE_ACTIVE
+        if "stage" in filename_placeholders(dt)
+        else None
+    )
     target = doc_path(repo_dir, dt, branch, stage=stage)
     if not target.is_file():
         branches = {

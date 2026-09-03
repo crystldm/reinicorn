@@ -61,8 +61,9 @@ def ensure_dependencies_approved(root: Path, branches: list[str]) -> int:
         if not branches:
             return 0
 
+        rows = registry(root)
         gated_rows = [
-            dt for dt in registry(root).values()
+            dt for dt in rows.values()
             if dt.depends_on is not None
             and dt.addressing is Addressing.BRANCH
         ]
@@ -106,6 +107,7 @@ def ensure_dependencies_approved(root: Path, branches: list[str]) -> int:
                 checked_path = f"{KB_DIR_NAME}/{doc_rel}"
                 rc = _check_doc(
                     doc_text_at(kb_dir, rev, doc_rel), rel,
+                    rows[rel.type].dir_path,
                     checked_path, scope, kb_dir, rev, tracked,
                 )
                 if rc != 0:
@@ -124,8 +126,8 @@ def ensure_dependencies_approved(root: Path, branches: list[str]) -> int:
 
 
 def _check_doc(
-    text: str, rel: DependsOn, checked_path: str, scope: str, kb_dir: Path,
-    rev: str, tracked: frozenset[str],
+    text: str, rel: DependsOn, target_dir: str, checked_path: str,
+    scope: str, kb_dir: Path, rev: str, tracked: frozenset[str],
 ) -> int:
     value = declared_dependency(text, rel)
 
@@ -155,7 +157,6 @@ def _check_doc(
             "Fix the path, or commit the doc to the kb before pushing.",
         )
 
-    target_dir = registry()[rel.type].dir_path
     if not path_in_dir(res.path, target_dir):
         return _block(
             checked_path, rel,

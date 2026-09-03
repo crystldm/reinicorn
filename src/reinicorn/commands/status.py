@@ -16,6 +16,7 @@ from reinicorn.review import collect_gated_drafts
 from reinicorn.staging import (
     STAGE_ACTIVE,
     active_branch_names,
+    active_type_of,
     check_overlap,
     overlap_line,
 )
@@ -191,21 +192,24 @@ def _compact_status(root: Path, kb_dir: Path, branch: str) -> int:
     No stale scan (per-doc `git log` is too slow for every session) and no
     headers — this output loads into agent context every session.
     """
-    names = active_branch_names(kb_dir, kb_scope(root))
-    current = branch_dir_name(branch) if branch else ""
-    has_doc = current in names
+    scope = kb_scope(root)
     closable = closable_types()
-    label = closable[0].key if closable else "doc"
-    state = f"{label} present" if has_doc else f"no {label}"
+    present = active_type_of(kb_dir / scope, branch) if branch else None
+    if present is not None:
+        state = f"{present.key} present"
+    else:
+        state = f"no {closable[0].key}" if closable else "no doc"
     print(f"reinicorn: branch {branch or 'detached'} — {state}")
-    print(f"{label}s: {len(names)} active in this repo scope")
+    for dt in closable:
+        names = active_branch_names(kb_dir, scope, [dt])
+        print(f"{dt.key}s: {len(names)} active in this repo scope")
 
     print(overlap_line(branch, root) if branch else "overlap: none")
 
     if not closable:
         return 0
-    if has_doc:
-        console.next_step(f"rcorn {label} show")
+    if present is not None:
+        console.next_step(f"rcorn {present.key} show")
     else:
         console.next_step(closable[0].create_hint)
     return 0

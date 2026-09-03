@@ -296,3 +296,14 @@ def test_default_never_leaks_drafts_regardless_of_glob_shape(kb_repo, key):
     repo_dir = kb_repo / "kb" / "testproject"
     for f in _doc_files(key, repo_dir, include_drafts=False):
         assert DRAFTS_DIR_NAME not in f.parts, f"{key} leaked draft {f}"
+
+
+def test_plan_show_resolves_completed_stage(kb_repo, monkeypatch, capsys):
+    """`plan complete` moves the dir; show follows it like retro show does."""
+    monkeypatch.chdir(kb_repo)
+    done = kb_repo / "kb" / "testproject" / "exec-plans" / "completed" / "feature-done"
+    done.mkdir(parents=True, exist_ok=True)
+    (done / "plan.md").write_text("# Execution Plan: feature-done\n\n## Goal\nShipped.\n")
+    assert cmd_branch_show("plan", "feature/done") == 0
+    out = capsys.readouterr().out
+    assert "# Execution Plan: feature-done" in out

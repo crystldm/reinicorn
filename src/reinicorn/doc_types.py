@@ -80,9 +80,11 @@ class DependsOn:
 class Closes:
     """This type is the closer of another (e.g. retro closes plan).
 
-    Implies: the closer is created inside the closee's dir, `<closee>
-    complete` moves the stage dir with both docs, and — when `required` —
-    the closee cannot complete without a filled closer (staging.py).
+    Implies: the closer is created inside the closee's dir and `<closee>
+    complete` moves the stage dir with both docs. `required` is declared
+    here so overlays can set it; the refusal it implies (`complete` blocks
+    without a filled closer, with an `--abandon` escape) lands with the
+    stage-3 gates — today a missing closer only warns.
     """
 
     type: str
@@ -473,6 +475,14 @@ def _validate_rows(rows: dict[str, DocType], source: str) -> None:
                 f"{sorted(used - allowed)} not allowed for addressing "
                 f"'{dt.addressing.value}' (allowed: {sorted(allowed)})"
             )
+        if _PLACEHOLDER_RE.findall(dt.filename).count("seq") > 1:
+            # `used` is a set, so a repeated {seq} passes the check above;
+            # filename_regex() would then emit two named groups and fail at
+            # the first create.
+            raise DocTypesError(
+                f"{where}: filename '{dt.filename}' repeats '{{seq}}' — one "
+                "sequence number per filename"
+            )
         identity = _IDENTITY_PLACEHOLDER.get(dt.addressing)
         if (
             identity is not None
@@ -547,6 +557,15 @@ def _validate_relations(rows: dict[str, DocType], source: str) -> None:
             raise DocTypesError(
                 f"{source}: doc_types.{closee_key}: a closer cannot itself "
                 "be closable (closes chains are depth one)"
+            )
+        if closee.title_source is not TitleSource.NONE:
+            # The lifecycle create derives the title from the branch; a
+            # title the parser demanded and the command ignored would be a
+            # silent lie to the user.
+            raise DocTypesError(
+                f"{source}: doc_types.{closee_key}: a closable type's title "
+                "is derived from the branch — set title_source: none (got "
+                f"'{closee.title_source.value}')"
             )
         if not closee.filename.startswith("{stage}/"):
             raise DocTypesError(
