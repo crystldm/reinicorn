@@ -1,8 +1,11 @@
 # Reinicorn
 
-Reinicorn is a Python CLI and workflow skill set for spec-driven development with
-AI coding agents. It serves engineering teams that keep intent, architecture,
-plans, and quality controls in a shared Git-backed knowledge base.
+Reinicorn is a Python CLI and skill set for governing agent-assisted
+development and the documents it produces. It serves engineering teams that
+keep intent, architecture, plans, and quality controls in a shared Git-backed
+knowledge base, with registry-defined doc types, CLI-only creation, and an
+optional review gate per doc type. Methodology comes from a pluggable
+skill-set adapter, not from Reinicorn itself.
 
 ## Build and test
 
