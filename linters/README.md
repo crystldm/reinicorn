@@ -81,13 +81,32 @@ Rules are configured in `linters/.lint-config.json`:
       "enabled": true,
       "severity": "error"
     },
-    "kb/plan-structure": {
+    "kb/required-sections": {
       "enabled": true,
-      "severity": "warning"
+      "severity": "error"
     }
   }
 }
 ```
+
+Built-in rules (Python, in `reinicorn.linter.rules`) and what they read from
+the doc-type registry:
+
+| Rule | Reads | Fails when |
+|---|---|---|
+| `kb/frontmatter` | `fields` / `required_fields` | a doc's provenance block is missing or malformed |
+| `kb/required-sections` | `required_sections` | a doc still being authored lacks a required `##` header (completed, closed and approved-gated docs are exempt); an active plan dir has no plan doc; a doc with a `depends_on` relation lacks its field. `kb/plan-structure` is accepted as an alias of this rule |
+| `kb/draft-refs` | `depends_on` | a doc builds on a draft or in-review doc |
+| `kb/closer-filled` | `closes` (`required: true`) | an active plan has no filled retro (or whatever the config's closer is) |
+| `kb/lifecycle` | `closes` | an active plan's branch is merged or deleted — `rcorn plan complete` it. Merged-ness is checked three ways (published-then-deleted, ancestor of the default branch, merged PR by head via `gh`); anything the network cannot answer is "cannot verify", never a failure |
+| `kb/cross-links` | — | a markdown link points nowhere |
+| `kb/docs-freshness` | `index_file` | an index file is older than `max_days_stale` |
+
+The pre-merge CI job (`rcorn _process-gate <branch>`, the "Process gate"
+check) runs exactly `kb/required-sections`, `kb/draft-refs` and
+`kb/closer-filled`, scoped to the docs the PR's branch owns. `kb/lifecycle`
+is excluded there by design: the branch under review is unmerged, and other
+branches' staleness must not red this PR.
 
 - **enabled**: `true` or `false`. Disabled rules are skipped entirely.
 - **severity**: `"error"` or `"warning"`. Errors cause the lint run to fail (exit 1).
@@ -108,5 +127,5 @@ linters/
     kb/
       docs-freshness.sh      # Check kb doc staleness
       cross-links.sh         # Validate markdown cross-links
-      plan-structure.sh      # Validate exec plan structure
+      plan-structure.sh      # Legacy shell form (shadowed by the built-in kb/required-sections)
 ```

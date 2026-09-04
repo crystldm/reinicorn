@@ -24,8 +24,11 @@ from reinicorn.staging import (
     STAGE_COMPLETED,
     branch_dir,
     check_overlap,
-    sections_empty,
+    closer_gap,
 )
+
+STATUS_COMPLETE = "complete"
+STATUS_ABANDONED = "abandoned"
 
 _TEMPLATE_DIR_NAME = "_template"
 
@@ -207,10 +210,15 @@ def cmd_lifecycle_status(doc_type: str) -> int:
 
 
 def cmd_lifecycle_complete(
-    doc_type: str, branch: str | None = None, *, repo_scope: str | None = None,
+    doc_type: str, branch: str | None = None, *,
+    repo_scope: str | None = None, abandon: bool = False,
 ) -> int:
     """Archive a closable doc's branch dir from the active to the completed
     stage.
+
+    Refuses (exit 1) when the row's closer is `required` and not filled —
+    the next step is the closer's own create command. `abandon` is the
+    escape: the doc is stamped abandoned/dropped and needs no closer.
 
     Args:
         doc_type: Registry key of the closable type.
@@ -219,6 +227,7 @@ def cmd_lifecycle_complete(
             When None, uses the configured KB scope or origin-derived fallback.
             Pass explicitly when archiving from a different scope
             (e.g. stale-doc sweep across all repo dirs).
+        abandon: Drop the doc instead of completing it.
     """
     dt = registry()[doc_type]
     root = repo_root()
@@ -240,13 +249,36 @@ def cmd_lifecycle_complete(
         console.error(f"No active {dt.key} found for branch '{branch}'.")
         return 1
 
-    # Mark the doc complete: `status` keeps the type's word, `lifecycle` is
-    # the coarse axis everything queryable keys off.
+    closer = closer_of(dt)
+    gap = closer_gap(pdir, closer) if closer is not None else None
+    if (
+        closer is not None and gap is not None and not abandon
+        and closer.closes is not None and closer.closes.required
+    ):
+        console.error(
+            f"{dt.key} '{branch}' cannot complete: {gap}, and its "
+            f"{closer.key} is required."
+        )
+        console.next_step(closer.create_hint)
+        console.next_step(
+            f"rcorn {dt.key} complete --abandon  (drop it: no {closer.key}, "
+            f"status {STATUS_ABANDONED})"
+        )
+        return 1
+
+    # Mark the doc: `status` keeps the type's word, `lifecycle` is the
+    # coarse axis everything queryable keys off.
+    verb = "abandon" if abandon else "complete"
     doc_file = pdir / _doc_name(dt)
     if doc_file.is_file():
         doc_file.write_text(set_meta(doc_file.read_text(), {
-            frontmatter.FIELD_STATUS: "complete",
-            frontmatter.FIELD_LIFECYCLE: frontmatter.LIFECYCLE_DONE,
+            frontmatter.FIELD_STATUS: (
+                STATUS_ABANDONED if abandon else STATUS_COMPLETE
+            ),
+            frontmatter.FIELD_LIFECYCLE: (
+                frontmatter.LIFECYCLE_DROPPED if abandon
+                else frontmatter.LIFECYCLE_DONE
+            ),
         }))
 
     # Move from the active to the completed stage.
@@ -255,21 +287,18 @@ def cmd_lifecycle_complete(
     shutil.move(str(pdir), str(completed_dir))
 
     console.success(
-        f"{dt.key.capitalize()} archived: {STAGE_ACTIVE}/{pdir.name}/ → "
-        f"{STAGE_COMPLETED}/{completed_dir.name}/"
+        f"{dt.key.capitalize()} {'abandoned' if abandon else 'archived'}: "
+        f"{STAGE_ACTIVE}/{pdir.name}/ → {STAGE_COMPLETED}/{completed_dir.name}/"
     )
 
-    closer = closer_of(dt)
-    if closer is not None:
-        closer_file = completed_dir / closer.filename
-        if not closer_file.is_file() or sections_empty(closer_file.read_text()):
-            console.warn(
-                f"No {closer.key} captured for this branch — lessons "
-                "learned will be lost."
-            )
-            console.next_step(closer.create_hint)
+    if closer is not None and gap is not None and not abandon:
+        console.warn(
+            f"No {closer.key} captured for this branch — lessons "
+            "learned will be lost."
+        )
+        console.next_step(closer.create_hint)
 
     # Both dirs: the deletion from the active stage and the addition under
     # the completed one.
-    commit_kb(root, f"{dt.key}: complete {branch}", paths=[pdir, completed_dir])
+    commit_kb(root, f"{dt.key}: {verb} {branch}", paths=[pdir, completed_dir])
     return 0

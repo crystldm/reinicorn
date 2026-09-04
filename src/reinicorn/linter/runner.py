@@ -6,7 +6,7 @@ import json
 import subprocess
 from typing import TYPE_CHECKING
 
-from reinicorn.linter.rules import BUILTIN_RULES
+from reinicorn.linter.rules import BUILTIN_RULES, RULE_ALIASES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +26,14 @@ def run_lints(project_root: Path) -> int:
         print(f"FATAL: {lint_config_path} is not valid JSON.")
         return 1
 
-    rules_config = config.get("rules", {})
+    rules_config = dict(config.get("rules", {}))
+    for old, new in RULE_ALIASES.items():
+        if old not in rules_config:
+            continue
+        print(f"[NOTE] rule '{old}' is now '{new}' — update {lint_config_path}")
+        print()
+        legacy = rules_config.pop(old)
+        rules_config.setdefault(new, legacy)
 
     total = passed = failed_errors = failed_warnings = skipped = 0
     error_failures: list[str] = []
@@ -77,7 +84,7 @@ def run_lints(project_root: Path) -> int:
             rel = script.relative_to(rules_dir)
             rule_name = str(rel).removesuffix(".sh")
 
-            if rule_name in BUILTIN_RULES:
+            if rule_name in BUILTIN_RULES or rule_name in RULE_ALIASES:
                 continue
 
             rule_cfg = rules_config.get(rule_name)

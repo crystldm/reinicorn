@@ -81,10 +81,10 @@ class Closes:
     """This type is the closer of another (e.g. retro closes plan).
 
     Implies: the closer is created inside the closee's dir and `<closee>
-    complete` moves the stage dir with both docs. `required` is declared
-    here so overlays can set it; the refusal it implies (`complete` blocks
-    without a filled closer, with an `--abandon` escape) lands with the
-    stage-3 gates — today a missing closer only warns.
+    complete` moves the stage dir with both docs. When `required`,
+    `complete` refuses without a filled closer (`--abandon` is the escape)
+    and the `kb/closer-filled` lint reports the gap; otherwise a missing
+    closer only warns.
     """
 
     type: str
