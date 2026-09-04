@@ -122,6 +122,16 @@ def _kb_and_matches(
     return root, kb_dir, matches
 
 
+def _draft_list_hint() -> str:
+    """The list command for the first gated type — where drafts live."""
+    from reinicorn.doc_types import gated_types
+
+    gt = gated_types()
+    return (
+        f"rcorn {gt[0].key} list --include-drafts" if gt else "rcorn kb status"
+    )
+
+
 def _ctx(slug_or_path: str, type_key: str | None) -> tuple[Path, Path, ReviewTarget] | None:
     """(root, kb_dir, target) for a uniquely-resolved draft, or None (error printed)."""
     resolved = _kb_and_matches(slug_or_path, type_key)
@@ -130,7 +140,7 @@ def _ctx(slug_or_path: str, type_key: str | None) -> tuple[Path, Path, ReviewTar
     root, kb_dir, matches = resolved
     if not matches:
         console.error(f"no draft named '{slug_or_path}'")
-        console.next_step("rcorn spec list --include-drafts")
+        console.next_step(_draft_list_hint())
         return None
     if len(matches) > 1:
         keys = ", ".join(sorted(t.doc_type.key for t in matches))
@@ -320,7 +330,7 @@ def cmd_review_merge(slug: str, type_key: str | None = None, force: bool = False
         landed = _landed_target(root, kb_dir, slug, type_key)
         if landed is None:
             console.error(f"no draft named '{slug}'")
-            console.next_step("rcorn spec list --include-drafts")
+            console.next_step(_draft_list_hint())
             return 1
         # A vanished draft with a doc already at the finalized path could be
         # this review landing elsewhere (CI cleanup, another machine) — or a

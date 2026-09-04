@@ -8,13 +8,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 from reinicorn import frontmatter as fm
-from reinicorn.commands.plan import cmd_plan_complete, cmd_plan_create, cmd_plan_status
-from reinicorn.kb_seed import generate_seed_tree
-from reinicorn.linter.spec_refs import (
-    SPEC_PLACEHOLDER,
-    SPEC_PLACEHOLDER_RE,
-    declared_spec,
+from reinicorn.commands.doc_lifecycle import (
+    cmd_lifecycle_complete,
+    cmd_lifecycle_create,
+    cmd_lifecycle_status,
 )
+from reinicorn.doc_types import REGISTRY
+from reinicorn.kb_seed import generate_seed_tree
+from reinicorn.refs import (
+    PLACEHOLDER_RE,
+    declared_dependency,
+    dependency_placeholder,
+)
+
+_PLAN_REL = REGISTRY["plan"].depends_on
+SPEC_PLACEHOLDER = dependency_placeholder(_PLAN_REL)
+
+
+def declared_spec(text):
+    return declared_dependency(text, _PLAN_REL)
 
 
 def test_plan_create_on_feature_branch(kb_repo: Path, capsys):
@@ -31,15 +43,18 @@ def test_plan_create_on_feature_branch(kb_repo: Path, capsys):
     )
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value="feature/PROJ-123-foo"), \
-         patch("reinicorn.commands.plan.run_git") as mock_git, \
-         patch("reinicorn.commands.plan.commit_kb") as mock_commit:
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch(
+             "reinicorn.commands.doc_lifecycle.current_branch",
+             return_value="feature/PROJ-123-foo",
+         ), \
+         patch("reinicorn.commands.doc_lifecycle.run_git") as mock_git, \
+         patch("reinicorn.commands.doc_lifecycle.commit_kb") as mock_commit:
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        result = cmd_plan_create()
+        result = cmd_lifecycle_create("plan")
 
     assert result == 0
     # Branch name sanitized: feature/PROJ-123-foo → feature-PROJ-123-foo
@@ -64,16 +79,16 @@ def test_plan_create_on_feature_branch(kb_repo: Path, capsys):
 
 
 def test_plan_create_rejects_main_branch(kb_repo: Path, capsys):
-    with patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value="main"):
-        result = cmd_plan_create()
+    with patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.current_branch", return_value="main"):
+        result = cmd_lifecycle_create("plan")
     assert result == 1
 
 
 def test_plan_create_rejects_detached_head(kb_repo: Path, capsys):
-    with patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value=""):
-        result = cmd_plan_create()
+    with patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.current_branch", return_value=""):
+        result = cmd_lifecycle_create("plan")
     assert result == 1
 
 
@@ -84,10 +99,10 @@ def test_plan_create_already_exists(kb_repo: Path, capsys):
     (pdir / "plan.md").write_text("existing plan\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value="feature/existing"):
-        result = cmd_plan_create()
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.current_branch", return_value="feature/existing"):
+        result = cmd_lifecycle_create("plan")
 
     assert result == 0
     assert "already exists" in capsys.readouterr().out.lower()
@@ -96,15 +111,15 @@ def test_plan_create_already_exists(kb_repo: Path, capsys):
 def _create_plan(kb_repo: Path, branch: str) -> dict:
     """Run plan create on *branch* and return the parsed plan.md frontmatter."""
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value=branch), \
-         patch("reinicorn.commands.plan.run_git") as mock_git, \
-         patch("reinicorn.commands.plan.commit_kb"):
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.current_branch", return_value=branch), \
+         patch("reinicorn.commands.doc_lifecycle.run_git") as mock_git, \
+         patch("reinicorn.commands.doc_lifecycle.commit_kb"):
         mock_git.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="Test User\n"
         )
-        assert cmd_plan_create() == 0
+        assert cmd_lifecycle_create("plan") == 0
     pdir = (
         kb_repo / "kb" / "testproject" / "exec-plans" / "active"
         / branch.replace("/", "-")
@@ -198,20 +213,21 @@ def test_plan_create_carries_provenance_fields(kb_repo: Path, capsys):
 
 def test_spec_placeholder_is_what_the_gate_treats_as_undeclared():
     """Generator and gate share one placeholder definition (issue #41)."""
-    assert SPEC_PLACEHOLDER_RE.match(SPEC_PLACEHOLDER)
+    assert PLACEHOLDER_RE.match(SPEC_PLACEHOLDER)
     doc = fm.dumps({"spec": SPEC_PLACEHOLDER}, "")
     assert declared_spec(doc) is None
 
 
 def test_plan_status_no_plan(kb_repo: Path, capsys):
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value="feature/no-plan"):
-        result = cmd_plan_status()
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.current_branch", return_value="feature/no-plan"):
+        result = cmd_lifecycle_status("plan")
 
     assert result == 0
     out = capsys.readouterr().out
-    assert "no execution plan" in out.lower()
+    assert "no plan for branch" in out.lower()
     assert "next: rcorn plan create" in out
 
 
@@ -222,9 +238,10 @@ def test_plan_status_shows_files(kb_repo: Path, capsys):
     (pdir / "plan.md").write_text("# Plan\n\nContent here\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value="feature/test"):
-        result = cmd_plan_status()
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.current_branch", return_value="feature/test"):
+        result = cmd_lifecycle_status("plan")
 
     assert result == 0
     out = capsys.readouterr().out
@@ -238,10 +255,10 @@ def test_plan_complete_moves_to_completed(kb_repo: Path, capsys):
     (active / "plan.md").write_text("# Plan\n\n**Status:** in-progress\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.commit_kb") as mock_commit:
-        result = cmd_plan_complete("feature/done")
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.commit_kb") as mock_commit:
+        result = cmd_lifecycle_complete("plan", "feature/done")
 
     assert result == 0
     assert not active.is_dir()
@@ -263,10 +280,10 @@ def test_plan_complete_updates_status(kb_repo: Path, capsys):
     (active / "plan.md").write_text("# Plan\n\n**Status:** planning\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.commit_kb"):
-        cmd_plan_complete("feature/x")
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.commit_kb"):
+        cmd_lifecycle_complete("plan", "feature/x")
 
     completed = kb_repo / "kb" / "testproject" / "exec-plans" / "completed" / "feature-x"
     content = (completed / "plan.md").read_text()
@@ -275,9 +292,9 @@ def test_plan_complete_updates_status(kb_repo: Path, capsys):
 
 def test_plan_complete_missing_plan(kb_repo: Path, capsys):
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo):
-        result = cmd_plan_complete("feature/nonexistent")
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo):
+        result = cmd_lifecycle_complete("plan", "feature/nonexistent")
 
     assert result == 1
     assert "no active plan" in capsys.readouterr().out.lower()
@@ -289,11 +306,11 @@ def test_plan_complete_defaults_to_current_branch(kb_repo: Path, capsys):
     (active / "plan.md").write_text("# Plan\n\n**Status:** in-progress\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.kb_scope", return_value="testproject"), \
-         patch("reinicorn.commands.plan.repo_root", return_value=kb_repo), \
-         patch("reinicorn.commands.plan.current_branch", return_value="feature/cur"), \
-         patch("reinicorn.commands.plan.commit_kb"):
-        result = cmd_plan_complete()
+         patch("reinicorn.commands.doc_lifecycle.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.current_branch", return_value="feature/cur"), \
+         patch("reinicorn.commands.doc_lifecycle.commit_kb"):
+        result = cmd_lifecycle_complete("plan")
 
     assert result == 0
     assert not active.is_dir()

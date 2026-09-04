@@ -7,7 +7,14 @@ import importlib
 import sys
 
 from reinicorn import __version__
-from reinicorn.doc_types import Addressing, CreateMode, DocTypesError, TitleSource, registry
+from reinicorn.doc_types import (
+    Addressing,
+    CreateMode,
+    DocTypesError,
+    TitleSource,
+    closable_types,
+    registry,
+)
 from reinicorn.identity import CLI_NAME, PRODUCT_NAME
 
 
@@ -79,14 +86,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     doc_groups = _add_doc_type_groups(sub)
 
-    # Plan lifecycle verbs stay hand-wired (spec non-goal: plan lifecycle
-    # stays code). Fetch the generated group and append them.
-    plan_sub = doc_groups["plan"]
-    plan_sub.add_parser("status", help="Show plan status for current branch")
-    plan_complete_p = plan_sub.add_parser("complete", help="Archive plan to completed/")
-    plan_complete_p.add_argument(
-        "branch", nargs="?", default=None, help="Branch name (default: current)"
-    )
+    # Lifecycle verbs, generated for every closable type (something in the
+    # registry closes it): status and complete join the generated create.
+    for dt in closable_types():
+        group = doc_groups[dt.key]
+        group.add_parser(
+            "status", help=f"Show {dt.key} status for current branch"
+        )
+        complete_p = group.add_parser(
+            "complete", help=f"Archive {dt.key} to the completed stage"
+        )
+        complete_p.add_argument(
+            "branch", nargs="?", default=None,
+            help="Branch name (default: current)",
+        )
 
     # ── Review group ────────────────────────────────────────
     review_p = sub.add_parser(
@@ -247,9 +260,28 @@ def _doc_dispatch_rows() -> dict:
     registry-driven-doc-types stage 2). Hand-wired rows merged into
     _DISPATCH after this override plan's create/status/complete."""
     rows: dict = {}
+    closable = {t.key for t in closable_types()}
     for dt in registry().values():
         key = dt.key
-        if dt.title_source is TitleSource.TITLE:
+        if key in closable:
+            # Closable types route create through the lifecycle entry point
+            # (templates, ticket, overlap check) and gain status/complete.
+            rows[(key, dt.create_verb)] = (
+                lambda _, k=key: _load(
+                    "doc_lifecycle", "cmd_lifecycle_create"
+                )(k)
+            )
+            rows[(key, "status")] = (
+                lambda _, k=key: _load(
+                    "doc_lifecycle", "cmd_lifecycle_status"
+                )(k)
+            )
+            rows[(key, "complete")] = (
+                lambda a, k=key: _load(
+                    "doc_lifecycle", "cmd_lifecycle_complete"
+                )(k, a.branch)
+            )
+        elif dt.title_source is TitleSource.TITLE:
             rows[(key, dt.create_verb)] = (
                 lambda a, k=key: _load("doc_create", "cmd_doc_create")(
                     k, " ".join(a.title)
@@ -292,11 +324,6 @@ def _doc_dispatch_rows() -> dict:
 # effective registry may read a kb overlay, and a broken overlay must fail
 # closed through main's DocTypesError handler, not as an import crash.
 _DISPATCH = {
-    # Plan lifecycle verbs stay hand-wired; create overrides the generated
-    # row (cmd_doc_create refuses "plan" — lifecycle logic lives in plan.py).
-    ("plan", "create"): lambda _: _load("plan", "cmd_plan_create")(),
-    ("plan", "status"): lambda _: _load("plan", "cmd_plan_status")(),
-    ("plan", "complete"): lambda a: _load("plan", "cmd_plan_complete")(a.branch),
     ("review", "start"): lambda a: _load("review", "cmd_review_start")(
         a.slug, a.reviewers, type_key=a.type_key
     ),

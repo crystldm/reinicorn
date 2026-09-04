@@ -8,23 +8,29 @@ from pathlib import Path
 
 from reinicorn import console, frontmatter
 from reinicorn.config import KB_DIR_NAME, kb_scope
+from reinicorn.corpus import doc_path
 from reinicorn.doc_types import (
     Addressing,
     CreateMode,
     DocType,
     TitleSource,
+    closable_types,
+    closer_of,
     drafts_dir,
+    filename_placeholders,
+    filename_regex,
     get_doc_dir,
     get_protected_map,
     registry,
+    seq_display_id,
 )
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.kb import (
     branch_dir_name,
-    branch_doc_path,
     commit_kb,
     require_kb_dir,
 )
+from reinicorn.staging import STAGE_ACTIVE, closer_target
 
 
 def _get_author() -> str:
@@ -75,7 +81,10 @@ def _typed_dir(doc_type: str, repo_dir: Path) -> Path:
     return get_doc_dir(doc_type, repo_dir)
 
 
-def _slug_target(doc_type: str, repo_dir: Path, slug: str) -> Path:
+def _slug_target(
+    doc_type: str, repo_dir: Path, slug: str,
+    values: dict[str, object] | None = None,
+) -> Path:
     """Where a new slug-addressed doc lands — filename from the registry, so
     creation can never diverge from how list/show/review resolve the doc.
 
@@ -85,7 +94,9 @@ def _slug_target(doc_type: str, repo_dir: Path, slug: str) -> Path:
     review merged", so drafting over a landed slug would corrupt the lane's
     state.
     """
-    fname = registry()[doc_type].filename.format(slug=slug)
+    fname = registry()[doc_type].filename.format(
+        **{"slug": slug, **(values or {})}
+    )
     target = _typed_dir(doc_type, repo_dir) / fname
     if target.is_file():
         raise FileExistsError(
@@ -100,6 +111,42 @@ def _slug_target(doc_type: str, repo_dir: Path, slug: str) -> Path:
                 "can't be redrafted under the same slug; pick a new title"
             )
     return target
+
+
+_PLACEHOLDER_ANY = re.compile(r"\{\w+(?::[^}]*)?\}")
+
+
+def _next_seq(dt: DocType, repo_dir: Path) -> int:
+    """max-existing + 1 over the type's dir (and drafts/ when gated, so two
+    open drafts never collide), found by matching the pattern's own regex.
+
+    Allocation is not atomic: concurrent creates in two checkouts, or
+    deleting the current maximum, can produce a duplicate or reused number.
+    Accepted — it cannot break identity or refs (spec §1).
+    """
+    glob_pattern = _PLACEHOLDER_ANY.sub("*", dt.filename)
+    rx = filename_regex(dt.filename)
+    dirs = [get_doc_dir(dt.key, repo_dir)]
+    if dt.gated:
+        dirs.append(drafts_dir(dt.key, repo_dir))
+    highest = 0
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for f in d.glob(glob_pattern):
+            m = rx.fullmatch(f.relative_to(d).as_posix())
+            if m:
+                highest = max(highest, int(m.group("seq")))
+    return highest + 1
+
+
+def _seq_values(dt: DocType, repo_dir: Path) -> tuple[dict[str, object], str | None]:
+    """({seq: n} filename values, display id) for a {seq} row; ({}, None)
+    otherwise."""
+    if "seq" not in filename_placeholders(dt):
+        return {}, None
+    seq = _next_seq(dt, repo_dir)
+    return {"seq": seq}, seq_display_id(dt.filename, seq)
 
 
 def render_doc(
@@ -123,14 +170,13 @@ def render_doc(
 
 
 def _branch_target(dt: DocType, repo_dir: Path, branch: str) -> Path:
-    """Branch-addressed target. Retro rides with an active plan when one
-    exists (spec non-goal: this coupling stays code; identity check against
-    the registry row keeps type knowledge out of string comparisons)."""
-    if dt is registry()["retro"]:
-        active_dir = branch_doc_path("plan", repo_dir, branch).parent
-        if active_dir.is_dir():
-            return active_dir / Path(dt.filename).name
-    return branch_doc_path(dt.key, repo_dir, branch)
+    """Branch-addressed target. A closer rides in its closee's dir at
+    whatever stage the closee currently lives in (graph lookup, not a
+    type-name special case)."""
+    if dt.closes is not None:
+        return closer_target(dt, repo_dir, branch)
+    stage = STAGE_ACTIVE if "stage" in filename_placeholders(dt) else None
+    return doc_path(repo_dir, dt, branch, stage=stage)
 
 
 def _append_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
@@ -167,8 +213,9 @@ def _create_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
         return target
     if dt.title_source is TitleSource.FREE_TEXT:
         slug = _slugify(title)
+        seq_values, seq_ident = _seq_values(dt, repo_dir)
         target = get_doc_dir(dt.key, repo_dir) / dt.filename.format(
-            slug=slug, username=_username_segment(author),
+            slug=slug, username=_username_segment(author), **seq_values,
         )
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
@@ -176,15 +223,22 @@ def _create_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
             # suffix instead of erroring like title-addressed creates do.
             target = target.with_stem(f"{slug}-2")
         heading = title.split("\n")[0][:80]
+        extra: dict[str, object] = {"slug": target.stem}
+        if seq_ident is not None:
+            extra["id"] = seq_ident
         target.write_text(render_doc(
             dt, heading, author,
-            extra={"slug": target.stem}, body_params={"text": title},
+            extra=extra, body_params={"text": title},
         ))
         return target
     slug = _slugify(title)
-    target = _slug_target(dt.key, repo_dir, slug)
+    seq_values, seq_ident = _seq_values(dt, repo_dir)
+    target = _slug_target(dt.key, repo_dir, slug, seq_values)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_doc(dt, title, author))
+    seq_extra: dict[str, object] | None = (
+        {"id": seq_ident} if seq_ident is not None else None
+    )
+    target.write_text(render_doc(dt, title, author, extra=seq_extra))
     return target
 
 
@@ -195,11 +249,11 @@ def cmd_doc_create(doc_type: str, title: str = "") -> int:
         console.error(f"Unknown doc type '{doc_type}'.")
         return 1
 
-    if dt is registry()["plan"]:
+    if closer_of(dt) is not None:
         console.error(
-            f"Use '{dt.create_hint}' instead — plan creation in "
-            "commands/plan.py runs lifecycle logic (templates, ticket, "
-            "overlap check) that this generic path would skip."
+            f"Use '{dt.create_hint}' instead — {dt.key} creation in "
+            "commands/doc_lifecycle.py runs lifecycle logic (templates, "
+            "ticket, overlap check) that this generic path would skip."
         )
         return 1
 
@@ -282,20 +336,19 @@ def cmd_doc_check_path(file_path: str) -> int:
     # Protected doc directories (these map to doc create types)
     protected = get_protected_map()
 
-    # exec-plans are special: plan.md and retro.md are protected
-    if subdir == registry()["plan"].dir_path:
+    # Staged dirs are special: only the closable doc and its closer are
+    # protected by name; aux files (progress.md, decisions.md) are not.
+    staged = {t.dir_path: t for t in closable_types()}
+    if subdir in staged:
         filename = parts[-1]
-        plan_filename = registry()["plan"].filename.rsplit("/", 1)[-1]  # "plan.md"
-        retro_filename = registry()["retro"].filename.rsplit("/", 1)[-1]  # "retro.md"
-        if filename == plan_filename:
+        guarded = {staged[subdir].filename.rsplit("/", 1)[-1]: staged[subdir]}
+        closer = closer_of(staged[subdir])
+        if closer is not None:
+            guarded[closer.filename] = closer
+        hit = guarded.get(filename)
+        if hit is not None:
             console.error(
-                f"Use '{registry()['plan'].create_hint}' instead of "
-                "writing kb docs directly."
-            )
-            return 2
-        elif filename == retro_filename:
-            console.error(
-                f"Use '{registry()['retro'].create_hint}' instead of "
+                f"Use '{hit.create_hint}' instead of "
                 "writing kb docs directly."
             )
             return 2

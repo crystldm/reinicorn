@@ -79,18 +79,21 @@ def iter_docs(kb: Path, scope: str | None = None) -> Iterator[Doc]:
 
 def doc_path(
     repo_dir: Path, dt: DocType, ident: str | None = None,
+    stage: str | None = None,
 ) -> Path:
     """The path of a doc addressed by its identity, inside a scope dir.
 
     `ident` is whatever the row's addressing consumes: the branch for
     branch-addressed rows (sanitized here), the slug for slug-addressed
-    rows, nothing for singletons. A filename needing more than the identity
-    ({seq} is allocated at create, {username} chosen at create) cannot be
-    formatted after the fact — resolve those through `iter_docs` matching
-    on `id`/slug instead; this raises rather than guess.
+    rows, nothing for singletons. `stage` fills the {stage} placeholder of
+    a closable row (staging.py owns the stage vocabulary). A filename
+    needing more than that ({seq} is allocated at create, {username} chosen
+    at create) cannot be formatted after the fact — resolve those through
+    `iter_docs` matching on `id`/slug instead; this raises rather than
+    guess.
     """
     placeholders = filename_placeholders(dt)
-    extra = placeholders - {"slug", "branch"}
+    extra = placeholders - {"slug", "branch", "stage"}
     if extra:
         raise ValueError(
             f"doc_path cannot resolve a '{dt.key}' path: filename "
@@ -98,6 +101,10 @@ def doc_path(
             "knows — look the doc up via iter_docs instead"
         )
     values: dict[str, str] = {}
+    if "stage" in placeholders:
+        if stage is None:
+            raise ValueError(f"'{dt.key}' is staged: pass a stage")
+        values["stage"] = stage
     if "branch" in placeholders:
         if ident is None:
             raise ValueError(f"'{dt.key}' is branch-addressed: pass a branch")
@@ -109,15 +116,19 @@ def doc_path(
     return repo_dir / dt.dir_path / dt.filename.format(**values)
 
 
-def iter_branch_dirs(kb: Path, dt: DocType) -> Iterator[tuple[str, Path]]:
+def iter_branch_dirs(
+    kb: Path, dt: DocType, stage: str | None = None,
+) -> Iterator[tuple[str, Path]]:
     """(scope, branch dir) for every branch dir of a branch-addressed type.
 
     The branch dir is the parent the filename pattern puts the doc in
-    (``active/{branch}/plan.md`` → each dir under ``active/``). Yields the
-    dir whether or not the doc file exists — the structure lint needs the
-    empty-dir case.
+    (``{stage}/{branch}/plan.md`` at stage "active" → each dir under
+    ``active/``). Yields the dir whether or not the doc file exists — the
+    structure lint needs the empty-dir case.
     """
     pattern = dt.filename.replace("{branch}", "*")
+    if stage is not None:
+        pattern = pattern.replace("{stage}", stage)
     parent_pattern = pattern.rsplit("/", 1)[0] if "/" in pattern else None
     if parent_pattern is None:
         return

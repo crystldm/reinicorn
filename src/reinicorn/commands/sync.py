@@ -12,13 +12,13 @@ from reinicorn.git import (
     run_git,
 )
 from reinicorn.kb import (
-    check_overlap,
     checkout_kb_main,
     get_kb_dir,
     require_kb_dir,
 )
 from reinicorn.kb_remote import resolve_kb_remote_url
 from reinicorn.kb_setup import KbSetupError, setup_kb_clone
+from reinicorn.staging import check_overlap
 
 
 def cmd_sync() -> int:

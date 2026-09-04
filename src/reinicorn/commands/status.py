@@ -7,18 +7,19 @@ from pathlib import Path
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, config_get, kb_scope
-from reinicorn.doc_types import registry
+from reinicorn.doc_types import closable_types, registry
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.hooks_health import hook_issues
 from reinicorn.identity import STALE_THRESHOLD_KEY
-from reinicorn.kb import (
-    active_plan_names,
-    branch_dir_name,
+from reinicorn.kb import branch_dir_name, require_kb_dir
+from reinicorn.review import collect_gated_drafts
+from reinicorn.staging import (
+    STAGE_ACTIVE,
+    active_branch_names,
+    active_type_of,
     check_overlap,
     overlap_line,
-    require_kb_dir,
 )
-from reinicorn.review import collect_gated_drafts
 
 
 def cmd_status(compact: bool = False) -> int:
@@ -37,23 +38,25 @@ def cmd_status(compact: bool = False) -> int:
     console.info(f"Branch: {branch or 'detached'}")
     print()
 
-    # Count active plans across all repos
-    plan_dirs = []
-    for repo_dir in sorted(kb_dir.iterdir()):
-        if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
-            continue
-        active_dir = repo_dir / registry()["plan"].dir_path / "active"
-        if active_dir.is_dir():
-            plan_dirs.extend(d for d in active_dir.iterdir() if d.is_dir())
-
-    if plan_dirs:
-        console.info(f"Active execution plans: {len(plan_dirs)}")
-        sanitized = branch_dir_name(branch) if branch else ""
-        for d in sorted(plan_dirs, key=lambda p: p.name):
-            if d.name == sanitized:
-                console.info(f"  * {d.name} (current)")
-            else:
-                console.info(f"    {d.name}")
+    # Count active branch docs of every closable type, across all repos
+    for dt in closable_types():
+        active_dirs = []
+        for repo_dir in sorted(kb_dir.iterdir()):
+            if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
+                continue
+            active_dir = repo_dir / dt.dir_path / STAGE_ACTIVE
+            if active_dir.is_dir():
+                active_dirs.extend(
+                    d for d in active_dir.iterdir() if d.is_dir()
+                )
+        if active_dirs:
+            console.info(f"Active {dt.key}s: {len(active_dirs)}")
+            sanitized = branch_dir_name(branch) if branch else ""
+            for d in sorted(active_dirs, key=lambda p: p.name):
+                if d.name == sanitized:
+                    console.info(f"  * {d.name} (current)")
+                else:
+                    console.info(f"    {d.name}")
     print()
 
     # In-review / draft gated docs across all repo scopes — frontmatter-only
@@ -74,13 +77,14 @@ def cmd_status(compact: bool = False) -> int:
         print()
 
     if branch:
-        from reinicorn.kb import plan_dir
-        pdir = plan_dir(kb_dir, branch)
-        if pdir.is_dir():
-            console.success("Current branch has an execution plan.")
-        else:
-            console.warn("Current branch has no execution plan.")
-            console.next_step("rcorn plan create")
+        from reinicorn.staging import branch_dir
+        scope_dir = kb_dir / kb_scope(root)
+        for dt in closable_types():
+            if branch_dir(scope_dir, dt, branch, STAGE_ACTIVE).is_dir():
+                console.success(f"Current branch has a {dt.key}.")
+            else:
+                console.warn(f"Current branch has no {dt.key}.")
+                console.next_step(dt.create_hint)
     print()
 
     if branch:
@@ -116,14 +120,21 @@ def cmd_status(compact: bool = False) -> int:
     _report_hook_health(root)
     _report_pointer_drift(root, kb_dir)
 
-    # Check tech debt across repos
+    # Index-file dashboard lines: one per row with an index, first repo
+    # scope that has any.
     for repo_dir in sorted(kb_dir.iterdir()):
         if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
             continue
-        debt_file = repo_dir / registry()["debt"].dir_path / "index.md"
-        if debt_file.is_file():
-            debt_path = f"{KB_DIR_NAME}/{repo_dir.name}/{registry()['debt'].dir_path}/index.md"
-            console.info(f"Tech debt: see {debt_path}")
+        found = False
+        for dt in registry().values():
+            if dt.index_file is None:
+                continue
+            index = repo_dir / dt.dir_path / dt.index_file
+            if index.is_file():
+                found = True
+                rel = f"{KB_DIR_NAME}/{repo_dir.name}/{dt.dir_path}/{dt.index_file}"
+                console.info(f"{dt.readme_label or dt.key}: see {rel}")
+        if found:
             break
     print()
 
@@ -181,17 +192,24 @@ def _compact_status(root: Path, kb_dir: Path, branch: str) -> int:
     No stale scan (per-doc `git log` is too slow for every session) and no
     headers — this output loads into agent context every session.
     """
-    plans = active_plan_names(kb_dir, kb_scope(root))
-    current = branch_dir_name(branch) if branch else ""
-    has_plan = current in plans
-    state = "plan present" if has_plan else "no plan"
+    scope = kb_scope(root)
+    closable = closable_types()
+    present = active_type_of(kb_dir / scope, branch) if branch else None
+    if present is not None:
+        state = f"{present.key} present"
+    else:
+        state = f"no {closable[0].key}" if closable else "no doc"
     print(f"reinicorn: branch {branch or 'detached'} — {state}")
-    print(f"plans: {len(plans)} active in this repo scope")
+    for dt in closable:
+        names = active_branch_names(kb_dir, scope, [dt])
+        print(f"{dt.key}s: {len(names)} active in this repo scope")
 
     print(overlap_line(branch, root) if branch else "overlap: none")
 
-    if has_plan:
-        console.next_step("rcorn plan show")
+    if not closable:
+        return 0
+    if present is not None:
+        console.next_step(f"rcorn {present.key} show")
     else:
-        console.next_step("rcorn plan create")
+        console.next_step(closable[0].create_hint)
     return 0

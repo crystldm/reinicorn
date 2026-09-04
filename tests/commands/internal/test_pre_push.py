@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 from tests.conftest import doc_text
 
+from reinicorn.commands.internal.deps_gate import ensure_dependencies_approved
 from reinicorn.commands.internal.pre_push import _ensure_kb_pushed
-from reinicorn.commands.internal.spec_gate import ensure_plan_spec_approved
 from reinicorn.git import run_git, sanitize_branch
 
 
@@ -221,17 +221,17 @@ class TestEnsurePlanSpecApproved:
 
     def _run(self, repo: Path, branches: list[str] | None = None) -> int:
         with patch(
-            "reinicorn.commands.internal.spec_gate.kb_scope", return_value=self.SCOPE
+            "reinicorn.commands.internal.deps_gate.kb_scope", return_value=self.SCOPE
         ):
             if branches is None:
                 branches = ["feat/thing"]
-            return ensure_plan_spec_approved(repo, branches)
+            return ensure_dependencies_approved(repo, branches)
 
     def test_no_kb_dir_allows(self, tmp_path: Path):
         with patch(
-            "reinicorn.commands.internal.spec_gate.get_kb_dir", return_value=None
+            "reinicorn.commands.internal.deps_gate.get_kb_dir", return_value=None
         ):
-            assert ensure_plan_spec_approved(tmp_path, ["feat/thing"]) == 0
+            assert ensure_dependencies_approved(tmp_path, ["feat/thing"]) == 0
 
     def test_no_plan_for_branch_allows(self, kb_clone_repo: Path):
         self._setup(kb_clone_repo)
@@ -379,12 +379,12 @@ class TestEnsurePlanSpecApproved:
         """
         self._setup(kb_clone_repo, plan=self._plan("specs/hot.md"))
         with patch(
-            "reinicorn.commands.internal.spec_gate.tracked_paths_at",
+            "reinicorn.commands.internal.deps_gate.tracked_paths_at",
             side_effect=RuntimeError("boom"),
         ):
             assert self._run(kb_clone_repo) == 0
         out = capsys.readouterr().out
-        assert "Spec-approval gate did not run" in out
+        assert "Dependency-approval gate did not run" in out
         assert "boom" in out
         assert "feat/thing" in out
         assert "NOT checked" in out
@@ -445,7 +445,7 @@ class TestEnsurePlanSpecApproved:
         (kb_clone_repo / "kb" / ".git").write_text("gitdir: /nonexistent/kb-git\n")
         assert self._run(kb_clone_repo) == 0
         out = capsys.readouterr().out
-        assert "Spec-approval gate did not run" in out
+        assert "Dependency-approval gate did not run" in out
         assert "NOT checked" in out
 
     def test_git_failure_fails_open_loudly(self, kb_clone_repo: Path, capsys):
@@ -460,7 +460,7 @@ class TestEnsurePlanSpecApproved:
             spec=("specs/ok.md", "approved"),
         )
         with patch(
-            "reinicorn.commands.internal.spec_gate.tracked_paths_at",
+            "reinicorn.commands.internal.deps_gate.tracked_paths_at",
             side_effect=RuntimeError("git ls-tree failed"),
         ):
             assert self._run(kb_clone_repo) == 0
@@ -554,7 +554,7 @@ class TestPushedBranchSelection:
             pre_push, "_ensure_kb_pushed", lambda _root: 0
         )
         monkeypatch.setattr(
-            pre_push, "ensure_plan_spec_approved",
+            pre_push, "ensure_dependencies_approved",
             lambda _root, branches: (seen.append(branches), 0)[1],
         )
         assert pre_push.cmd_pre_push() == 0

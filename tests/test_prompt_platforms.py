@@ -72,14 +72,14 @@ def test_parse_platform_selection_handles_arbitrary_text(raw: str):
             continue
         if token.isascii() and token.isdecimal():
             index = int(token) - 1
-            if 0 <= index < len(platforms_mod.PLATFORM_SPECS):
+            if 0 <= index < len(platforms_mod.PLATFORMS):
                 expected_indices.add(index)
                 continue
         expected_discarded.append(token)
 
     assert selected == [
         spec.key
-        for index, spec in enumerate(platforms_mod.PLATFORM_SPECS)
+        for index, spec in enumerate(platforms_mod.PLATFORMS)
         if index in expected_indices
     ]
     assert discarded == expected_discarded

@@ -84,14 +84,14 @@ def test_codex_platform_installs_no_extra_file(tmp_path: Path):
 
 def test_platform_specs_describe_installable_and_agents_only_platforms():
     """Each platform either has both install paths or relies on AGENTS.md."""
-    from reinicorn.commands.init_platforms import PLATFORM_SPECS
+    from reinicorn.commands.init_platforms import PLATFORMS
 
-    codex = next(spec for spec in PLATFORM_SPECS if spec.key == "codex")
+    codex = next(spec for spec in PLATFORMS if spec.key == "codex")
     assert codex.template_path is None
     assert codex.destination_path is None
     assert all(
         (spec.template_path is None) == (spec.destination_path is None)
-        for spec in PLATFORM_SPECS
+        for spec in PLATFORMS
     )
 
 

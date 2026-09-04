@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from reinicorn.commands.internal.spec_gate import ensure_plan_spec_approved
+from reinicorn.commands.internal.deps_gate import ensure_dependencies_approved
 from reinicorn.config import KB_DIR_NAME
 from reinicorn.git import current_branch, explain_failure, repo_root, run_git
 from reinicorn.kb import get_kb_dir
@@ -38,7 +38,7 @@ def cmd_pre_push() -> int:
         rc = _ensure_kb_pushed(root)
         if rc != 0:
             return rc
-        return ensure_plan_spec_approved(root, branches)
+        return ensure_dependencies_approved(root, branches)
     except Exception as e:
         # Fail closed: this guard exists to stop a parent push that would
         # reference unpublished kb commits. If the check itself errors we

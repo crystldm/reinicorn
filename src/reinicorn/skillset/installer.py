@@ -138,7 +138,7 @@ def install_adapter(
     sha256 the legacy asset manifest recorded for them. Listed paths that
     pre-exist on disk are adopted rather than treated as collisions —
     hash-clean ones are replaced by the adapter's copy, drifted ones are
-    preserved with a warning (see `_plan_adoption`).
+    preserved with a warning (see `_compute_adoption`).
     """
     lock = read_lock(repo_root)
     if lock is not None and lock.adapter != adapter.name:
@@ -235,8 +235,8 @@ def _install_or_update(
         adopted = dict(adopt_hashes) if adopt_hashes else {}
         _check_collisions(adapter, repo_root, skills_root, hashes, owned, adopted)
         _check_local_edits(adapter, skills_root, hashes, owned, force=force)
-        removals, preserved = _plan_removals(skills_root, hashes, owned)
-        kept_adoptions = _plan_adoption(skills_root, hashes, adopted)
+        removals, preserved = _compute_removals(skills_root, hashes, owned)
+        kept_adoptions = _compute_adoption(skills_root, hashes, adopted)
         _commit(
             adapter,
             repo_root,
@@ -656,7 +656,7 @@ def _is_locally_modified(path: Path, locked_hash: str) -> bool:
     return sha256_file(path) != locked_hash
 
 
-def _plan_adoption(
+def _compute_adoption(
     skills_root: Path, hashes: dict[str, str], adopted: dict[str, str]
 ) -> list[str]:
     """Adopted, staged paths whose on-disk state drifted from the adopt hash.
@@ -686,7 +686,7 @@ def _plan_adoption(
     return kept
 
 
-def _plan_removals(
+def _compute_removals(
     skills_root: Path, hashes: dict[str, str], owned: dict[str, str]
 ) -> tuple[list[str], list[str]]:
     """Split lock-inventory files the new staging drops into (remove, preserve).

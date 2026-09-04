@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from reinicorn import console
 from reinicorn.config import KB_DIR_NAME, kb_scope
-from reinicorn.doc_types import registry
 from reinicorn.git import (
     GitFailure,
     classify_result,
@@ -284,39 +283,8 @@ def branch_changed_files(branch: str, root: Path | None = None) -> set[str]:
 
 
 def branch_dir_name(branch: str) -> str:
-    """Directory name a branch's exec-plan docs live under."""
+    """Directory name a branch's branch-addressed docs live under."""
     return sanitize_branch(branch)
-
-
-def branch_doc_path(doc_type: str, repo_dir: Path, branch: str) -> Path:
-    """Full path of a branch-addressed doc (plan/retro) inside a repo scope dir."""
-    dt = registry()[doc_type]
-    return repo_dir / dt.dir_path / dt.filename.format(branch=sanitize_branch(branch))
-
-
-def plan_dir(kb: Path, branch: str) -> Path:
-    return branch_doc_path("plan", kb / kb_scope(), branch).parent
-
-
-def active_plan_names(kb_dir: Path, slug: str) -> list[str]:
-    """Return sorted active plan directory names for the given repo scope."""
-    active = kb_dir / slug / registry()["plan"].dir_path / "active"
-    if not active.is_dir():
-        return []
-    return sorted(d.name for d in active.iterdir() if d.is_dir())
-
-
-def overlap_line(branch: str, root: Path) -> str:
-    """Return the single-line overlap summary for compact dashboards.
-
-    None (no basis for comparison) and [] (compared, none found) both
-    collapse to "none" here — the dashboards only distinguish "nothing to
-    worry about" from "go check kb status".
-    """
-    overlaps = overlapping_branches(branch, root)
-    if overlaps:
-        return f"overlap: {len(overlaps)} branch(es) — see rcorn kb status"
-    return "overlap: none"
 
 
 def repo_kb_dir(kb_dir: Path) -> Path:
@@ -328,92 +296,3 @@ def repo_kb_dir(kb_dir: Path) -> Path:
     repo_dir = kb_dir / slug
     repo_dir.mkdir(parents=True, exist_ok=True)
     return repo_dir
-
-
-def overlapping_branches(
-    current_branch: str, root: Path | None = None
-) -> list[tuple[str, set[str]]] | None:
-    """Return (branch, overlapping_files) for each other active branch that
-    shares changed files with `current_branch`.
-
-    Queries git directly (no kb files read). Active branches are discovered
-    by directory name under ``kb/*/exec-plans/active/``. Results are sorted
-    by branch name; only branches with a non-empty overlap are included.
-
-    Returns None when there is no basis for comparison (no repo root, no kb
-    clone, no other active branches, or the current branch has no
-    changed files vs main) — distinct from an empty list, which means the
-    comparison actually ran and found no overlap.
-    """
-    if root is None:
-        root = repo_root(quiet=True)
-        if root is None:
-            return None
-
-    resolved = get_kb_dir(root)
-    if resolved is None:
-        return None
-
-    other_branches: set[str] = set()
-    sanitized_current = sanitize_branch(current_branch)
-    for repo_dir in sorted(resolved.iterdir()):
-        if not repo_dir.is_dir() or repo_dir.name.startswith((".", "_")):
-            continue
-        active_dir = repo_dir / registry()["plan"].dir_path / "active"
-        if not active_dir.is_dir():
-            continue
-        for entry in sorted(active_dir.iterdir()):
-            if not entry.is_dir() or entry.name.startswith((".", "_")):
-                continue
-            if entry.name == sanitized_current:
-                continue
-            other_branches.add(entry.name)
-
-    if not other_branches:
-        return None
-
-    our_files = branch_changed_files(current_branch, root)
-    if not our_files:
-        return None
-
-    results: list[tuple[str, set[str]]] = []
-    for other in sorted(other_branches):
-        other_files = branch_changed_files(other, root)
-        if not other_files:
-            continue
-        overlap = our_files & other_files
-        if not overlap:
-            continue
-        results.append((other, overlap))
-
-    return results
-
-
-def check_overlap(current_branch: str, root: Path | None = None) -> bool:
-    """Warn if any other active branch has changed files that also changed here.
-
-    Prints a multi-line block via `overlapping_branches`. Silent when there
-    is no basis for comparison (see `overlapping_branches`). Returns True if
-    any overlap is found.
-    """
-    overlaps = overlapping_branches(current_branch, root)
-
-    if overlaps is None:
-        return False
-
-    if not overlaps:
-        console.success("No overlap with other active branches.")
-        print()
-        return False
-
-    console.header("Cross-branch overlap detected")
-    print()
-    for other, overlap in overlaps:
-        console.warn(f"Branch '{other}' overlaps on {len(overlap)} file(s):")
-        for f in sorted(overlap)[:5]:
-            console.info(f"  {f}")
-        if len(overlap) > 5:
-            console.info(f"  ... and {len(overlap) - 5} more")
-        print()
-
-    return True
