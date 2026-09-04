@@ -50,6 +50,31 @@ def branch_dir(repo_dir: Path, dt: DocType, branch: str, stage: str) -> Path:
     return doc_path(repo_dir, dt, branch, stage=stage).parent
 
 
+def stage_root(scope_dir: Path, dt: DocType, stage: str) -> Path:
+    """The dir holding every branch dir of closable *dt* at *stage*.
+
+    Sound because the loader requires a closable filename of
+    ``{stage}/{branch}/<name>``: the stage is always the first component
+    under the type's dir.
+    """
+    return scope_dir / dt.dir_path / stage
+
+
+def closer_gap(branch_dir: Path, closer: DocType) -> str | None:
+    """Why the closer doc in *branch_dir* does not count as filled, or None.
+
+    The one filled-check for `complete`, the closer-filled lint and the
+    post-merge sweep, so a closer `complete` accepts is a closer the lint
+    accepts and vice versa.
+    """
+    path = branch_dir / closer.filename
+    if not path.is_file():
+        return f"{closer.filename} is missing"
+    if sections_empty(path.read_text()):
+        return f"{closer.filename} has only placeholder sections"
+    return None
+
+
 def stage_of(repo_dir: Path, dt: DocType, branch: str) -> str | None:
     """Which stage the branch's dir currently lives in, or None."""
     for stage in STAGES:
@@ -77,7 +102,7 @@ def active_branch_names(
     across every closable type (or just *types*)."""
     names: set[str] = set()
     for dt in closable_types() if types is None else types:
-        base = kb_dir / scope / dt.dir_path / STAGE_ACTIVE
+        base = stage_root(kb_dir / scope, dt, STAGE_ACTIVE)
         if not base.is_dir():
             continue
         names.update(d.name for d in base.iterdir() if d.is_dir())

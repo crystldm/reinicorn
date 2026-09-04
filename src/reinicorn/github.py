@@ -109,6 +109,13 @@ def gh_repo_create(
 PR_STATE_OPEN = "OPEN"
 REVIEW_DECISION_APPROVED = "APPROVED"
 
+# `gh pr list --state` vocabulary (gh CLI contract, mirrored once here).
+PR_LIST_STATE_MERGED = "merged"
+PR_LIST_STATE_ALL = "all"
+# `gh pr list --limit` cap for head-branch sweeps. Heads beyond the most
+# recent this many PRs read as "cannot verify", never as "unmerged".
+PR_LIST_LIMIT = 1000
+
 
 def gh_pr_create(
     repo: str, *, head: str, title: str, body: str,
@@ -209,3 +216,35 @@ def gh_pr_close(repo: str, number: int, comment: str = "") -> None:
         *args,
         error_hint="The PR may already be closed or merged — check the PR page.",
     )
+
+
+def gh_pr_heads(repo: str, *, state: str) -> set[str] | None:
+    """Head branch names of *repo*'s PRs in *state*, or None when gh cannot
+    answer (not installed, unauthenticated, offline, or an unexpected
+    response shape). *state* is one of the `PR_LIST_STATE_*` values.
+
+    Capped at `PR_LIST_LIMIT` most recent PRs; callers treat an absent
+    head as unverifiable, not as a negative.
+    """
+    try:
+        r = run_gh(
+            "pr", "list", "--repo", repo, "--state", state,
+            "--limit", str(PR_LIST_LIMIT), "--json", "headRefName",
+            check=False,
+        )
+    except RuntimeError:
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        rows = json.loads(r.stdout)
+    except ValueError:
+        return None
+    if not isinstance(rows, list):
+        return None
+    heads: set[str] = set()
+    for row in rows:
+        head = row.get("headRefName") if isinstance(row, dict) else None
+        if isinstance(head, str) and head:
+            heads.add(head)
+    return heads

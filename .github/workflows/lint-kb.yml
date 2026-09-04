@@ -35,6 +35,10 @@ jobs:
 
       - name: Run lint kb
         id: lints
+        env:
+          # kb/lifecycle's merged-PR signal asks gh; without a token it
+          # fails open and every merged-but-active plan looks fine.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set +e
           output=$(uv run rcorn kb lint 2>&1)
@@ -72,3 +76,29 @@ jobs:
       - name: Fail if lints failed
         if: steps.lints.outputs.exit_code != '0'
         run: exit 1
+
+  process-gate:
+    name: Process gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Clone kb
+        run: git clone --depth 1 https://github.com/crystldm/reinicorn-kb.git kb
+
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+
+      # The effective registry in the check log: a process weakened by an
+      # overlay edit is at least visible where the gate ran.
+      - name: Effective doc-type registry
+        run: uv run rcorn doc-types show
+
+      - name: Process gate
+        env:
+          # Data, never interpolated into the shell source.
+          HEAD_REF: ${{ github.head_ref }}
+        run: uv run rcorn _process-gate "$HEAD_REF"

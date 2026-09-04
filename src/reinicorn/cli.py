@@ -100,6 +100,10 @@ def _build_parser() -> argparse.ArgumentParser:
             "branch", nargs="?", default=None,
             help="Branch name (default: current)",
         )
+        complete_p.add_argument(
+            "--abandon", action="store_true",
+            help=f"Drop the {dt.key} instead: no closer needed, status abandoned",
+        )
 
     # ── Review group ────────────────────────────────────────
     review_p = sub.add_parser(
@@ -279,7 +283,7 @@ def _doc_dispatch_rows() -> dict:
             rows[(key, "complete")] = (
                 lambda a, k=key: _load(
                     "doc_lifecycle", "cmd_lifecycle_complete"
-                )(k, a.branch)
+                )(k, a.branch, abandon=a.abandon)
             )
         elif dt.title_source is TitleSource.TITLE:
             rows[(key, dt.create_verb)] = (
@@ -403,7 +407,7 @@ def _dispatch(args: argparse.Namespace) -> int:
 
 _INTERNAL_COMMANDS = {
     "_hook-check", "_post-checkout", "_pre-push", "_post-merge",
-    "_check-path", "_review-cleanup", "_review-check",
+    "_check-path", "_review-cleanup", "_review-check", "_process-gate",
 }
 
 
@@ -441,6 +445,10 @@ def _dispatch_internal(argv: list[str]) -> int:
     if cmd == "_review-check":
         from reinicorn.commands.internal.review_check import cmd_review_check
         return cmd_review_check(rest)
+
+    if cmd == "_process-gate":
+        from reinicorn.commands.internal.process_gate import cmd_process_gate
+        return cmd_process_gate(rest)
 
     return 1
 

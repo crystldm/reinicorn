@@ -70,7 +70,7 @@ When you start a feature branch, create an execution plan:
 ```bash
 rcorn plan create   # scaffolds a plan doc scoped to the current branch
 rcorn plan status   # check progress
-rcorn plan complete # archive when the branch merges
+rcorn plan complete # archive when the branch merges (--abandon to drop it)
 ```
 
 Design docs work the same way: `rcorn spec create "<title>"` writes a draft
