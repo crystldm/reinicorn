@@ -33,9 +33,9 @@ Reinicorn is opinionated about three things and leaves the rest alone:
    generated wiring doc tells agents which skill to run before creating each
    doc type.
 
-The core loop works: spec → review → implementation → test → retro is (mostly)
-there. Plenty is still missing, and many ideas are open for implementation in
-the [knowledgebase](https://github.com/crystldm/reinicorn-kb). Contribution,
+The basics work. Plenty is still missing, and many ideas are open for
+implementation in the
+[knowledgebase](https://github.com/crystldm/reinicorn-kb). Contribution,
 testing, and feedback are most welcome: `rcorn feedback` opens an issue on
 this repo. I've dog-fooded the project from day one (I built Reinicorn using
 Reinicorn), but the next test is real team workflows.
