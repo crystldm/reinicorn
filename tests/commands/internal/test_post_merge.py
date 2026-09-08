@@ -20,14 +20,15 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.conftest import doc_text
+from tests.conftest import FILLED_RETRO, doc_text
 
 from reinicorn.commands.internal.post_merge import cmd_post_merge
 from reinicorn.git import run_git
 
 
 def _mk_active_plan(repo: Path, slug: str, branch_dir: str) -> Path:
-    """Create + commit an active exec-plan dir inside the kb submodule."""
+    """Create + commit an active exec-plan dir inside the kb submodule,
+    with the filled retro the default registry requires to complete."""
     active = repo / "kb" / slug / "exec-plans" / "active" / branch_dir
     active.mkdir(parents=True)
     (active / "plan.md").write_text(doc_text(
@@ -35,6 +36,7 @@ def _mk_active_plan(repo: Path, slug: str, branch_dir: str) -> Path:
         status="in-progress", branch=branch_dir,
         body=f"\n# Execution Plan: {branch_dir}\n",
     ))
+    (active / "retro.md").write_text(FILLED_RETRO)
     run_git("add", "-A", cwd=repo / "kb")
     run_git("commit", "-q", "-m", "plan", cwd=repo / "kb")
     return active

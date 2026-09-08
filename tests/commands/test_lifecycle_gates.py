@@ -1,8 +1,9 @@
 """`<type> complete` refusal without a filled required closer, and the
 `--abandon` escape (spec: process-as-config §3).
 
-The shipped defaults require nothing, so the requirement comes from an
-overlay on the fixture scope — the same way a repo opts in.
+The shipped defaults require the retro (stage 4), so the refusal tests run
+on the bare registry; the warn-only path comes from an overlay that makes
+the closer optional — the same way a repo opts out.
 """
 
 from __future__ import annotations
@@ -19,10 +20,10 @@ from reinicorn.commands.doc_lifecycle import (
 )
 from tests.conftest import doc_text
 
-REQUIRED_CLOSER = (
+OPTIONAL_CLOSER = (
     "doc_types:\n"
     "  retro:\n"
-    "    closes: {type: plan, required: true}\n"
+    "    closes: {type: plan, required: false}\n"
 )
 
 FILLED_RETRO = (
@@ -38,13 +39,19 @@ PLACEHOLDER_RETRO = (
 
 @pytest.fixture
 def gated_repo(kb_repo: Path, monkeypatch) -> Path:
-    """kb_repo whose scope overlay makes the closer required; cwd inside
-    it so the cwd-keyed registry reads that overlay."""
+    """kb_repo on the default registry (retro required); cwd inside it so
+    the cwd-keyed registry resolves against this repo."""
     with (kb_repo / ".reinicorn-config").open("a") as f:
         f.write('REINICORN_KB_SCOPE="testproject"\n')
-    (kb_repo / "kb" / "testproject" / "doc-types.yaml").write_text(REQUIRED_CLOSER)
     monkeypatch.chdir(kb_repo)
     return kb_repo
+
+
+@pytest.fixture
+def optional_repo(gated_repo: Path) -> Path:
+    """gated_repo with an overlay making the closer optional again."""
+    (gated_repo / "kb" / "testproject" / "doc-types.yaml").write_text(OPTIONAL_CLOSER)
+    return gated_repo
 
 
 def _active_plan(root: Path, name: str, branch: str) -> Path:
@@ -137,10 +144,10 @@ def test_abandon_needs_no_closer_and_stamps_dropped(gated_repo: Path, capsys):
     assert "No retro captured" not in out, "an abandoned doc is not nagged for a closer"
 
 
-def test_optional_closer_still_only_warns(kb_repo: Path, monkeypatch, capsys):
-    """The shipped default (`required: false`) keeps today's behavior: the
-    move happens and the missing closer is a warning with a next step."""
-    monkeypatch.chdir(kb_repo)
+def test_optional_closer_still_only_warns(optional_repo: Path, capsys):
+    """An overlay with `required: false` keeps the pre-stage-4 behavior:
+    the move happens and the missing closer is a warning with a next step."""
+    kb_repo = optional_repo
     active = _active_plan(kb_repo, "feature-v", "feature/v")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \

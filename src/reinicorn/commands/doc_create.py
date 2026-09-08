@@ -158,7 +158,11 @@ def render_doc(
 ) -> str:
     """Frontmatter + H1 + the type's template body — the one rendering path
     every doc-type creation goes through (registry-driven-doc-types stage 1)."""
-    sections = "".join(f"\n## {s}\n\n- \n" for s in dt.required_sections)
+    hints = dict(dt.section_hints)
+    sections = "".join(
+        f"\n## {s}\n\n- {f'_{hints[s]}_' if s in hints else ''}\n"
+        for s in dt.required_sections
+    )
     params: dict[str, str] = {
         "title": title, "author": author,
         "date": date.today().isoformat(), "sections": sections,

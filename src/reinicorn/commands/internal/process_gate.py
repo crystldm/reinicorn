@@ -30,7 +30,14 @@ from reinicorn.staging import STAGES, branch_dir
 if TYPE_CHECKING:
     from pathlib import Path
 
-GATE_RULES = (DocStructureRule, DraftRefsRule, CloserFilledRule)
+    from reinicorn.linter.rules.base import LintRule
+
+
+def gate_rules() -> tuple[LintRule, ...]:
+    """The gate's rules. `closer-filled` runs strict here: the branch under
+    review is where its closer is due, so a missing one blocks the merge
+    (whole-kb it only reports an unfilled stub)."""
+    return (DocStructureRule(), DraftRefsRule(), CloserFilledRule(missing_counts=True))
 
 
 def cmd_process_gate(argv: list[str]) -> int:
@@ -57,8 +64,7 @@ def cmd_process_gate(argv: list[str]) -> int:
     print()
 
     failed: list[str] = []
-    for rule_cls in GATE_RULES:
-        rule = rule_cls()
+    for rule in gate_rules():
         hits = [d for d in rule.run(root) if diagnostic_path(d) in docs]
         if not hits:
             print(f"[PASS] {rule.name()}")

@@ -235,3 +235,16 @@ def test_is_staged_and_is_required_closer_read_the_row():
     assert not is_required_closer(row())
     assert not is_required_closer(row(closes=Closes(type="plan", required=False)))
     assert is_required_closer(row(closes=Closes(type="plan", required=True)))
+
+
+def test_retro_defaults_require_a_retro_with_spec_drift():
+    """Stage-4 defaults (spec §4): the retro closes the plan as a hard
+    requirement and carries a Spec Drift section whose placeholder states
+    the content contract."""
+    retro = REGISTRY["retro"]
+    assert retro.closes is not None and retro.closes.required is True
+    assert retro.required_sections[-1] == "Spec Drift"
+    hint = dict(retro.section_hints)["Spec Drift"]
+    for word in ("amended", "debted", "accepted", "None."):
+        assert word in hint
+    assert "_" not in hint, "an underscore would break the italic placeholder"

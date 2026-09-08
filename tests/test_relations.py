@@ -71,7 +71,7 @@ def test_default_graph():
         field="spec", type="spec", status="approved"
     )
     assert dependencies_of(REGISTRY["retro"]) is None
-    assert REGISTRY["retro"].closes == Closes(type="plan", required=False)
+    assert REGISTRY["retro"].closes == Closes(type="plan", required=True)
 
 
 # --- Overlay validation -----------------------------------------------------

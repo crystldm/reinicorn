@@ -119,10 +119,12 @@ one place, `rcorn kb status` can compare active branches and flag overlap
 before two people silently rewrite the same file. This is what the article
 calls cross-branch awareness. With the superpowers adapter installed, the
 executing-plans skill works the plan step by step; when the branch merges,
-`rcorn plan complete` archives it and asks for a retro, because lessons that
-never get written down are lost. A repo whose doc-type config marks the retro
-as required gets a refusal instead of a nag, with `--abandon` as the recorded
-escape hatch.
+`rcorn plan complete` archives it, and refuses without a filled retro, because
+lessons that never get written down are lost; `--abandon` is the recorded
+escape hatch, and a repo whose doc-type config makes the retro optional gets a
+nag instead. The retro's Spec Drift section states every deviation from the
+plan's declared spec with a disposition (amended, debted or accepted), or the
+single word "None." — so drift is disclosed where the reviewer reads it.
 
 Two capture commands sit outside the main loop. `rcorn idea create` is for
 the thought that strikes while you're doing something else: file it and stay
@@ -137,7 +139,7 @@ from a template through the CLI. The protected kb paths (`specs/`, `prds/`,
 `tech-debt/`, `exec-plans/`, `ideas/`) reject direct writes, so a doc can't
 exist without its provenance fields and required sections. `rcorn kb lint`
 checks cross-links, doc freshness, required sections, drafts referenced as if
-they were approved, missing retros where the config requires one, and plans
+they were approved, retros left as empty scaffolds, and plans
 still active after their branch merged; the "Process gate" CI job runs the
 per-branch subset against every PR. Team taste gets the same treatment: `rcorn principle add`
 appends to the repo's golden principles, capturing a human preference once so
@@ -150,7 +152,7 @@ The document types, each with its template and protected location:
 | spec | `rcorn spec create "<title>"` | The implementation contract: problem, design goals, design, non-goals |
 | prd | `rcorn prd create "<title>"` | Product requirements: overview, user stories, acceptance criteria, out of scope |
 | plan | `rcorn plan create` | Per-branch execution plan: goal, acceptance criteria, tasks |
-| retro | `rcorn retro create` | Per-branch retrospective: what went well, what to improve, lessons, actions |
+| retro | `rcorn retro create` | Per-branch retrospective: what went well, what to improve, lessons, actions, spec drift |
 | debt | `rcorn debt create "<title>"` | Tech-debt entry: impact and remediation plan |
 | idea | `rcorn idea create "<idea>"` | Quick capture, filed by author |
 | principle | `rcorn principle add "<title>"` | Appends a golden principle to the repo's ruleset |
@@ -213,7 +215,7 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn plan create` | Create execution plan for current branch |
 | `rcorn plan status` | Plan status for current branch |
 | `rcorn plan show [branch] [--full]` | Show plan doc |
-| `rcorn plan complete [branch]` | Archive plan to completed/ (refuses without a filled retro when the config requires one) |
+| `rcorn plan complete [branch]` | Archive plan to completed/ (refuses without a filled retro; the doc-type config can make it optional) |
 | `rcorn plan complete [branch] --abandon` | Drop the plan instead: status abandoned, no retro needed |
 | `rcorn retro create` | Create retro for current branch |
 | `rcorn retro show [branch] [--full]` | Show retro doc |

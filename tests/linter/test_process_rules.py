@@ -19,10 +19,10 @@ from reinicorn.linter.rules.lifecycle import LifecycleRule, MergeProbe
 from reinicorn.linter.runner import run_lints
 from tests.conftest import doc_text
 
-REQUIRED_CLOSER = (
+OPTIONAL_CLOSER = (
     "doc_types:\n"
     "  retro:\n"
-    "    closes: {type: plan, required: true}\n"
+    "    closes: {type: plan, required: false}\n"
 )
 PLAN_BODY = (
     "\n# Plan\n\n## Goal\n\n- Do it.\n\n## Acceptance Criteria\n\n- Done.\n\n"
@@ -153,44 +153,50 @@ class TestRequiredSections:
 
 
 class TestCloserFilled:
-    def test_defaults_require_nothing(self, kb_repo: Path):
+    """The default registry requires the retro (stage 4). Whole-kb the rule
+    judges only a stub that exists; the gate's strict mode also counts a
+    missing one, because the branch under review is where it is due."""
+
+    def test_missing_closer_is_not_a_whole_kb_finding(self, kb_repo: Path):
         _plan(kb_repo, "feature-c", "feature/c")
         assert CloserFilledRule().run(kb_repo) == []
 
-    @pytest.fixture
-    def required(self, kb_repo: Path) -> Path:
-        with (kb_repo / ".reinicorn-config").open("a") as f:
-            f.write('REINICORN_KB_SCOPE="testproject"\n')
-        (kb_repo / "kb" / "testproject" / "doc-types.yaml").write_text(REQUIRED_CLOSER)
-        return kb_repo
+    def test_strict_mode_reports_a_missing_closer(self, kb_repo: Path):
+        _plan(kb_repo, "feature-d", "feature/d")
 
-    def test_missing_required_closer_is_an_error(self, required: Path):
-        _plan(required, "feature-d", "feature/d")
-
-        diags = CloserFilledRule().run(required)
+        diags = CloserFilledRule(missing_counts=True).run(kb_repo)
         assert len(diags) == 1
         assert diags[0].startswith("kb/testproject/exec-plans/active/feature-d/plan.md:1")
         assert "retro.md is missing" in diags[0]
         assert "rcorn retro create" in diags[0]
 
-    def test_placeholder_closer_is_an_error(self, required: Path):
-        active = _plan(required, "feature-e", "feature/e")
+    @pytest.mark.parametrize("missing_counts", [False, True])
+    def test_placeholder_closer_is_an_error(self, kb_repo: Path, missing_counts: bool):
+        active = _plan(kb_repo, "feature-e", "feature/e")
         _retro(active, body="\n# Retro\n\n## What Went Well\n\n- \n")
 
-        diags = CloserFilledRule().run(required)
+        diags = CloserFilledRule(missing_counts=missing_counts).run(kb_repo)
         assert len(diags) == 1
         assert "only placeholder sections" in diags[0]
 
-    def test_filled_closer_passes(self, required: Path):
-        active = _plan(required, "feature-f", "feature/f")
+    def test_filled_closer_passes(self, kb_repo: Path):
+        active = _plan(kb_repo, "feature-f", "feature/f")
         _retro(active)
-        assert CloserFilledRule().run(required) == []
+        assert CloserFilledRule(missing_counts=True).run(kb_repo) == []
 
-    def test_completed_stage_is_not_judged(self, required: Path):
-        completed = required / "kb" / "testproject" / "exec-plans" / "completed" / "old"
+    def test_completed_stage_is_not_judged(self, kb_repo: Path):
+        completed = kb_repo / "kb" / "testproject" / "exec-plans" / "completed" / "old"
         completed.mkdir(parents=True)
         (completed / "plan.md").write_text("# Old\n")
-        assert CloserFilledRule().run(required) == []
+        assert CloserFilledRule(missing_counts=True).run(kb_repo) == []
+
+    def test_optional_closer_is_never_judged(self, kb_repo: Path):
+        with (kb_repo / ".reinicorn-config").open("a") as f:
+            f.write('REINICORN_KB_SCOPE="testproject"\n')
+        (kb_repo / "kb" / "testproject" / "doc-types.yaml").write_text(OPTIONAL_CLOSER)
+        active = _plan(kb_repo, "feature-g", "feature/g")
+        _retro(active, body="\n# Retro\n\n## What Went Well\n\n- \n")
+        assert CloserFilledRule(missing_counts=True).run(kb_repo) == []
 
 
 # --- kb/lifecycle ------------------------------------------------------------

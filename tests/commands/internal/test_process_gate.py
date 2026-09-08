@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from tests.conftest import doc_text
+from tests.conftest import FILLED_RETRO, doc_text
 
 from reinicorn.commands.internal.process_gate import branch_docs, cmd_process_gate
 from reinicorn.git import run_git
@@ -38,6 +38,10 @@ def _plan(root: Path, name: str, branch: str, body: str = GOOD_BODY) -> Path:
     return active
 
 
+def _retro(active: Path) -> None:
+    (active / "retro.md").write_text(FILLED_RETRO)
+
+
 def _run(root: Path, branch: str) -> int:
     with patch("reinicorn.commands.internal.process_gate.repo_root", return_value=root):
         return cmd_process_gate([branch])
@@ -49,12 +53,13 @@ def test_no_governed_docs_passes(gate_repo: Path, capsys):
 
 
 def test_gate_judges_only_the_named_branch(gate_repo: Path, capsys):
-    _plan(gate_repo, "feature-good", "feature/good")
+    _retro(_plan(gate_repo, "feature-good", "feature/good"))
     _plan(gate_repo, "feature-bad", "feature/bad", body="\n# Plan\n\nno sections\n")
 
     assert _run(gate_repo, "feature/good") == 0
     out = capsys.readouterr().out
     assert "[PASS] kb/required-sections" in out
+    assert "[PASS] kb/closer-filled" in out
     assert "feature-bad" not in out, "another branch's findings must not red this one"
 
     assert _run(gate_repo, "feature/bad") == 1
@@ -73,15 +78,15 @@ def test_missing_doc_in_branch_dir_is_not_filtered_away(gate_repo: Path, capsys)
     assert "Missing plan.md" in capsys.readouterr().out
 
 
-def test_required_closer_blocks_the_gate(gate_repo: Path, capsys):
-    (gate_repo / "kb" / "testproject" / "doc-types.yaml").write_text(
-        "doc_types:\n  retro:\n    closes: {type: plan, required: true}\n"
-    )
+def test_missing_retro_blocks_the_gate_by_default(gate_repo: Path, capsys):
+    """The default registry requires the retro, and the gate is strict:
+    a branch whose plan has no retro yet cannot merge."""
     _plan(gate_repo, "feature-open", "feature/open")
 
     assert _run(gate_repo, "feature/open") == 1
     out = capsys.readouterr().out
     assert "[FAIL] kb/closer-filled" in out
+    assert "retro.md is missing" in out
     assert "rcorn retro create" in out
 
 

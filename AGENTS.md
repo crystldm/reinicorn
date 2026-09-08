@@ -49,6 +49,18 @@ This rule applies to agents and contributors operating *on* the KB —
   discloses known-unrelated noise instead of glossing over it.
 - Never claim "always/never/all paths" without enumerating the paths or routing
   them through one enforcing seam.
+- Body states spec-drift status: "matches spec", or every deviation between
+  the plan's declared spec and what shipped with its disposition — amended
+  (link the spec review PR), debted (link the debt doc), accepted (one-line
+  reason) — mirroring the retro's Spec Drift section.
+
+## Reviewing
+
+- Diff the change against the plan's declared spec, not only against the PR
+  description; undisclosed drift is a blocking finding.
+- The retro is part of the reviewed diff and is held to the same bar as code:
+  a Spec Drift section that says "None." while the diff deviates is a defect,
+  not a formality.
 
 ## Responding to code review
 

@@ -53,9 +53,11 @@ def test_override_changes_only_listed_fields(tmp_path):
     )
     retro = registry(root)["retro"]
     assert retro.required_sections == ("Only Section",)
-    # Everything unlisted keeps the default.
+    # Everything unlisted keeps the default — including a hint for a section
+    # that is no longer required, which simply never renders.
     assert retro.filename == REGISTRY["retro"].filename
     assert retro.protected is REGISTRY["retro"].protected
+    assert retro.section_hints == REGISTRY["retro"].section_hints
 
 
 def test_add_row_with_derived_defaults(tmp_path):
@@ -246,3 +248,47 @@ def test_frontmatter_vocabulary_reads_overlay(tmp_path, monkeypatch):
     assert frontmatter.validate(meta) == []
     meta["bogus"] = "x"
     assert any("bogus" in e for e in frontmatter.validate(meta))
+
+
+def test_section_hints_overlay_is_a_string_mapping(tmp_path):
+    root = _repo_with_overlay(
+        tmp_path,
+        "doc_types:\n"
+        "  retro:\n"
+        "    section_hints: {'What Went Well': 'Wins, with evidence.'}\n",
+    )
+    assert registry(root)["retro"].section_hints == (
+        ("What Went Well", "Wins, with evidence."),
+    )
+
+
+def test_section_hints_overlay_rejects_non_mapping(tmp_path):
+    root = _repo_with_overlay(
+        tmp_path,
+        "doc_types:\n  retro:\n    section_hints: [Spec Drift]\n",
+    )
+    with pytest.raises(DocTypesError, match="mapping of string to string"):
+        registry(root)
+
+
+def test_section_hints_in_schema_and_show_round_trip(tmp_path, monkeypatch, capsys):
+    """`doc-types show` prints valid overlay YAML: the hints come out as the
+    mapping the loader accepts, and the schema types them the same way."""
+    import yaml
+
+    from reinicorn.commands.doc_types_cmd import cmd_doc_types_show
+
+    row = overlay_schema()["properties"]["doc_types"]["additionalProperties"]
+    assert row["properties"]["section_hints"] == {
+        "type": "object", "additionalProperties": {"type": "string"},
+    }
+
+    monkeypatch.chdir(_repo_with_overlay(tmp_path, None))
+    assert cmd_doc_types_show() == 0
+    shown = yaml.safe_load(capsys.readouterr().out)
+    hints = shown["doc_types"]["retro"]["section_hints"]
+    assert hints == dict(REGISTRY["retro"].section_hints)
+    reloaded = _repo_with_overlay(
+        tmp_path / "again", yaml.safe_dump({"doc_types": {"retro": {"section_hints": hints}}}),
+    )
+    assert registry(reloaded)["retro"].section_hints == REGISTRY["retro"].section_hints

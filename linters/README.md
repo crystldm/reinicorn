@@ -97,7 +97,7 @@ the doc-type registry:
 | `kb/frontmatter` | `fields` / `required_fields` | a doc's provenance block is missing or malformed |
 | `kb/required-sections` | `required_sections` | a doc still being authored lacks a required `##` header — the whole heading must be the name, `## Design Notes` is not `Design` (completed, closed and approved-gated docs are exempt); an active plan dir has no plan doc; a doc with a `depends_on` relation lacks its field. `kb/plan-structure` is accepted as an alias of this rule |
 | `kb/draft-refs` | `depends_on` | a doc builds on a draft or in-review doc |
-| `kb/closer-filled` | `closes` (`required: true`) | an active plan has no filled retro (or whatever the config's closer is) |
+| `kb/closer-filled` | `closes` (`required: true`) | an active plan's retro (or whatever the config's closer is) exists but is still the placeholder scaffold. Only the process gate also counts a *missing* retro: the branch under review is where the retro is due, whereas kb-wide an in-progress plan has none yet by design |
 | `kb/lifecycle` | `closes` | an active plan's branch is merged or deleted — `rcorn plan complete` it. Merged-ness is checked three ways (published-then-deleted, ancestor of the default branch, merged PR by head via `gh`); anything the network cannot answer is "cannot verify", never a failure |
 | `kb/cross-links` | — | a markdown link points nowhere |
 | `kb/docs-freshness` | `index_file` | an index file is older than `max_days_stale` |

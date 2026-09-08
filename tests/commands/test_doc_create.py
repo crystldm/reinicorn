@@ -469,3 +469,23 @@ def test_seq_show_reports_ambiguous_id(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "ambiguous" in out
     assert "RFC-0001-one" in out and "RFC-0001-two" in out
+
+
+def test_render_doc_section_hints_are_italic_placeholders():
+    """A hinted section scaffolds as an italic bullet that `sections_empty`
+    still counts as unfilled; an unhinted one stays a bare bullet."""
+    import dataclasses
+
+    from reinicorn.commands.doc_create import render_doc
+    from reinicorn.doc_types import REGISTRY
+    from reinicorn.staging import sections_empty
+
+    dt = dataclasses.replace(
+        REGISTRY["retro"],
+        required_sections=("Alpha", "Beta"),
+        section_hints=(("Beta", "What beta needs."),),
+    )
+    text = render_doc(dt, "T", "A", extra={"branch": "feature/x"})
+    assert "## Alpha\n\n- \n" in text
+    assert "## Beta\n\n- _What beta needs._\n" in text
+    assert sections_empty(text)
