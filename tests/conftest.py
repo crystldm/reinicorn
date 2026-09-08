@@ -11,6 +11,15 @@ import pytest
 from reinicorn import frontmatter
 from reinicorn.git import run_git
 
+# A retro `staging.sections_empty` counts as filled: what `plan complete`
+# needs under the default registry (retro required, stage 4).
+FILLED_RETRO = (
+    "# Retro\n\n## What Went Well\n\n- Shipped.\n\n"
+    "## What Could Be Improved\n\n- Tests earlier.\n\n"
+    "## Lessons Learned\n\n- Write it down.\n\n## Action Items\n\n- None.\n\n"
+    "## Spec Drift\n\nNone.\n"
+)
+
 
 def doc_text(body: str = "\n## Problem\n\nbody\n", **meta) -> str:
     """A valid frontmatter doc for fixtures.

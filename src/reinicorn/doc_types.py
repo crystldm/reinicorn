@@ -82,8 +82,9 @@ class Closes:
 
     Implies: the closer is created inside the closee's dir and `<closee>
     complete` moves the stage dir with both docs. When `required`,
-    `complete` refuses without a filled closer (`--abandon` is the escape)
-    and the `kb/closer-filled` lint reports the gap; otherwise a missing
+    `complete` refuses without a filled closer (`--abandon` is the escape),
+    the process gate blocks a missing or unfilled one, and the whole-kb
+    `kb/closer-filled` lint reports an unfilled stub; otherwise a missing
     closer only warns.
     """
 
@@ -114,6 +115,11 @@ class DocType:
     readme_label: str | None = None  # Seeded kb README row; None = no row
     index_file: str | None = None  # For freshness linter
     required_sections: tuple[str, ...] = ()  # Linter checks these headers
+    # Placeholder text per required section, as (section, hint) pairs; a
+    # section without a hint scaffolds as a bare bullet, a hint for a
+    # section not in required_sections never renders. Hints render in
+    # italics so `staging.sections_empty` still counts them as unfilled.
+    section_hints: tuple[tuple[str, str], ...] = ()
     gated: bool = False  # Review-gated: create writes to drafts/, approval via the review lane
     # Per-type frontmatter vocabulary (beyond the core fields every doc
     # carries). `branch` is auto-added to both for branch-addressed rows;
@@ -255,10 +261,20 @@ REGISTRY: dict[str, DocType] = {
             "What Could Be Improved",
             "Lessons Learned",
             "Action Items",
+            "Spec Drift",
+        ),
+        section_hints=(
+            (
+                "Spec Drift",
+                "Every deviation between the plan's declared spec: and what "
+                "shipped, each with a disposition: amended (link the spec "
+                "review PR), debted (link the debt doc) or accepted (one-line "
+                "reason). Or the single word None.",
+            ),
         ),
         fields=("branch", "plan"),
         required_fields=("branch",),
-        closes=Closes(type="plan", required=False),
+        closes=Closes(type="plan", required=True),
     ),
     "principle": DocType(
         key="principle",
@@ -291,6 +307,9 @@ _ENUM_FIELDS: dict[str, type[Enum]] = {
 # second schema to keep in sync. `key` comes from the mapping key and
 # `disabled` is the removal marker, not a field.
 _ROW_KEYS = frozenset(f.name for f in dataclasses.fields(DocType)) - {"key"}
+# Row fields that are string-to-string mappings in the overlay and
+# (key, value) tuples on the frozen dataclass.
+STRING_MAPPING_FIELDS = frozenset({"extra_meta", "section_hints"})
 _ADD_MANDATORY = ("dir_path", "filename", "addressing")
 
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)(?::[^}]*)?\}")
@@ -397,7 +416,7 @@ def _coerce(source: str, key: str, name: str, value: Any) -> Any:
             if not isinstance(v, expected):
                 raise bad(f"{expected.__name__} for '{k}', got {v!r}")
         return rel_cls(**value)
-    if name == "extra_meta":
+    if name in STRING_MAPPING_FIELDS:
         if not isinstance(value, dict) or not all(
             isinstance(k, str) and isinstance(v, str) for k, v in value.items()
         ):
@@ -744,7 +763,7 @@ def overlay_schema() -> dict[str, Any]:
                     for f in rel_fields
                 },
             }
-        if name == "extra_meta":
+        if name in STRING_MAPPING_FIELDS:
             return {"type": "object", "additionalProperties": {"type": "string"}}
         if name in ("required_sections", "fields", "required_fields"):
             return {"type": "array", "items": {"type": "string"}}

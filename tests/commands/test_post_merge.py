@@ -9,7 +9,7 @@ from reinicorn.commands.internal.post_merge import (
     _archive_stale_docs,
     _live_remote_branches,
 )
-from tests.conftest import doc_text
+from tests.conftest import FILLED_RETRO, doc_text
 
 
 def test_archive_stale_docs_removes_deleted_branch(kb_repo: Path, capsys):
@@ -21,6 +21,7 @@ def test_archive_stale_docs_removes_deleted_branch(kb_repo: Path, capsys):
         status="in-progress", branch="feature/merged",
         body="\n# Plan\n",
     ))
+    (active / "retro.md").write_text(FILLED_RETRO)
 
     with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git, \
          patch("reinicorn.kb.kb_scope", return_value="testproject"), \
@@ -71,6 +72,7 @@ def test_lookalike_dashed_branch_does_not_keep_a_deleted_plan_alive(
         status="in-progress", branch="feature/mvp",
         body="\n# Plan\n",
     ))
+    (active / "retro.md").write_text(FILLED_RETRO)
 
     with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git, \
          patch("reinicorn.kb.kb_scope", return_value="testproject"), \

@@ -1,10 +1,16 @@
 """Lint rule ``kb/closer-filled``: an active closee whose row has a
-*required* closer must have that closer present and filled in.
+*required* closer must not carry an unfilled one.
 
-Reads only the ``closes`` relation (spec: process-as-config §3). With the
-shipped defaults nothing is required, so the rule passes untouched until
-an overlay — or the stage-4 defaults flip — says otherwise. The filled
-check is `staging.closer_gap`, the same one `complete` refuses on.
+Reads only the ``closes`` relation (spec: process-as-config §3). The filled
+check is `staging.closer_gap`, the same one `complete` refuses on. Two
+presence modes, because the closer is due at different moments:
+
+- whole-kb (`rcorn kb lint`, the default): only a closer that exists but is
+  placeholder-only is reported. A missing closer on an in-progress closee
+  is normal — the retro is written inside the PR (spec §6) — so it is not
+  a kb-wide finding.
+- strict (``missing_counts=True``, the process gate): a missing closer is
+  reported too. The gate is the pre-merge check, where the closer is due.
 """
 
 from __future__ import annotations
@@ -22,6 +28,9 @@ if TYPE_CHECKING:
 
 
 class CloserFilledRule(LintRule):
+    def __init__(self, *, missing_counts: bool = False) -> None:
+        self.missing_counts = missing_counts
+
     def name(self) -> str:
         return f"{KB_DIR_NAME}/closer-filled"
 
@@ -37,6 +46,8 @@ class CloserFilledRule(LintRule):
                 continue
             doc_name = dt.filename.rsplit("/", 1)[-1]
             for _scope, stage_dir in iter_branch_dirs(kb, dt, STAGE_ACTIVE):
+                if not self.missing_counts and not (stage_dir / closer.filename).is_file():
+                    continue
                 gap = closer_gap(stage_dir, closer)
                 if gap is None:
                     continue

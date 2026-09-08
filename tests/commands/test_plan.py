@@ -20,6 +20,7 @@ from reinicorn.refs import (
     declared_dependency,
     dependency_placeholder,
 )
+from tests.conftest import FILLED_RETRO
 
 _PLAN_REL = REGISTRY["plan"].depends_on
 SPEC_PLACEHOLDER = dependency_placeholder(_PLAN_REL)
@@ -252,6 +253,7 @@ def test_plan_complete_moves_to_completed(kb_repo: Path, capsys):
     # Sanitized dir name
     active = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-done"
     active.mkdir(parents=True)
+    (active / "retro.md").write_text(FILLED_RETRO)
     (active / "plan.md").write_text("# Plan\n\n**Status:** in-progress\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
@@ -277,6 +279,7 @@ def test_plan_complete_moves_to_completed(kb_repo: Path, capsys):
 def test_plan_complete_updates_status(kb_repo: Path, capsys):
     active = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-x"
     active.mkdir(parents=True)
+    (active / "retro.md").write_text(FILLED_RETRO)
     (active / "plan.md").write_text("# Plan\n\n**Status:** planning\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
@@ -303,6 +306,7 @@ def test_plan_complete_missing_plan(kb_repo: Path, capsys):
 def test_plan_complete_defaults_to_current_branch(kb_repo: Path, capsys):
     active = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-cur"
     active.mkdir(parents=True)
+    (active / "retro.md").write_text(FILLED_RETRO)
     (active / "plan.md").write_text("# Plan\n\n**Status:** in-progress\n")
 
     with patch("reinicorn.kb.kb_scope", return_value="testproject"), \

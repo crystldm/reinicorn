@@ -16,6 +16,7 @@ import yaml
 
 from reinicorn.doc_types import (
     OVERLAY_FILENAME,
+    STRING_MAPPING_FIELDS,
     DocType,
     overlay_keys,
     overlay_schema,
@@ -32,7 +33,7 @@ def _row_yaml(dt: DocType) -> str:
         value = getattr(dt, f.name)
         if isinstance(value, Enum):
             value = value.value
-        elif f.name == "extra_meta":
+        elif f.name in STRING_MAPPING_FIELDS:
             value = dict(value)
         elif dataclasses.is_dataclass(value) and not isinstance(value, type):
             # Relations render in their overlay shape ({field, type, status}).
