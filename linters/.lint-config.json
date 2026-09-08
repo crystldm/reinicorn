@@ -2,9 +2,11 @@
   "rules": {
     "kb/docs-freshness": { "enabled": true, "severity": "warning", "max_days_stale": 30 },
     "kb/cross-links": { "enabled": true, "severity": "error" },
-    "kb/plan-structure": { "enabled": true, "severity": "warning" },
+    "kb/required-sections": { "enabled": true, "severity": "error" },
     "kb/frontmatter": { "enabled": true, "severity": "error" },
     "kb/draft-refs": { "enabled": true, "severity": "error" },
+    "kb/closer-filled": { "enabled": true, "severity": "error" },
+    "kb/lifecycle": { "enabled": true, "severity": "error" },
     "scripts/shellcheck": { "enabled": true, "severity": "error" }
   }
 }

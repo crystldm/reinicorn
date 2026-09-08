@@ -62,6 +62,24 @@ def test_run_gh_raises_when_gh_not_installed():
         run_gh("auth", "status")
 
 
+def test_run_gh_timeout_is_passed_and_raises_when_it_elapses():
+    import subprocess
+
+    with (
+        patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["gh"], 5)) as mock,
+        pytest.raises(RuntimeError, match="timed out after 5s"),
+    ):
+        run_gh("pr", "list", check=False, timeout=5)
+    assert mock.call_args.kwargs["timeout"] == 5
+
+
+def test_run_gh_without_timeout_waits():
+    with patch("subprocess.run") as mock:
+        mock.return_value.returncode = 0
+        run_gh("auth", "status")
+    assert "timeout" not in mock.call_args.kwargs
+
+
 def test_run_gh_check_false_returns_result():
     with patch("subprocess.run") as mock:
         mock.return_value.returncode = 1
@@ -297,3 +315,49 @@ def test_gh_login_none_on_failure():
         mock.return_value.returncode = 1
         mock.return_value.stdout = ""
         assert gh_login() is None
+
+
+# --- gh_pr_heads (gh CLI contract: `gh pr list --state X --json headRefName`) --
+
+
+def _completed(rc: int, stdout: str):
+    from subprocess import CompletedProcess
+    return CompletedProcess(args=["gh"], returncode=rc, stdout=stdout, stderr="")
+
+
+def test_gh_pr_heads_returns_head_names():
+    from reinicorn.github import PR_LIST_STATE_MERGED, gh_pr_heads
+
+    payload = '[{"headRefName": "feat/a"}, {"headRefName": "fix/b"}, {"other": 1}]'
+    with patch("reinicorn.github.run_gh", return_value=_completed(0, payload)) as mock:
+        assert gh_pr_heads("o/r", state=PR_LIST_STATE_MERGED) == {"feat/a", "fix/b"}
+    args = mock.call_args[0]
+    assert args[:6] == ("pr", "list", "--repo", "o/r", "--state", "merged")
+    assert "--json" in args and "headRefName" in args
+
+
+@pytest.mark.parametrize(
+    "result",
+    [_completed(1, ""), _completed(0, ""), _completed(0, "not json"), _completed(0, "{}")],
+    ids=["failed", "empty", "garbage", "not-a-list"],
+)
+def test_gh_pr_heads_is_none_when_gh_cannot_answer(result):
+    from reinicorn.github import PR_LIST_STATE_ALL, gh_pr_heads
+
+    with patch("reinicorn.github.run_gh", return_value=result):
+        assert gh_pr_heads("o/r", state=PR_LIST_STATE_ALL) is None
+
+
+def test_gh_pr_heads_forwards_timeout_and_is_none_when_it_elapses():
+    from reinicorn.github import PR_LIST_STATE_ALL, gh_pr_heads
+
+    with patch("reinicorn.github.run_gh", side_effect=RuntimeError("timed out")) as mock:
+        assert gh_pr_heads("o/r", state=PR_LIST_STATE_ALL, timeout=7) is None
+    assert mock.call_args.kwargs["timeout"] == 7
+
+
+def test_gh_pr_heads_is_none_without_gh():
+    from reinicorn.github import PR_LIST_STATE_ALL, gh_pr_heads
+
+    with patch("reinicorn.github.run_gh", side_effect=RuntimeError("gh CLI not found")):
+        assert gh_pr_heads("o/r", state=PR_LIST_STATE_ALL) is None

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import date
+from typing import TYPE_CHECKING
 
 from reinicorn import console, frontmatter
 from reinicorn.config import config_get, kb_scope
-from reinicorn.doc_types import DocType, closer_of, registry
+from reinicorn.doc_types import DocType, closer_of, is_required_closer, registry
 from reinicorn.frontmatter import set_meta
 from reinicorn.git import current_branch, repo_root, run_git
 from reinicorn.identity import TICKET_PATTERN_KEY
@@ -24,16 +26,52 @@ from reinicorn.staging import (
     STAGE_COMPLETED,
     branch_dir,
     check_overlap,
-    sections_empty,
+    closer_gap,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+STATUS_COMPLETE = "complete"
+STATUS_ABANDONED = "abandoned"
+
 _TEMPLATE_DIR_NAME = "_template"
+
+
+@dataclass(frozen=True)
+class _Outcome:
+    """How `complete` closes a doc: the commit verb, the `status` word the
+    type keeps, the coarse `lifecycle` axis, and the past tense told to
+    the user."""
+
+    verb: str
+    status: str
+    lifecycle: str
+    told: str
+
+
+_COMPLETED = _Outcome(
+    "complete", STATUS_COMPLETE, frontmatter.LIFECYCLE_DONE, "archived",
+)
+_ABANDONED = _Outcome(
+    "abandon", STATUS_ABANDONED, frontmatter.LIFECYCLE_DROPPED, "abandoned",
+)
 
 
 def _doc_name(dt: DocType) -> str:
     """The doc's basename from the row's filename pattern (finding: never
     assume the built-in name — an overlay may rename it)."""
     return dt.filename.rsplit("/", 1)[-1]
+
+
+def _unfilled_closer(pdir: Path, dt: DocType) -> tuple[DocType, str] | None:
+    """(closer type, what is wrong with it) when the doc's closer is missing
+    or placeholder-only; None when there is no closer or it is filled."""
+    closer = closer_of(dt)
+    if closer is None:
+        return None
+    gap = closer_gap(pdir, closer)
+    return None if gap is None else (closer, gap)
 
 
 def cmd_lifecycle_create(doc_type: str) -> int:
@@ -207,10 +245,15 @@ def cmd_lifecycle_status(doc_type: str) -> int:
 
 
 def cmd_lifecycle_complete(
-    doc_type: str, branch: str | None = None, *, repo_scope: str | None = None,
+    doc_type: str, branch: str | None = None, *,
+    repo_scope: str | None = None, abandon: bool = False,
 ) -> int:
     """Archive a closable doc's branch dir from the active to the completed
     stage.
+
+    Refuses (exit 1) when the row's closer is `required` and not filled —
+    the next step is the closer's own create command. `abandon` is the
+    escape: the doc is stamped abandoned/dropped and needs no closer.
 
     Args:
         doc_type: Registry key of the closable type.
@@ -219,6 +262,7 @@ def cmd_lifecycle_complete(
             When None, uses the configured KB scope or origin-derived fallback.
             Pass explicitly when archiving from a different scope
             (e.g. stale-doc sweep across all repo dirs).
+        abandon: Drop the doc instead of completing it.
     """
     dt = registry()[doc_type]
     root = repo_root()
@@ -240,13 +284,31 @@ def cmd_lifecycle_complete(
         console.error(f"No active {dt.key} found for branch '{branch}'.")
         return 1
 
-    # Mark the doc complete: `status` keeps the type's word, `lifecycle` is
-    # the coarse axis everything queryable keys off.
+    # Abandoning never asks about the closer; completing does, and refuses
+    # when the missing closer is a required one.
+    unfilled = None if abandon else _unfilled_closer(pdir, dt)
+    if unfilled is not None:
+        closer, gap = unfilled
+        if is_required_closer(closer):
+            console.error(
+                f"{dt.key} '{branch}' cannot complete: {gap}, and its "
+                f"{closer.key} is required."
+            )
+            console.next_step(closer.create_hint)
+            console.next_step(
+                f"rcorn {dt.key} complete --abandon  (drop it: no "
+                f"{closer.key}, status {_ABANDONED.status})"
+            )
+            return 1
+
+    # Mark the doc: `status` keeps the type's word, `lifecycle` is the
+    # coarse axis everything queryable keys off.
+    outcome = _ABANDONED if abandon else _COMPLETED
     doc_file = pdir / _doc_name(dt)
     if doc_file.is_file():
         doc_file.write_text(set_meta(doc_file.read_text(), {
-            frontmatter.FIELD_STATUS: "complete",
-            frontmatter.FIELD_LIFECYCLE: frontmatter.LIFECYCLE_DONE,
+            frontmatter.FIELD_STATUS: outcome.status,
+            frontmatter.FIELD_LIFECYCLE: outcome.lifecycle,
         }))
 
     # Move from the active to the completed stage.
@@ -255,21 +317,21 @@ def cmd_lifecycle_complete(
     shutil.move(str(pdir), str(completed_dir))
 
     console.success(
-        f"{dt.key.capitalize()} archived: {STAGE_ACTIVE}/{pdir.name}/ → "
-        f"{STAGE_COMPLETED}/{completed_dir.name}/"
+        f"{dt.key.capitalize()} {outcome.told}: "
+        f"{STAGE_ACTIVE}/{pdir.name}/ → {STAGE_COMPLETED}/{completed_dir.name}/"
     )
 
-    closer = closer_of(dt)
-    if closer is not None:
-        closer_file = completed_dir / closer.filename
-        if not closer_file.is_file() or sections_empty(closer_file.read_text()):
-            console.warn(
-                f"No {closer.key} captured for this branch — lessons "
-                "learned will be lost."
-            )
-            console.next_step(closer.create_hint)
+    if unfilled is not None:
+        closer, _gap = unfilled
+        console.warn(
+            f"No {closer.key} captured for this branch — lessons "
+            "learned will be lost."
+        )
+        console.next_step(closer.create_hint)
 
     # Both dirs: the deletion from the active stage and the addition under
     # the completed one.
-    commit_kb(root, f"{dt.key}: complete {branch}", paths=[pdir, completed_dir])
+    commit_kb(
+        root, f"{dt.key}: {outcome.verb} {branch}", paths=[pdir, completed_dir],
+    )
     return 0

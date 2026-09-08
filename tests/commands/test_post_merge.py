@@ -185,3 +185,34 @@ def test_failed_remote_query_archives_nothing(kb_repo: Path):
     assert not (
         kb_repo / "kb" / "testproject" / "exec-plans" / "completed" / "feature-live"
     ).exists()
+
+
+def test_sweep_surfaces_a_refused_complete(kb_repo: Path, monkeypatch, capsys):
+    """With a required closer, the sweep's `complete` refuses; the doc stays
+    active and the refusal plus its next step reach stdout, where the
+    post-merge hook lets them through to the merge output."""
+    with (kb_repo / ".reinicorn-config").open("a") as f:
+        f.write('REINICORN_KB_SCOPE="testproject"\n')
+    (kb_repo / "kb" / "testproject" / "doc-types.yaml").write_text(
+        "doc_types:\n  retro:\n    closes: {type: plan, required: true}\n"
+    )
+    monkeypatch.chdir(kb_repo)
+    active = kb_repo / "kb" / "testproject" / "exec-plans" / "active" / "feature-merged"
+    active.mkdir(parents=True)
+    (active / "plan.md").write_text(doc_text(
+        type="plan", title="Plan", slug="feature-merged",
+        status="in-progress", branch="feature/merged", body="\n# Plan\n",
+    ))
+
+    with patch("reinicorn.commands.internal.post_merge.run_git") as mock_git, \
+         patch("reinicorn.commands.doc_lifecycle.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_lifecycle.commit_kb") as mock_commit:
+        mock_git.return_value.returncode = 0
+        mock_git.return_value.stdout = ""
+        _archive_stale_docs(kb_repo)
+
+    assert (active / "plan.md").is_file()
+    mock_commit.assert_not_called()
+    out = capsys.readouterr().out
+    assert "cannot complete" in out
+    assert "next: rcorn retro create" in out

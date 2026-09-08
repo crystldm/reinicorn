@@ -81,10 +81,10 @@ class Closes:
     """This type is the closer of another (e.g. retro closes plan).
 
     Implies: the closer is created inside the closee's dir and `<closee>
-    complete` moves the stage dir with both docs. `required` is declared
-    here so overlays can set it; the refusal it implies (`complete` blocks
-    without a filled closer, with an `--abandon` escape) lands with the
-    stage-3 gates — today a missing closer only warns.
+    complete` moves the stage dir with both docs. When `required`,
+    `complete` refuses without a filled closer (`--abandon` is the escape)
+    and the `kb/closer-filled` lint reports the gap; otherwise a missing
+    closer only warns.
     """
 
     type: str
@@ -294,13 +294,21 @@ _ROW_KEYS = frozenset(f.name for f in dataclasses.fields(DocType)) - {"key"}
 _ADD_MANDATORY = ("dir_path", "filename", "addressing")
 
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)(?::[^}]*)?\}")
+# The placeholder names a `filename` pattern may use.
+PLACEHOLDER_SLUG = "slug"
+PLACEHOLDER_BRANCH = "branch"
+PLACEHOLDER_STAGE = "stage"
+PLACEHOLDER_USERNAME = "username"
+PLACEHOLDER_SEQ = "seq"
 # Placeholders each addressing mode may (and must) use in `filename`.
 _ALLOWED_PLACEHOLDERS = {
-    Addressing.SLUG: frozenset({"slug", "username", "seq"}),
-    Addressing.BRANCH: frozenset({"branch", "stage"}),
+    Addressing.SLUG: frozenset({PLACEHOLDER_SLUG, PLACEHOLDER_USERNAME, PLACEHOLDER_SEQ}),
+    Addressing.BRANCH: frozenset({PLACEHOLDER_BRANCH, PLACEHOLDER_STAGE}),
     Addressing.SINGLETON: frozenset(),
 }
-_IDENTITY_PLACEHOLDER = {Addressing.SLUG: "slug", Addressing.BRANCH: "branch"}
+_IDENTITY_PLACEHOLDER = {
+    Addressing.SLUG: PLACEHOLDER_SLUG, Addressing.BRANCH: PLACEHOLDER_BRANCH,
+}
 # Relation values in the overlay are mappings coerced into these dataclasses.
 _RELATION_FIELDS: dict[str, type] = {"depends_on": DependsOn, "closes": Closes}
 
@@ -308,6 +316,17 @@ _RELATION_FIELDS: dict[str, type] = {"depends_on": DependsOn, "closes": Closes}
 def filename_placeholders(dt: DocType) -> frozenset[str]:
     """Placeholder names used in the row's filename pattern."""
     return frozenset(_PLACEHOLDER_RE.findall(dt.filename))
+
+
+def is_staged(dt: DocType) -> bool:
+    """The row's docs move between stages (its filename has ``{stage}``)."""
+    return PLACEHOLDER_STAGE in filename_placeholders(dt)
+
+
+def is_required_closer(dt: DocType) -> bool:
+    """The row closes another type and that closer is mandatory: the closee
+    cannot `complete` without it, and `kb/closer-filled` reds it."""
+    return dt.closes is not None and dt.closes.required
 
 
 _PLACEHOLDER_FULL_RE = re.compile(r"\{(\w+)(?::[^}]*)?\}")
@@ -475,7 +494,7 @@ def _validate_rows(rows: dict[str, DocType], source: str) -> None:
                 f"{sorted(used - allowed)} not allowed for addressing "
                 f"'{dt.addressing.value}' (allowed: {sorted(allowed)})"
             )
-        if _PLACEHOLDER_RE.findall(dt.filename).count("seq") > 1:
+        if _PLACEHOLDER_RE.findall(dt.filename).count(PLACEHOLDER_SEQ) > 1:
             # `used` is a set, so a repeated {seq} passes the check above;
             # filename_regex() would then emit two named groups and fail at
             # the first create.

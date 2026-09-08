@@ -211,3 +211,27 @@ def test_plan_precedes_retro_for_shared_dir():
     keys = list(REGISTRY)
     assert keys.index("plan") < keys.index("retro")
     assert by_dir(REGISTRY["plan"].dir_path) is REGISTRY["plan"]
+
+
+def test_is_staged_and_is_required_closer_read_the_row():
+    from reinicorn.doc_types import (
+        Addressing,
+        Closes,
+        DocType,
+        is_required_closer,
+        is_staged,
+    )
+
+    def row(**kw):
+        base = dict(
+            key="x", dir_path="x", filename="{branch}/x.md", protected=True,
+            help_text="x ops", template_body="", addressing=Addressing.BRANCH,
+        )
+        base.update(kw)
+        return DocType(**base)
+
+    assert is_staged(row(filename="{stage}/{branch}/x.md"))
+    assert not is_staged(row())
+    assert not is_required_closer(row())
+    assert not is_required_closer(row(closes=Closes(type="plan", required=False)))
+    assert is_required_closer(row(closes=Closes(type="plan", required=True)))
