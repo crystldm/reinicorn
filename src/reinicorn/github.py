@@ -24,6 +24,7 @@ def run_gh(
     interactive: bool = False,
     input_text: str | None = None,
     error_hint: str | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a gh CLI command.
 
@@ -35,6 +36,8 @@ def run_gh(
             'gh api --input -').
         error_hint: Overrides the default "How to fix" line in the
             check-failure error (default suggests checking 'gh auth status').
+        timeout: Seconds to wait before giving up; a RuntimeError is raised
+            when it elapses (regardless of `check`).
 
     Returns:
         CompletedProcess with stdout/stderr captured (empty when interactive).
@@ -48,12 +51,18 @@ def run_gh(
     if input_text is not None:
         kwargs["input"] = input_text
         kwargs["text"] = True
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     try:
         r = subprocess.run(["gh", *args], **kwargs)
     except FileNotFoundError:
         raise RuntimeError(
             "gh CLI not found.\n"
             "  How to fix: Install gh from https://cli.github.com/"
+        ) from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"gh {' '.join(args)} timed out after {timeout:g}s."
         ) from None
     if check and r.returncode != 0:
         stderr = getattr(r, "stderr", "") or ""
@@ -218,10 +227,13 @@ def gh_pr_close(repo: str, number: int, comment: str = "") -> None:
     )
 
 
-def gh_pr_heads(repo: str, *, state: str) -> set[str] | None:
+def gh_pr_heads(
+    repo: str, *, state: str, timeout: float | None = None,
+) -> set[str] | None:
     """Head branch names of *repo*'s PRs in *state*, or None when gh cannot
-    answer (not installed, unauthenticated, offline, or an unexpected
-    response shape). *state* is one of the `PR_LIST_STATE_*` values.
+    answer (not installed, unauthenticated, offline, slower than *timeout*,
+    or an unexpected response shape). *state* is one of the
+    `PR_LIST_STATE_*` values.
 
     Capped at `PR_LIST_LIMIT` most recent PRs; callers treat an absent
     head as unverifiable, not as a negative.
@@ -230,7 +242,7 @@ def gh_pr_heads(repo: str, *, state: str) -> set[str] | None:
         r = run_gh(
             "pr", "list", "--repo", repo, "--state", state,
             "--limit", str(PR_LIST_LIMIT), "--json", "headRefName",
-            check=False,
+            check=False, timeout=timeout,
         )
     except RuntimeError:
         return None

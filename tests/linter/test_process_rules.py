@@ -81,6 +81,15 @@ class TestRequiredSections:
         diags = DocStructureRule().run(kb_repo)
         assert any("drafts/thin.md" in d and "'## Design' section" in d for d in diags)
 
+    def test_heading_must_be_the_whole_name(self):
+        from reinicorn.linter.rules.doc_structure import missing_sections
+
+        # A longer heading that merely starts with the name is not it.
+        assert missing_sections("## Design Notes\n", ("Design",)) == ["Design"]
+        assert missing_sections("## Design\n", ("Design",)) == []
+        assert missing_sections("##   design   \n", ("Design",)) == []
+        assert missing_sections("## Lessons  Learned\n", ("Lessons Learned",)) == []
+
     def test_approved_gated_doc_is_exempt(self, kb_repo: Path):
         specs = kb_repo / "kb" / "testproject" / "specs"
         specs.mkdir(parents=True)
@@ -288,6 +297,24 @@ class TestLifecycle:
         _plan(published_repo, "feature-theirs", "feature/theirs", scope="otherproject")
 
         assert _lifecycle(published_repo) == []
+
+    def test_probes_are_bounded_and_a_timeout_fails_open(self, published_repo: Path):
+        import subprocess
+
+        from reinicorn.linter.rules.lifecycle import PROBE_TIMEOUT_SECONDS
+
+        probe = MergeProbe(published_repo)
+        with patch(
+            "reinicorn.linter.rules.lifecycle.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git"], PROBE_TIMEOUT_SECONDS),
+        ) as run:
+            assert probe.live_heads() is None
+        assert run.call_args.kwargs["timeout"] == PROBE_TIMEOUT_SECONDS
+
+        with patch("reinicorn.linter.rules.lifecycle.gh_pr_heads", return_value=None) as gh, \
+             patch("reinicorn.linter.rules.lifecycle.gh_repo_from_url", return_value="o/r"):
+            assert probe.pr_heads("merged") is None
+        assert gh.call_args.kwargs["timeout"] == PROBE_TIMEOUT_SECONDS
 
     def test_network_facts_are_fetched_once_per_run(self, published_repo: Path):
         for i in range(3):

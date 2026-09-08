@@ -37,12 +37,14 @@ if TYPE_CHECKING:
 
 def missing_sections(content: str, sections: tuple[str, ...]) -> list[str]:
     """The required headers *content* lacks (``## <name>``, case-insensitive,
-    flexible whitespace)."""
+    flexible whitespace). The whole heading must be the name: ``## Design
+    Notes`` does not satisfy ``Design``."""
     missing: list[str] = []
     for section in sections:
         pattern = (
             r'(?mi)^\s*##\s+'
             + re.escape(section).replace(r'\ ', r'\s+')
+            + r'\s*$'
         )
         if not re.search(pattern, content):
             missing.append(section)

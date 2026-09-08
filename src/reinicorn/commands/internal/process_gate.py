@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from reinicorn import console
 from reinicorn.config import kb_scope
 from reinicorn.corpus import doc_path
-from reinicorn.doc_types import Addressing, filename_placeholders, registry
+from reinicorn.doc_types import Addressing, is_staged, registry
 from reinicorn.git import current_branch, repo_root
 from reinicorn.kb import get_kb_dir
 from reinicorn.linter.rules.base import diagnostic_path
@@ -89,7 +89,7 @@ def branch_docs(root: Path, kb_dir: Path, branch: str) -> set[str]:
     for dt in registry(root).values():
         if dt.addressing is not Addressing.BRANCH or dt.closes is not None:
             continue
-        if "stage" in filename_placeholders(dt):
+        if is_staged(dt):
             doc_name = dt.filename.rsplit("/", 1)[-1]
             for stage in STAGES:
                 d = branch_dir(scope_dir, dt, branch, stage)

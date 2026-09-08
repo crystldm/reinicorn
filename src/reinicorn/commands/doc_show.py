@@ -11,8 +11,10 @@ from reinicorn.config import kb_scope
 from reinicorn.corpus import doc_path
 from reinicorn.doc_types import (
     DRAFTS_DIR_NAME,
+    PLACEHOLDER_SEQ,
     drafts_dir,
     filename_placeholders,
+    is_staged,
     registry,
 )
 from reinicorn.git import current_branch, repo_root
@@ -72,7 +74,7 @@ def cmd_doc_show(
     files = _doc_files(doc_type, repo_dir, include_drafts)
     matches = {f.stem: f for f in files}
     target = matches.get(slug)
-    if target is None and "seq" in filename_placeholders(registry()[doc_type]):
+    if target is None and PLACEHOLDER_SEQ in filename_placeholders(registry()[doc_type]):
         # {seq} rows resolve by the stamped `id` too. Numbering is
         # best-effort-unique (spec §1), so a duplicated id is reported, not
         # silently picked from.
@@ -174,7 +176,7 @@ def _branch_doc_show(doc_type: str, branch: str | None, full: bool) -> int:
     # completed branch's doc stays readable — the closer already does this.
     stage = (
         stage_of(repo_dir, dt, branch) or STAGE_ACTIVE
-        if "stage" in filename_placeholders(dt)
+        if is_staged(dt)
         else None
     )
     target = doc_path(repo_dir, dt, branch, stage=stage)

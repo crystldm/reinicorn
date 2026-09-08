@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from reinicorn import frontmatter
-from reinicorn.doc_types import DocType, filename_placeholders, registry
+from reinicorn.doc_types import (
+    PLACEHOLDER_BRANCH,
+    PLACEHOLDER_SLUG,
+    PLACEHOLDER_STAGE,
+    DocType,
+    filename_placeholders,
+    registry,
+)
 from reinicorn.kb import branch_dir_name
 
 if TYPE_CHECKING:
@@ -93,7 +100,7 @@ def doc_path(
     guess.
     """
     placeholders = filename_placeholders(dt)
-    extra = placeholders - {"slug", "branch", "stage"}
+    extra = placeholders - {PLACEHOLDER_SLUG, PLACEHOLDER_BRANCH, PLACEHOLDER_STAGE}
     if extra:
         raise ValueError(
             f"doc_path cannot resolve a '{dt.key}' path: filename "
@@ -101,18 +108,18 @@ def doc_path(
             "knows — look the doc up via iter_docs instead"
         )
     values: dict[str, str] = {}
-    if "stage" in placeholders:
+    if PLACEHOLDER_STAGE in placeholders:
         if stage is None:
             raise ValueError(f"'{dt.key}' is staged: pass a stage")
-        values["stage"] = stage
-    if "branch" in placeholders:
+        values[PLACEHOLDER_STAGE] = stage
+    if PLACEHOLDER_BRANCH in placeholders:
         if ident is None:
             raise ValueError(f"'{dt.key}' is branch-addressed: pass a branch")
-        values["branch"] = branch_dir_name(ident)
-    if "slug" in placeholders:
+        values[PLACEHOLDER_BRANCH] = branch_dir_name(ident)
+    if PLACEHOLDER_SLUG in placeholders:
         if ident is None:
             raise ValueError(f"'{dt.key}' is slug-addressed: pass a slug")
-        values["slug"] = ident
+        values[PLACEHOLDER_SLUG] = ident
     return repo_dir / dt.dir_path / dt.filename.format(**values)
 
 

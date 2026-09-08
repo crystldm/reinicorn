@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from reinicorn.config import KB_DIR_NAME
 from reinicorn.corpus import iter_branch_dirs
-from reinicorn.doc_types import closable_types, closer_of
+from reinicorn.doc_types import closable_types, closer_of, is_required_closer
 from reinicorn.linter.rules.base import LintRule
 from reinicorn.staging import STAGE_ACTIVE, closer_gap
 
@@ -33,7 +33,7 @@ class CloserFilledRule(LintRule):
         diagnostics: list[str] = []
         for dt in closable_types(project_root):
             closer = closer_of(dt, project_root)
-            if closer is None or closer.closes is None or not closer.closes.required:
+            if closer is None or not is_required_closer(closer):
                 continue
             doc_name = dt.filename.rsplit("/", 1)[-1]
             for _scope, stage_dir in iter_branch_dirs(kb, dt, STAGE_ACTIVE):

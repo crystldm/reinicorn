@@ -10,6 +10,7 @@ from reinicorn import console, frontmatter
 from reinicorn.config import KB_DIR_NAME, kb_scope
 from reinicorn.corpus import doc_path
 from reinicorn.doc_types import (
+    PLACEHOLDER_SEQ,
     Addressing,
     CreateMode,
     DocType,
@@ -21,6 +22,7 @@ from reinicorn.doc_types import (
     filename_regex,
     get_doc_dir,
     get_protected_map,
+    is_staged,
     registry,
     seq_display_id,
 )
@@ -143,10 +145,10 @@ def _next_seq(dt: DocType, repo_dir: Path) -> int:
 def _seq_values(dt: DocType, repo_dir: Path) -> tuple[dict[str, object], str | None]:
     """({seq: n} filename values, display id) for a {seq} row; ({}, None)
     otherwise."""
-    if "seq" not in filename_placeholders(dt):
+    if PLACEHOLDER_SEQ not in filename_placeholders(dt):
         return {}, None
     seq = _next_seq(dt, repo_dir)
-    return {"seq": seq}, seq_display_id(dt.filename, seq)
+    return {PLACEHOLDER_SEQ: seq}, seq_display_id(dt.filename, seq)
 
 
 def render_doc(
@@ -175,7 +177,7 @@ def _branch_target(dt: DocType, repo_dir: Path, branch: str) -> Path:
     type-name special case)."""
     if dt.closes is not None:
         return closer_target(dt, repo_dir, branch)
-    stage = STAGE_ACTIVE if "stage" in filename_placeholders(dt) else None
+    stage = STAGE_ACTIVE if is_staged(dt) else None
     return doc_path(repo_dir, dt, branch, stage=stage)
 
 

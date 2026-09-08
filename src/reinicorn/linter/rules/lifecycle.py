@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 
 _REMOTE = "origin"
 _HEADS_PREFIX = "refs/heads/"
+# Longest either network probe may take before it fails open — a hung
+# remote must not hang the lint.
+PROBE_TIMEOUT_SECONDS = 30.0
 
 
 class MergeProbe:
@@ -73,13 +76,14 @@ class MergeProbe:
         return self._live
 
     def _ls_remote_heads(self) -> set[str] | None:
-        # Never let a credential prompt hang a lint run: fail open instead.
+        # Never let a credential prompt or a hung remote stall a lint run:
+        # fail open instead (TimeoutExpired is a SubprocessError).
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
         try:
             r = subprocess.run(
                 ["git", "ls-remote", "--heads", _REMOTE],
                 capture_output=True, text=True, check=False,
-                cwd=self._root, env=env,
+                cwd=self._root, env=env, timeout=PROBE_TIMEOUT_SECONDS,
             )
         except (OSError, subprocess.SubprocessError):
             return None
@@ -122,7 +126,8 @@ class MergeProbe:
         if state not in self._pr_heads:
             repo = gh_repo_from_url(remote_url(self._root))
             self._pr_heads[state] = (
-                gh_pr_heads(repo, state=state) if repo else None
+                gh_pr_heads(repo, state=state, timeout=PROBE_TIMEOUT_SECONDS)
+                if repo else None
             )
         return self._pr_heads[state]
 
