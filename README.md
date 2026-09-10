@@ -145,7 +145,8 @@ per-branch subset against every PR. Team taste gets the same treatment: `rcorn p
 appends to the repo's golden principles, capturing a human preference once so
 it can be enforced continuously instead of re-litigated in every review.
 
-The document types, each with its template and protected location:
+The default document types, each with its template and protected location
+(the set is a config, see [Customizing the process](#customizing-the-process)):
 
 | Type | Create command | What it is |
 |------|----------------|------------|
@@ -187,6 +188,83 @@ optional at every step; without it, reinicorn pushes the branch and hands you
 the PR link to open yourself. `rcorn kb lint` warns when a plan builds on a
 spec that never got approved.
 
+### Customizing the process
+
+Everything above is the shipped default, not the engine. A doc type is a row
+in a registry: where its docs live, how they are addressed (by slug, by
+branch, or a single file), which sections they must carry, whether they go
+through review, what they depend on and what they close. The engine only asks
+a row what it can do, never what it is, so the process a repo runs is data.
+To change it, add `kb/<scope>/doc-types.yaml` next to the docs it governs and
+publish it like any other kb file:
+
+- **Override** a built-in row by listing only the fields that change
+  (`required_sections:` replaces the list wholesale; there is no merging).
+- **Add** a row. `dir_path`, `filename` and `addressing` are mandatory; the
+  rest take defaults. `rcorn <key> create` and `show` (plus `list` for
+  slug-addressed rows), the template and the required-section lint follow
+  from the row.
+- **Remove** a built-in row with `disabled: true`. A disabled row takes its
+  own relations with it, so disabling `spec`, `plan` and `retro` together is
+  fine.
+
+Two relations wire types together, and every gate reads them rather than
+naming types. `depends_on` says this type's docs must point at an approved
+doc of another type (`plan` → `spec` by default; enforced by the draft-refs
+lint and the pre-push gate). `closes` says this type closes another and
+lives in its directory (`retro` closes `plan`; enforced by the closer-filled
+lint, the pre-merge process gate and `<type> complete`). A custom pair gets
+all of that without new code.
+
+`rcorn doc-types show` prints the effective registry with each row marked
+`built-in` or `overlay`. Copy a row, change one line, publish: that is the
+customization loop. `rcorn doc-types show --schema` emits a JSON Schema for
+editor validation of the overlay. A broken overlay fails closed with the file
+and offending key instead of silently reverting to defaults, and the process
+gate prints the effective registry in its check log, so a weakened process
+is visible where the PR is reviewed.
+
+Making the retro optional again and dropping its Spec Drift section is two
+lines:
+
+```yaml
+doc_types:
+  retro:
+    closes: {type: plan, required: false}
+    required_sections: [What Went Well, What Could Be Improved, Lessons Learned, Action Items]
+```
+
+A different process altogether, RFC → ADR, is a handful more:
+
+```yaml
+doc_types:
+  spec:  {disabled: true}
+  plan:  {disabled: true}
+  retro: {disabled: true}
+  rfc:
+    dir_path: rfcs
+    filename: "RFC-{seq:04}-{slug}.md"
+    addressing: slug
+    gated: true
+    required_sections: [Summary, Motivation, Detailed Design, Drawbacks, Alternatives]
+    fields: [superseded_by]
+  adr:
+    dir_path: decisions
+    filename: "{slug}.md"
+    addressing: slug
+    required_sections: [Context, Decision, Consequences]
+    fields: [rfc]
+    depends_on: {field: rfc, type: rfc, status: approved}
+```
+
+That gives `rcorn rfc create` through the review lane with `RFC-0001-…`
+numbering, `rcorn adr create`, the draft-refs lint and pre-push gate on
+`adr.rfc`, required-section lint on both, and no retro or completion
+machinery at all. The overlay composes behaviors; it cannot define new ones.
+There are no conditions, custom events or scripting in it: a gate the engine
+lacks is an engine change with its own spec (see
+[the process-as-config spec](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/process-as-config-doc-type-registry-overlay-and-declarative.md)).
+
 ## The CLI
 
 `rcorn` is the single entry point for kb operations; it hides the git plumbing
@@ -219,6 +297,7 @@ enforce these rules, so read the spec before changing how any command talks.
 | `rcorn plan complete [branch] --abandon` | Drop the plan instead: status abandoned, no retro needed |
 | `rcorn retro create` | Create retro for current branch |
 | `rcorn retro show [branch] [--full]` | Show retro doc |
+| `rcorn doc-types show [--schema]` | Print the effective doc-type registry (defaults + overlay), or its JSON Schema |
 | `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
 | `rcorn review setup [--force]` | Install kb-repo CI workflows (cleanup + status checks) and the ruleset |
 | `rcorn principle add "title"` | Append a golden principle |

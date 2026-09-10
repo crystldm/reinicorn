@@ -78,6 +78,12 @@ from the template, and the draft goes through PR-style review before it counts
 as approved. The workflow section of the [README](README.md) covers the full
 loop, including doc review.
 
+Those types and their rules (which docs go through review, what a plan must
+point at, what a retro must contain before a plan can complete) are the
+shipped defaults, not fixed behavior. A repo changes them in
+`kb/<scope>/doc-types.yaml`; `rcorn doc-types show` prints what is in effect.
+See [Customizing the process](README.md#customizing-the-process).
+
 ## Key commands
 
 | Command | What it does |
@@ -90,6 +96,7 @@ loop, including doc review.
 | `rcorn <type> create "<title>"` | Create a kb doc (spec, prd, retro, etc.) |
 | `rcorn idea create "<text>"` | Capture an idea |
 | `rcorn kb lint` | Run kb lint rules |
+| `rcorn doc-types show` | Print the effective doc-type registry (the process config) |
 | `rcorn skills install <name>` | Install a skill-set adapter |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
