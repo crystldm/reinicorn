@@ -102,8 +102,8 @@ once it is. The full set of beliefs behind the design is in
 [core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md).
 
 Every governed doc is a markdown file with a frontmatter block, living under
-`kb/<scope>/` (one scope per repo) and created by `rcorn <type> create`, never
-by hand. What a `<type>` *is* comes from a registry row. The engine never asks
+`kb/<scope>/` (one scope per repo) and created through the CLI, never by
+hand. What a `<type>` *is* comes from a registry row. The engine never asks
 what a doc is, only what it can do, so the rest of this section names no
 type: `<type>` is any row, `<closer>` and `<closee>` are two rows joined by a
 relation.
@@ -155,8 +155,10 @@ cannot define them.
 
 ### The CLI is generated from the registry
 
-Every row gets `rcorn <type> create` (the argument shape follows the row: a
-title, free text, or nothing for branch-addressed and singleton types) and
+Every row gets a creation command, `rcorn <type> <create_verb>`, where the
+verb is the row's `create_verb` (`create` unless the row says otherwise;
+the appendable `principle` row uses `add`) and the argument shape follows
+`title_source`: a title, free text, or nothing. Every row gets
 `rcorn <type> show`; slug-addressed rows also get `list`. Every closee gets
 `status` and `complete [--abandon]`. `rcorn doc-types show` prints the
 effective registry with each row marked `built-in` or `overlay`;
@@ -330,7 +332,7 @@ Generated per registry row (with the defaults, `<type>` is one of `spec`,
 
 | Command | Purpose |
 |---|---|
-| `rcorn <type> create [...]` | Create a doc from its template; argument shape per row (`rcorn help`, or the wiring doc) |
+| `rcorn <type> <create_verb> [...]` | Create a doc from its template; the verb (`create`, or `add` for the appendable `principle`) and argument shape come from the row (`rcorn help`, or the wiring doc) |
 | `rcorn <type> show [<slug>\|<branch>] [--full]` | Read a kb doc (truncated preview by default) |
 | `rcorn <type> list [--include-drafts]` | List docs of a slug-addressed type |
 | `rcorn <closee> status` | Lifecycle status for the current branch (`plan` by default) |
