@@ -102,90 +102,90 @@ get the important context written down, and to make sure it can be trusted
 once it is. The full set of beliefs behind the design is in
 [core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md).
 
-Every governed doc is a markdown file with a frontmatter block, living under
-`kb/<scope>/` (one scope per repo) and created through the CLI, never by
-hand. What a `<type>` *is* comes from a registry row. The engine never asks
-what a doc is, only what it can do, so the rest of this section names no
-type: `<type>` is any row, `<closer>` and `<closee>` are two rows joined by a
-relation.
+Every document in the kb is a markdown file with a frontmatter block, filed
+under `kb/<scope>/` (one scope per repo) and created through the CLI rather
+than by hand. Which documents exist, where they go and what rules apply to
+them is decided by the registry. The registry ships with a spec-driven set of
+types; you can change them or replace them, and everything below applies to
+your types exactly as it does to the shipped ones.
 
-### A doc type is a bundle of behaviors
+### Document types
 
-| Behavior | Row fields | What the engine does with it |
-|---|---|---|
-| Addressed by slug, by branch, or a singleton | `addressing`, `filename` | Shapes the CLI argument and the path. `{slug}` names a doc; `{branch}` scopes it to a git branch; a singleton is one file. A `{seq:04}` placeholder numbers a corpus (`RFC-0007`) and stamps the number into the doc's `id` |
-| Protected | `protected` | Direct writes to the directory are rejected by the editor hook; docs exist only through the CLI, with their provenance fields |
-| Structured | `required_sections`, `section_hints` | The template scaffolds the headers, with an italic placeholder hint where the row gives one; the `kb/required-sections` lint checks them while the doc is being authored |
-| Review-gated | `gated` | `create` writes to `drafts/`, invisible to `list` and `show` unless asked; approval goes through the review lane (`rcorn review …`) |
-| Indexed | `index_file` | The `kb/docs-freshness` lint and the dashboard track the index |
-| Appendable | `create_mode: append` | `create` appends an entry to the one file instead of writing a new one |
-| Seeded | `readme_label` | A row in the kb README that `rcorn init` seeds |
-| Frontmatter vocabulary | `fields`, `required_fields` | Which extra keys a doc may or must carry. `branch` (branch-addressed) and `id` (`{seq}`) are added by the engine |
+A document type is a name plus the rules you attach to it. Each rule is
+something you switch on for the type, with a consequence the whole team sees:
 
-### Two relations join types
+- **Give it a home and a naming pattern**, and `rcorn <type> create` files
+  each document there with its frontmatter filled in. A pattern can name the
+  document by slug (`specs/<slug>.md`), scope it to a branch
+  (`exec-plans/active/<branch>/plan.md`), or number it (`RFC-0007-<slug>.md`).
+- **Mark it protected**, and the editor hooks reject direct writes to that
+  directory, so a document cannot exist without the provenance fields the CLI
+  stamps on it.
+- **Give it required sections**, and the template scaffolds them with a hint
+  in each, and `rcorn kb lint` flags a document that is still missing one.
+- **Mark it review-gated**, and a new document is a draft that must pass
+  through a PR before it becomes actionable. Until then `list` and `show`
+  leave it out unless asked, and nothing else in the kb may build on it.
+- **Give it an index file**, and the linter tells you when the index has gone
+  stale.
+- **Make it appendable**, and `create` adds an entry to one running file
+  instead of writing a new document; the repo's golden principles work this
+  way.
 
-- `depends_on: {field, type, status}` on a `<dependent>` row: each doc's
-  `field:` must resolve to a tracked doc of `type` with `status`, or be
-  `N/A`. A placeholder counts as undeclared.
-- `closes: {type, required}` on a `<closer>` row: the closer closes
-  `<closee>` and lives inside its directory. A closee's filename is
-  `{stage}/{branch}/<name>`, stage being `active` or `completed`; the closer's
-  is a bare name. `rcorn <closee> complete` moves the directory with both
-  docs from active to completed. When `required`, it refuses until the closer
-  is filled; `--abandon` drops the closee instead. One closer per closee, and
-  a closer is not itself closable.
+### Relations between types
 
-### Enforcement is a fixed set of events
+Two rules connect one type to another, and they are where the workflow comes
+from:
 
-The events never change; what varies is the registry they read.
+- **Say a type depends on another**, and each of its documents must name an
+  approved document of that type. A plan names the spec it implements, so a
+  plan built on a draft spec is a lint finding, and a branch whose plan names
+  a draft cannot be pushed.
+- **Say a type closes another**, and the closing document lives alongside the
+  one it closes and must be written before that one is finalized. A retro
+  closes an execution plan, so `rcorn plan complete` refuses until the retro
+  is filled in; `--abandon` is the recorded way to drop a plan without one.
+  The closed document's directory moves from `active` to `completed` with
+  both files in it.
 
-| Event | Reads | Rule |
-|---|---|---|
-| `rcorn kb lint` | `required_sections` | `kb/required-sections`: every doc of every structured type carries its headers |
-| `rcorn kb lint` | `depends_on` | `kb/draft-refs`: a dependent doc points at a draft or in-review target |
-| `rcorn kb lint` | `closes` | `kb/closer-filled`: an active closee's required closer exists but is still the placeholder scaffold |
-| `rcorn kb lint` | `closes` | `kb/lifecycle`: an active closee whose branch is merged or deleted |
-| pre-push hook | `depends_on` | Refuses to push a branch whose dependent doc points at an unapproved or undeclared target. Network failures fail open, loudly |
-| pre-merge CI (`rcorn _process-gate <branch>`) | `required_sections`, `depends_on`, `closes` | The branch-scoped subset of the lints, with a *missing* required closer counting; every finding blocks. Prints the effective registry so a weakened process is visible in the check log |
-| `rcorn <closee> complete` | `closes` | Refuses without a filled required closer |
-| post-merge hook | `closes` | Archives active closees whose branch is gone from origin, through the same `complete` |
+### Where the rules are enforced
 
-There is no rule language. A behavior is an engine field; a gate the engine
-lacks is an engine change with its own spec. The config composes behaviors, it
-cannot define them.
+The rules are code, not conventions, and they run at five moments:
 
-### The CLI is generated from the registry
+- **While you write**: `rcorn kb lint` reports every document missing a
+  section, building on a draft, or left as an empty scaffold, and every plan
+  still active after its branch merged.
+- **When you push**: the pre-push hook stops a branch whose documents depend
+  on something not yet approved.
+- **When the PR is reviewed**: the "Process gate" check runs the lints for
+  that branch's documents alone, so a PR cannot merge with an empty or
+  missing retro, and prints the registry in effect so a weakened rule is
+  visible where the reviewer looks.
+- **When the branch is done**: `rcorn <type> complete` refuses to archive
+  without the document that closes it.
+- **After merge**: the post-merge hook archives the plans of branches that
+  are gone from origin, through the same `complete`.
 
-Every row gets a creation command, `rcorn <type> <create_verb>`, where the
-verb is the row's `create_verb` (`create` unless the row says otherwise;
-the appendable `principle` row uses `add`) and the argument shape follows
-`title_source`: a title, free text, or nothing. Every row gets
-`rcorn <type> show`; slug-addressed rows also get `list`. Every closee gets
-`status` and `complete [--abandon]`. `rcorn doc-types show` prints the
-effective registry with each row marked `built-in` or `overlay`;
-`--schema` emits a JSON Schema for the config file.
+### Changing the registry
 
-### The config file
-
-`kb/<scope>/doc-types.yaml`, next to the docs it governs, published with
-`rcorn kb publish` like any kb file. Three operations:
-
-- **Override** a built-in row by listing only the fields that change
-  (`required_sections:` replaces the list wholesale; there is no merging).
-- **Add** a row. `dir_path`, `filename` and `addressing` are mandatory; the
-  rest take defaults.
-- **Remove** a built-in row with `disabled: true`. A disabled row takes its
-  own relations with it.
-
-A broken file fails closed with the path and offending key; it never silently
-reverts to defaults. Copy a row from `rcorn doc-types show`, change one line,
-publish: that is the customization loop. The full contract is in
+The registry lives in `kb/<scope>/doc-types.yaml`, next to the documents it
+governs, and travels with `rcorn kb publish` like any other kb file. Run
+`rcorn doc-types show` to see every type in effect, marked `built-in` or
+`overlay`; copy a row, change one line, publish. You can change a shipped
+type (only the lines you list change), add a type of your own (a home, a
+naming pattern and an addressing mode are all it needs), or switch a shipped
+type off with `disabled: true`. A mistake in the file stops the CLI with the
+offending key rather than quietly falling back to the shipped set, and
+`rcorn doc-types show --schema` gives your editor a schema to validate
+against. [Customizing the process](#customizing-the-process) has worked
+examples; the full contract is in
 [the process-as-config spec](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/process-as-config-doc-type-registry-overlay-and-declarative.md).
 
 ## The shipped defaults
 
-With no config file, the registry holds seven rows that encode a spec-driven
-workflow. Expressed as config, the two relations that drive it are:
+Out of the box the registry holds seven types. Two relations tie them into
+a workflow: a plan depends on an approved spec, and a retro closes a plan.
+Written as registry rows, that is:
 
 ```yaml
 doc_types:
@@ -195,15 +195,18 @@ doc_types:
     closes: {type: plan, required: true}
 ```
 
-| Type | Create | Addressing | Behaviors | Required sections |
-|------|--------|------------|-----------|-------------------|
-| spec | `rcorn spec create "<title>"` | slug | protected, gated, indexed, seeded | Problem, Design Goals, Design, Non-Goals |
-| prd | `rcorn prd create "<title>"` | slug | protected, indexed, seeded | Overview, User Stories, Acceptance Criteria, Out of Scope, Open Questions |
-| debt | `rcorn debt create "<title>"` | slug | protected, indexed, seeded | Impact, Remediation Plan |
-| idea | `rcorn idea create "<idea>"` | slug, filed by author | protected | none |
-| plan | `rcorn plan create` | branch | protected, seeded, depends on an approved spec, closed by retro | Goal, Acceptance Criteria, Tasks |
-| retro | `rcorn retro create` | branch | protected, closes plan (required) | What Went Well, What Could Be Improved, Lessons Learned, Action Items, Spec Drift |
-| principle | `rcorn principle add "<title>"` | singleton | appendable, seeded | none |
+| Type | Create | What it is | Rules |
+|------|--------|------------|-------|
+| spec | `rcorn spec create "<title>"` | The implementation contract: problem, design goals, design, non-goals | review-gated, indexed |
+| prd | `rcorn prd create "<title>"` | Product requirements: overview, user stories, acceptance criteria, out of scope, open questions | indexed |
+| debt | `rcorn debt create "<title>"` | Tech-debt entry: impact and remediation plan | indexed |
+| idea | `rcorn idea create "<idea>"` | Quick capture, filed by author | none |
+| plan | `rcorn plan create` | Per-branch execution plan: goal, acceptance criteria, tasks | depends on an approved spec; closed by a retro |
+| retro | `rcorn retro create` | Per-branch retrospective: what went well, what to improve, lessons, actions, spec drift | closes the plan, required |
+| principle | `rcorn principle add "<title>"` | One entry in the repo's golden principles | appendable |
+
+All but `principle` are protected, and every type with sections has them
+scaffolded and linted.
 
 ### The default workflow
 
@@ -223,7 +226,7 @@ place, `rcorn kb status` can compare active branches and flag overlap before
 two people silently rewrite the same file, what the article calls cross-branch
 awareness. With the superpowers adapter installed, the executing-plans skill
 works the plan step by step. When the branch merges, `rcorn plan complete`
-archives it, and because `retro` closes `plan` as a required closer, it
+archives it, and because a retro closes a plan and is required, it
 refuses without a filled retro; `--abandon` is the recorded escape hatch. The
 retro's Spec Drift section states every deviation from the plan's declared
 spec with a disposition (amended, debted or accepted), or the single word
@@ -240,8 +243,8 @@ enforced continuously instead of re-litigated in every review.
 
 The other belief doing heavy lifting here is mechanical enforcement over
 documented conventions: a rule that exists only in prose will eventually be
-violated, so wherever possible the rules are code. That is what the events
-above are. With the defaults, `rcorn kb lint` checks cross-links, doc
+violated, so wherever possible the rules are code. With the defaults,
+`rcorn kb lint` checks cross-links, doc
 freshness, required sections, plans built on unapproved specs, retros left as
 empty scaffolds, and plans still active after their branch merged; the
 "Process gate" CI job runs the per-branch subset against every PR.
@@ -314,7 +317,7 @@ doc_types:
 That gives `rcorn rfc create` through the review lane with `RFC-0001-…`
 numbering, `rcorn adr create`, the draft-refs lint and pre-push gate on
 `adr.rfc`, required-section lint on both, and no retro or completion
-machinery at all. Zero engine changes.
+step at all, because nothing closes anything.
 
 ## The CLI
 
@@ -328,19 +331,20 @@ sets the output rules: content first, structured errors on stdout where agents
 can see them, and a `next:` footer suggesting the likely next command. Tests
 enforce these rules, so read the spec before changing how any command talks.
 
-Generated per registry row (with the defaults, `<type>` is one of `spec`,
-`prd`, `debt`, `idea`, `plan`, `retro`, `principle`):
+Every type in the registry gets its own commands (with the shipped set,
+`<type>` is one of `spec`, `prd`, `debt`, `idea`, `plan`, `retro`,
+`principle`):
 
 | Command | Purpose |
 |---|---|
-| `rcorn <type> <create_verb> [...]` | Create a doc from its template; the verb (`create`, or `add` for the appendable `principle`) and argument shape come from the row (`rcorn help`, or the wiring doc) |
+| `rcorn <type> create "<title>"` | Create a document from its template. Branch-scoped types take no title; an appendable type uses `add` (`rcorn principle add "<title>"`). `rcorn help` lists the exact form per type |
 | `rcorn <type> show [<slug>\|<branch>] [--full]` | Read a kb doc (truncated preview by default) |
 | `rcorn <type> list [--include-drafts]` | List docs of a slug-addressed type |
-| `rcorn <closee> status` | Lifecycle status for the current branch (`plan` by default) |
-| `rcorn <closee> complete [branch] [--abandon]` | Archive to the completed stage; refuses without a filled required closer, `--abandon` drops it |
+| `rcorn <type> status` | Where the current branch's document stands (types that something closes, so `plan` by default) |
+| `rcorn <type> complete [branch] [--abandon]` | Archive the branch's document; refuses until the document that closes it is filled in, `--abandon` drops it instead |
 | `rcorn doc-types show [--schema]` | Print the effective registry, or the JSON Schema for the config file |
 
-Fixed:
+The same for every registry:
 
 | Command | Purpose |
 |---|---|

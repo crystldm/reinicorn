@@ -102,13 +102,12 @@ the doc-type registry:
 | `kb/cross-links` | — | a markdown link points nowhere |
 | `kb/docs-freshness` | `index_file` | an index file is older than `max_days_stale` |
 
-None of the process rules name a doc type. They read sections and relations
-off the effective registry, so a type added, changed or disabled in
-`kb/<scope>/doc-types.yaml` is covered (or released) without a new rule: give
-a custom type `required_sections` and `kb/required-sections` checks it; give
-it `depends_on` and `kb/draft-refs` follows the reference; give it `closes`
-and `kb/closer-filled` and `kb/lifecycle` apply to the pair. See "How it
-works" in the [README](../README.md#how-it-works).
+The process rules apply to whatever types the registry holds, shipped or
+your own. Give a type required sections and `kb/required-sections` checks
+them; say it depends on another and `kb/draft-refs` follows the reference;
+say it closes another and `kb/closer-filled` and `kb/lifecycle` watch the
+pair. No new rule is needed for a new type. See "How it works" in the
+[README](../README.md#how-it-works).
 
 The pre-merge CI job (`rcorn _process-gate <branch>`, the "Process gate"
 check) runs exactly `kb/required-sections`, `kb/draft-refs` and

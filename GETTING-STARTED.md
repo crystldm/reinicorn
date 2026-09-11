@@ -78,12 +78,11 @@ from the template, and the draft goes through PR-style review before it counts
 as approved. The workflow section of the [README](README.md) covers the full
 loop, including doc review.
 
-Those types and their rules (which docs go through review, what a plan must
-point at, what a retro must contain before a plan can complete) are the
-shipped defaults, not fixed behavior. A repo changes them in
-`kb/<scope>/doc-types.yaml`; `rcorn doc-types show` prints what is in effect.
-The README's [How it works](README.md#how-it-works) section describes the
-generic model; [Customizing the process](README.md#customizing-the-process)
+Those are the document types Reinicorn ships with, not the only ones you
+can have. Add your own or change these in `kb/<scope>/doc-types.yaml`;
+`rcorn doc-types show` prints the set in effect. The README's
+[How it works](README.md#how-it-works) explains the rules you can attach to
+a type, and [Customizing the process](README.md#customizing-the-process)
 has worked examples.
 
 ## Key commands
