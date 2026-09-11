@@ -82,7 +82,9 @@ Those types and their rules (which docs go through review, what a plan must
 point at, what a retro must contain before a plan can complete) are the
 shipped defaults, not fixed behavior. A repo changes them in
 `kb/<scope>/doc-types.yaml`; `rcorn doc-types show` prints what is in effect.
-See [Customizing the process](README.md#customizing-the-process).
+The README's [How it works](README.md#how-it-works) section describes the
+generic model; [Customizing the process](README.md#customizing-the-process)
+has worked examples.
 
 ## Key commands
 

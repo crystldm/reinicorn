@@ -107,8 +107,8 @@ off the effective registry, so a type added, changed or disabled in
 `kb/<scope>/doc-types.yaml` is covered (or released) without a new rule: give
 a custom type `required_sections` and `kb/required-sections` checks it; give
 it `depends_on` and `kb/draft-refs` follows the reference; give it `closes`
-and `kb/closer-filled` and `kb/lifecycle` apply to the pair. See "Customizing
-the process" in the [README](../README.md#customizing-the-process).
+and `kb/closer-filled` and `kb/lifecycle` apply to the pair. See "How it
+works" in the [README](../README.md#how-it-works).
 
 The pre-merge CI job (`rcorn _process-gate <branch>`, the "Process gate"
 check) runs exactly `kb/required-sections`, `kb/draft-refs` and
