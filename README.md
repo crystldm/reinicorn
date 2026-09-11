@@ -142,9 +142,10 @@ from:
   plan built on a draft spec is a lint finding, and a branch whose plan names
   a draft cannot be pushed.
 - **Say a type closes another**, and the closing document lives alongside the
-  one it closes and must be written before that one is finalized. A retro
-  closes an execution plan, so `rcorn plan complete` refuses until the retro
-  is filled in; `--abandon` is the recorded way to drop a plan without one.
+  one it closes. Mark it required, and it must be written before that one
+  is finalized: a retro closes an execution plan, so `rcorn plan complete`
+  refuses until the retro is filled in, and `--abandon` is the recorded way
+  to drop a plan without one. Leave it optional and `complete` only warns.
   The closed document's directory moves from `active` to `completed` with
   both files in it.
 
@@ -338,8 +339,8 @@ Every type in the registry gets its own commands (with the shipped set,
 | Command | Purpose |
 |---|---|
 | `rcorn <type> create "<title>"` | Create a document from its template. Branch-scoped types take no title; an appendable type uses `add` (`rcorn principle add "<title>"`). `rcorn help` lists the exact form per type |
-| `rcorn <type> show [<slug>\|<branch>] [--full]` | Read a kb doc (truncated preview by default) |
-| `rcorn <type> list [--include-drafts]` | List docs of a slug-addressed type |
+| `rcorn <type> show [<slug>\|<branch>] [--full]` | Read a document (truncated preview by default). Slug-named types take a slug, branch-scoped types default to the current branch; an appendable type has no `show` |
+| `rcorn <type> list [--include-drafts]` | List the documents of a slug-named type (branch-scoped and appendable types have no `list`) |
 | `rcorn <type> status` | Where the current branch's document stands (types that something closes, so `plan` by default) |
 | `rcorn <type> complete [branch] [--abandon]` | Archive the branch's document; refuses until the document that closes it is filled in, `--abandon` drops it instead |
 | `rcorn doc-types show [--schema]` | Print the effective registry, or the JSON Schema for the config file |
