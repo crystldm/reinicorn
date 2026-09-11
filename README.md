@@ -9,18 +9,19 @@ straightforward way: a set of skills, hooks (both `git` and harness), and the
 MCP, no vector database, no extra cloud storage (excuse the LLM-ism). It keeps
 your docs organized and helps minimize the slop.
 
-At the core of Reinicorn is a knowledgebase repository and a registry of
-document types. A type is a bundle of behaviors: where its docs live, how they
-are addressed, whether they go through review, which sections they must carry,
-what they depend on and what they close. Every gate reads those behaviors
-rather than type names, so the process a repo runs is config, and the shipped
-defaults are one such config: a spec-driven-development workflow, spec → review
-→ plan → execute → retro. The methodology skills that drive that workflow are
-pluggable: install the bundled adapter for
-[obra/superpowers](https://github.com/obra/superpowers) or bring your own (see
-[The skill set](#the-skill-set)). Every document comes from a template, so
-provenance and review status are first-class rather than something you
-remember to add.
+Reinicorn is for creating, maintaining, and curating a knowledgebase
+repository, using whatever workflow documents you want. Document types and
+their relations to each other are defined in a registry. For a typical
+spec-driven-development workflow (such as the one Reinicorn ships with), you
+could have a spec -> spec-review -> plan -> execute -> retro workflow. Mark a
+document as review-gated, it must pass through PR before becoming actionable.
+Mark a document as closing another, then it must be created before its closee
+is finalized; a retro closing an execution plan for example. The methodology
+and skills that drive the workflow are pluggable: install the bundled adapter
+for [obra/superpowers](https://github.com/obra/superpowers) or bring your own
+(see [The skill set](#the-skill-set)). Every document comes from a template, so
+provenance and review status are first-class rather than something you remember
+to add.
 
 The knowledgebase lives as a separate repository, always on its `main` branch
 except for single-doc review PRs. One `kb` can be shared across multiple
