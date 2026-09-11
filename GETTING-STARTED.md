@@ -78,6 +78,13 @@ from the template, and the draft goes through PR-style review before it counts
 as approved. The workflow section of the [README](README.md) covers the full
 loop, including doc review.
 
+Those are the document types Reinicorn ships with, not the only ones you
+can have. Add your own or change these in `kb/<scope>/doc-types.yaml`;
+`rcorn doc-types show` prints the set in effect. The README's
+[How it works](README.md#how-it-works) explains the rules you can attach to
+a type, and [Customizing the process](README.md#customizing-the-process)
+has worked examples.
+
 ## Key commands
 
 | Command | What it does |
@@ -90,6 +97,7 @@ loop, including doc review.
 | `rcorn <type> create "<title>"` | Create a kb doc (spec, prd, retro, etc.) |
 | `rcorn idea create "<text>"` | Capture an idea |
 | `rcorn kb lint` | Run kb lint rules |
+| `rcorn doc-types show` | Print the effective doc-type registry (the process config) |
 | `rcorn skills install <name>` | Install a skill-set adapter |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |

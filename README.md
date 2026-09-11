@@ -9,19 +9,19 @@ straightforward way: a set of skills, hooks (both `git` and harness), and the
 MCP, no vector database, no extra cloud storage (excuse the LLM-ism). It keeps
 your docs organized and helps minimize the slop.
 
-At the core of Reinicorn is a spec-driven-development workflow and a
-knowledgebase repository for keeping track of the `.md` files you generate.
-The methodology skills that drive that workflow are pluggable: install the
-bundled adapter for [obra/superpowers](https://github.com/obra/superpowers)
-or bring your own (see [The skill set](#the-skill-set)). Every document comes
-from a template, so provenance and review status are first-class rather than
-something you remember to add.
-
-Specs get placed in `kb/<project-slug>/specs/drafts` and can then be put up for
-review. Organized metadata keeps track of all the details. When the review PR
-passes, the spec can be distilled into implementation plans. The code is
-reviewed as normal, of course, but having the team collaborate on and validate
-the intent first saves a lot of time and effort.
+Reinicorn is for creating, maintaining, and curating a knowledgebase
+repository, using whatever workflow documents you want. Document types and
+their relations to each other are defined in a registry. For a typical
+spec-driven-development workflow (such as the one Reinicorn ships with), you
+could have a spec -> spec-review -> plan -> execute -> retro workflow. Mark a
+document as review-gated, it must pass through PR before becoming actionable.
+Mark a document as closing another, then it must be created before its closee
+is finalized; a retro closing an execution plan for example. The methodology
+and skills that drive the workflow are pluggable: install the bundled adapter
+for [obra/superpowers](https://github.com/obra/superpowers) or bring your own
+(see [The skill set](#the-skill-set)). Every document comes from a template, so
+provenance and review status are first-class rather than something you remember
+to add.
 
 The knowledgebase lives as a separate repository, always on its `main` branch
 except for single-doc review PRs. One `kb` can be shared across multiple
@@ -92,7 +92,7 @@ reinicorn/
 └── tests/                  # Test suite
 ```
 
-## The workflow
+## How it works
 
 Everything here follows from the harness engineering article's central claim:
 the repository is the source of truth. If context lives in a chat thread or in
@@ -100,70 +100,164 @@ someone's head, agents can't see it. The kb is where it becomes visible to the
 whole team, including agents working on other branches. The workflow exists to
 get the important context written down, and to make sure it can be trusted
 once it is. The full set of beliefs behind the design is in
-[core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md);
-several of them come up below.
+[core-beliefs.md](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/core-beliefs.md).
 
-Work starts with a **spec**, the implementation contract: problem, design
-goals, design, non-goals. Specs come from wherever work comes from: a PRD, a
-roadmap conversation, a bug that exposed a design flaw, an idea captured weeks
-earlier. With the superpowers adapter installed (see [The skill
-set](#the-skill-set)), the brainstorming skill turns that raw intent into a
-design through dialogue; `rcorn spec create` turns the design into a draft in
-the kb either way. A draft only becomes authoritative after doc review (next
-section).
+Every document in the kb is a markdown file with a frontmatter block, filed
+under `kb/<scope>/` (one scope per repo) and created through the CLI rather
+than by hand. Which documents exist, where they go and what rules apply to
+them is decided by the registry. The registry ships with a spec-driven set of
+types; you can change them or replace them, and everything below applies to
+your types exactly as it does to the shipped ones.
+
+### Document types
+
+A document type is a name plus the rules you attach to it. Each rule is
+something you switch on for the type, with a consequence the whole team sees:
+
+- **Give it a home and a naming pattern**, and `rcorn <type> create` files
+  each document there with its frontmatter filled in. A pattern can name the
+  document by slug (`specs/<slug>.md`), scope it to a branch
+  (`exec-plans/active/<branch>/plan.md`), or number it (`RFC-0007-<slug>.md`).
+- **Mark it protected**, and the editor hooks reject direct writes to that
+  directory, so a document cannot exist without the provenance fields the CLI
+  stamps on it.
+- **Give it required sections**, and the template scaffolds them with a hint
+  in each, and `rcorn kb lint` flags a document that is still missing one.
+- **Mark it review-gated**, and a new document is a draft that must pass
+  through a PR before it becomes actionable. Until then `list` and `show`
+  leave it out unless asked, and nothing else in the kb may build on it.
+- **Give it an index file**, and the linter tells you when the index has gone
+  stale.
+- **Make it appendable**, and `create` adds an entry to one running file
+  instead of writing a new document; the repo's golden principles work this
+  way.
+
+### Relations between types
+
+Two rules connect one type to another, and they are where the workflow comes
+from:
+
+- **Say a type depends on another**, and each of its documents must name an
+  approved document of that type. A plan names the spec it implements, so a
+  plan built on a draft spec is a lint finding, and a branch whose plan names
+  a draft cannot be pushed.
+- **Say a type closes another**, and the closing document lives alongside the
+  one it closes. Mark it required, and it must be written before that one
+  is finalized: a retro closes an execution plan, so `rcorn plan complete`
+  refuses until the retro is filled in, and `--abandon` is the recorded way
+  to drop a plan without one. Leave it optional and `complete` only warns.
+  The closed document's directory moves from `active` to `completed` with
+  both files in it.
+
+### Where the rules are enforced
+
+The rules are code, not conventions, and they run at five moments:
+
+- **While you write**: `rcorn kb lint` reports every document missing a
+  section, building on a draft, or left as an empty scaffold, and every plan
+  still active after its branch merged.
+- **When you push**: the pre-push hook stops a branch whose documents depend
+  on something not yet approved.
+- **When the PR is reviewed**: the "Process gate" check runs the lints for
+  that branch's documents alone, so a PR cannot merge with an empty or
+  missing retro, and prints the registry in effect so a weakened rule is
+  visible where the reviewer looks.
+- **When the branch is done**: `rcorn <type> complete` refuses to archive
+  without the document that closes it.
+- **After merge**: the post-merge hook archives the plans of branches that
+  are gone from origin, through the same `complete`.
+
+### Changing the registry
+
+The registry lives in `kb/<scope>/doc-types.yaml`, next to the documents it
+governs, and travels with `rcorn kb publish` like any other kb file. Run
+`rcorn doc-types show` to see every type in effect, marked `built-in` or
+`overlay`; copy a row, change one line, publish. You can change a shipped
+type (only the lines you list change), add a type of your own (a home, a
+naming pattern and an addressing mode are all it needs), or switch a shipped
+type off with `disabled: true`. A mistake in the file stops the CLI with the
+offending key rather than quietly falling back to the shipped set, and
+`rcorn doc-types show --schema` gives your editor a schema to validate
+against. [Customizing the process](#customizing-the-process) has worked
+examples; the full contract is in
+[the process-as-config spec](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/process-as-config-doc-type-registry-overlay-and-declarative.md).
+
+## The shipped defaults
+
+Out of the box the registry holds seven types. Two relations tie them into
+a workflow: a plan depends on an approved spec, and a retro closes a plan.
+Written as registry rows, that is:
+
+```yaml
+doc_types:
+  plan:
+    depends_on: {field: spec, type: spec, status: approved}
+  retro:
+    closes: {type: plan, required: true}
+```
+
+| Type | Create | What it is | Rules |
+|------|--------|------------|-------|
+| spec | `rcorn spec create "<title>"` | The implementation contract: problem, design goals, design, non-goals | review-gated, indexed |
+| prd | `rcorn prd create "<title>"` | Product requirements: overview, user stories, acceptance criteria, out of scope, open questions | indexed |
+| debt | `rcorn debt create "<title>"` | Tech-debt entry: impact and remediation plan | indexed |
+| idea | `rcorn idea create "<idea>"` | Quick capture, filed by author | none |
+| plan | `rcorn plan create` | Per-branch execution plan: goal, acceptance criteria, tasks | depends on an approved spec; closed by a retro |
+| retro | `rcorn retro create` | Per-branch retrospective: what went well, what to improve, lessons, actions, spec drift | closes the plan, required |
+| principle | `rcorn principle add "<title>"` | One entry in the repo's golden principles | appendable |
+
+All but `principle` are protected, and every type with sections has them
+scaffolded and linted.
+
+### The default workflow
+
+Work starts with a **spec**, the implementation contract. Specs come from
+wherever work comes from: a PRD, a roadmap conversation, a bug that exposed a
+design flaw, an idea captured weeks earlier. With the superpowers adapter
+installed (see [The skill set](#the-skill-set)), the brainstorming skill turns
+that raw intent into a design through dialogue; `rcorn spec create` turns the
+design into a draft in the kb either way. Because `spec` is gated, a draft
+only becomes authoritative after doc review (next section).
 
 With a spec in hand, work moves to a feature branch. `rcorn plan create`
-scaffolds an execution plan scoped to that branch (goal, acceptance criteria,
-tasks) and publishes it to the kb. Because every branch's plan is visible in
-one place, `rcorn kb status` can compare active branches and flag overlap
-before two people silently rewrite the same file. This is what the article
-calls cross-branch awareness. With the superpowers adapter installed, the
-executing-plans skill works the plan step by step; when the branch merges,
-`rcorn plan complete` archives it, and refuses without a filled retro, because
-lessons that never get written down are lost; `--abandon` is the recorded
-escape hatch, and a repo whose doc-type config makes the retro optional gets a
-nag instead. The retro's Spec Drift section states every deviation from the
-plan's declared spec with a disposition (amended, debted or accepted), or the
-single word "None." — so drift is disclosed where the reviewer reads it.
+scaffolds an execution plan scoped to that branch and publishes it to the kb.
+Because `plan` depends on an approved spec, the pre-push hook refuses a
+branch whose plan names a draft. Because every branch's plan is visible in one
+place, `rcorn kb status` can compare active branches and flag overlap before
+two people silently rewrite the same file, what the article calls cross-branch
+awareness. With the superpowers adapter installed, the executing-plans skill
+works the plan step by step. When the branch merges, `rcorn plan complete`
+archives it, and because a retro closes a plan and is required, it
+refuses without a filled retro; `--abandon` is the recorded escape hatch. The
+retro's Spec Drift section states every deviation from the plan's declared
+spec with a disposition (amended, debted or accepted), or the single word
+"None." — so drift is disclosed where the reviewer reads it.
 
 Two capture commands sit outside the main loop. `rcorn idea create` is for
 the thought that strikes while you're doing something else: file it and stay
 on task, instead of losing it or chasing it. `rcorn debt create` catalogs tech
 debt as you encounter it. Debt compounds fast in agent-assisted codebases,
 since a shortcut taken today becomes a pattern agents replicate tomorrow.
+Team taste gets the same treatment: `rcorn principle add` appends to the
+repo's golden principles, capturing a human preference once so it can be
+enforced continuously instead of re-litigated in every review.
 
 The other belief doing heavy lifting here is mechanical enforcement over
 documented conventions: a rule that exists only in prose will eventually be
-violated, so wherever possible the rules are code. Every document is created
-from a template through the CLI. The protected kb paths (`specs/`, `prds/`,
-`tech-debt/`, `exec-plans/`, `ideas/`) reject direct writes, so a doc can't
-exist without its provenance fields and required sections. `rcorn kb lint`
-checks cross-links, doc freshness, required sections, drafts referenced as if
-they were approved, retros left as empty scaffolds, and plans
-still active after their branch merged; the "Process gate" CI job runs the
-per-branch subset against every PR. Team taste gets the same treatment: `rcorn principle add`
-appends to the repo's golden principles, capturing a human preference once so
-it can be enforced continuously instead of re-litigated in every review.
-
-The document types, each with its template and protected location:
-
-| Type | Create command | What it is |
-|------|----------------|------------|
-| spec | `rcorn spec create "<title>"` | The implementation contract: problem, design goals, design, non-goals |
-| prd | `rcorn prd create "<title>"` | Product requirements: overview, user stories, acceptance criteria, out of scope |
-| plan | `rcorn plan create` | Per-branch execution plan: goal, acceptance criteria, tasks |
-| retro | `rcorn retro create` | Per-branch retrospective: what went well, what to improve, lessons, actions, spec drift |
-| debt | `rcorn debt create "<title>"` | Tech-debt entry: impact and remediation plan |
-| idea | `rcorn idea create "<idea>"` | Quick capture, filed by author |
-| principle | `rcorn principle add "<title>"` | Appends a golden principle to the repo's ruleset |
+violated, so wherever possible the rules are code. With the defaults,
+`rcorn kb lint` checks cross-links, doc
+freshness, required sections, plans built on unapproved specs, retros left as
+empty scaffolds, and plans still active after their branch merged; the
+"Process gate" CI job runs the per-branch subset against every PR.
 
 ### Doc review
 
-Specs shape everything built after them, so they get the same review treatment
-as code. The process stays lightweight, though: corrections are cheap and
-waiting is expensive. `rcorn spec create` writes the draft to `specs/drafts/`
-on kb main, visible to everyone immediately but excluded from
-`rcorn spec list` and `show` unless you ask for drafts. When it's ready:
+A gated type (only `spec` by default) gets the same review treatment as code,
+because specs shape everything built after them. The process stays
+lightweight, though: corrections are cheap and waiting is expensive.
+`rcorn spec create` writes the draft to `specs/drafts/` on kb main, visible to
+everyone immediately but excluded from `rcorn spec list` and `show` unless
+you ask for drafts. When it's ready:
 
 ```bash
 rcorn review start <slug>     # push a review branch, open a PR, request reviewers
@@ -184,14 +278,53 @@ main). The `reinicorn-doc-review` ruleset requires both before a merge into
 kb main; direct `rcorn kb publish` pushes are unaffected. Rerun `rcorn review
 setup --force` after upgrading to pick up new workflow versions. `gh` is
 optional at every step; without it, reinicorn pushes the branch and hands you
-the PR link to open yourself. `rcorn kb lint` warns when a plan builds on a
-spec that never got approved.
+the PR link to open yourself.
+
+### Customizing the process
+
+Making the retro optional again and dropping its Spec Drift section is two
+lines in `kb/<scope>/doc-types.yaml`:
+
+```yaml
+doc_types:
+  retro:
+    closes: {type: plan, required: false}
+    required_sections: [What Went Well, What Could Be Improved, Lessons Learned, Action Items]
+```
+
+A different process altogether, RFC → ADR, is a handful more:
+
+```yaml
+doc_types:
+  spec:  {disabled: true}
+  plan:  {disabled: true}
+  retro: {disabled: true}
+  rfc:
+    dir_path: rfcs
+    filename: "RFC-{seq:04}-{slug}.md"
+    addressing: slug
+    gated: true
+    required_sections: [Summary, Motivation, Detailed Design, Drawbacks, Alternatives]
+    fields: [superseded_by]
+  adr:
+    dir_path: decisions
+    filename: "{slug}.md"
+    addressing: slug
+    required_sections: [Context, Decision, Consequences]
+    fields: [rfc]
+    depends_on: {field: rfc, type: rfc, status: approved}
+```
+
+That gives `rcorn rfc create` through the review lane with `RFC-0001-…`
+numbering, `rcorn adr create`, the draft-refs lint and pre-push gate on
+`adr.rfc`, required-section lint on both, and no retro or completion
+step at all, because nothing closes anything.
 
 ## The CLI
 
 `rcorn` is the single entry point for kb operations; it hides the git plumbing
 so neither humans nor agents touch the kb clone directly. Bare `rcorn` shows
-a live status home view (branch, active plans, overlap), and `rcorn help` has
+a live status home view (branch, active docs, overlap), and `rcorn help` has
 the full manual.
 
 The [axi spec](https://github.com/crystldm/reinicorn-kb/blob/main/reinicorn/specs/agent-native-output-surface-axi-principles.md)
@@ -199,29 +332,33 @@ sets the output rules: content first, structured errors on stdout where agents
 can see them, and a `next:` footer suggesting the likely next command. Tests
 enforce these rules, so read the spec before changing how any command talks.
 
+Every type in the registry gets its own commands (with the shipped set,
+`<type>` is one of `spec`, `prd`, `debt`, `idea`, `plan`, `retro`,
+`principle`):
+
+| Command | Purpose |
+|---|---|
+| `rcorn <type> create "<title>"` | Create a document from its template. Branch-scoped types take no title; an appendable type uses `add` (`rcorn principle add "<title>"`). `rcorn help` lists the exact form per type |
+| `rcorn <type> show [<slug>\|<branch>] [--full]` | Read a document (truncated preview by default). Slug-named types take a slug, branch-scoped types default to the current branch; an appendable type has no `show` |
+| `rcorn <type> list [--include-drafts]` | List the documents of a slug-named type (branch-scoped and appendable types have no `list`) |
+| `rcorn <type> status` | Where the current branch's document stands (types that something closes, so `plan` by default) |
+| `rcorn <type> complete [branch] [--abandon]` | Archive the branch's document; refuses until the document that closes it is filled in, `--abandon` drops it instead |
+| `rcorn doc-types show [--schema]` | Print the effective registry, or the JSON Schema for the config file |
+
+The same for every registry:
+
 | Command | Purpose |
 |---|---|
 | `rcorn kb sync` | Pull latest kb state |
 | `rcorn kb publish` | Push kb changes (rebase + push) |
-| `rcorn kb status` | Kb health, active plans, overlap, stale docs |
+| `rcorn kb status` | Kb health, active docs, overlap, stale docs |
 | `rcorn kb status --compact` | ≤10-line dashboard for agent context (session-start hook) |
 | `rcorn kb lint` | Run kb lint rules |
 | `rcorn kb list` | List repo scopes in the kb |
 | `rcorn kb remove-scope <name>` | Remove a repo scope |
 | `rcorn kb git <args...>` | Raw git passthrough inside the kb |
-| `rcorn <spec\|prd\|debt\|idea> create "..."` | Create a doc of that type from its template |
-| `rcorn <spec\|prd\|debt\|idea> show <slug> [--full]` | Read a kb doc (truncated preview by default) |
-| `rcorn <spec\|prd\|debt\|idea> list` | List kb docs of that type |
-| `rcorn plan create` | Create execution plan for current branch |
-| `rcorn plan status` | Plan status for current branch |
-| `rcorn plan show [branch] [--full]` | Show plan doc |
-| `rcorn plan complete [branch]` | Archive plan to completed/ (refuses without a filled retro; the doc-type config can make it optional) |
-| `rcorn plan complete [branch] --abandon` | Drop the plan instead: status abandoned, no retro needed |
-| `rcorn retro create` | Create retro for current branch |
-| `rcorn retro show [branch] [--full]` | Show retro doc |
-| `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane (see above) |
+| `rcorn review start\|push\|merge\|cancel\|link\|status` | The doc-review lane for gated types (see above) |
 | `rcorn review setup [--force]` | Install kb-repo CI workflows (cleanup + status checks) and the ruleset |
-| `rcorn principle add "title"` | Append a golden principle |
 | `rcorn skills install <name>` | Install a skill-set adapter |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
