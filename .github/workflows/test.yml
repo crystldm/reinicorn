@@ -26,7 +26,7 @@ jobs:
       - name: Clone kb
         run: git clone --depth 1 https://github.com/crystldm/reinicorn-kb.git kb
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
       # The server-side kb boundary: .gitignore and the pre-commit hook are
       # client-side and bypassable (git add -f, --no-verify). Anything
