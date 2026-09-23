@@ -30,8 +30,9 @@ The interactive prompt asks where the shared kb should live. Three options:
 2. A new private GitHub repo (`--create-remote`): created for you via `gh`.
 3. A local bare repo (`--local`): useful for solo experiments.
 
-`init` adds the kb submodule, installs the git and editor hooks, creates your
-repo scope, and lays down the skills and agent instructions.
+`init` clones the kb into `kb/` (gitignored), installs the git and editor
+hooks, creates your repo scope, and lays down the skills and agent
+instructions.
 
 `init` only ships two native skills (`using-reinicorn`, `populate-agents-md`).
 Reinicorn has no opinion on how you develop, so for brainstorming, planning,
@@ -123,11 +124,14 @@ rcorn kb git remote set-url origin git@github.com:you/my-project-kb.git
 **Detached HEAD in kb:** run `rcorn kb git checkout main`, then
 `rcorn kb sync`.
 
-**Submodule not initialized:** run `git submodule update --init --recursive`.
-If you still see errors, delete `kb/` and re-run `rcorn init`.
+**No `kb/` after a fresh checkout:** that's expected, since `kb/` is
+gitignored. Run `rcorn kb sync` and it clones the kb from the recorded remote.
+If there's no remote recorded yet, run `rcorn init` instead.
 
-**"not our ref" on clone:** the kb pointer is stale. Run `rcorn kb publish`
-from a working checkout to update it.
+**Still on the old kb submodule:** run `rcorn init`. It spots the submodule
+and converts it to a plain clone in place, then tells you exactly what to
+commit. If the old kb has uncommitted or unpushed changes, it refuses until
+they're on the remote, so nothing gets lost. [upgrades/v0.2.md](upgrades/v0.2.md) has the details.
 
 If you hit something these steps don't cover, run `rcorn feedback` and
 describe it. Feedback is how the rough edges get found.
