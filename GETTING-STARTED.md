@@ -30,12 +30,13 @@ The interactive prompt asks where the shared kb should live. Three options:
 2. A new private GitHub repo (`--create-remote`): created for you via `gh`.
 3. A local bare repo (`--local`): useful for solo experiments.
 
-`init` adds the kb submodule, installs the git and editor hooks, creates your
-repo scope, and lays down the skills and agent instructions.
+`init` clones the kb into `kb/` (gitignored), installs the git and editor
+hooks, creates your repo scope, and lays down the skills and agent
+instructions.
 
-`init` only ships two native skills (`using-reinicorn`, `populate-agents-md`)
-— reinicorn takes no position on methodology. To get brainstorming,
-planning, debugging, and review skills, install a skill-set adapter:
+`init` only ships two native skills (`using-reinicorn`, `populate-agents-md`).
+Reinicorn has no opinion on how you develop, so for brainstorming, planning,
+debugging, and review skills, install a skill-set adapter:
 
 ```bash
 rcorn skills install superpowers
@@ -78,6 +79,13 @@ from the template, and the draft goes through PR-style review before it counts
 as approved. The workflow section of the [README](README.md) covers the full
 loop, including doc review.
 
+Those are just the document types Reinicorn ships with. You can add your own
+or change these in `kb/<scope>/doc-types.yaml`, and `rcorn doc-types show`
+prints the set in effect. The README's [How it works](README.md#how-it-works)
+explains the rules you can attach to a type, and
+[Customizing the process](README.md#customizing-the-process) has worked
+examples.
+
 ## Key commands
 
 | Command | What it does |
@@ -90,6 +98,7 @@ loop, including doc review.
 | `rcorn <type> create "<title>"` | Create a kb doc (spec, prd, retro, etc.) |
 | `rcorn idea create "<text>"` | Capture an idea |
 | `rcorn kb lint` | Run kb lint rules |
+| `rcorn doc-types show` | Print the effective doc-type registry (the process config) |
 | `rcorn skills install <name>` | Install a skill-set adapter |
 | `rcorn skills status` / `list` | Installed adapter state / bundled adapters |
 | `rcorn skills update [--ref X] [--force]` | Re-apply or re-pin the installed adapter |
@@ -115,11 +124,14 @@ rcorn kb git remote set-url origin git@github.com:you/my-project-kb.git
 **Detached HEAD in kb:** run `rcorn kb git checkout main`, then
 `rcorn kb sync`.
 
-**Submodule not initialized:** run `git submodule update --init --recursive`.
-If you still see errors, delete `kb/` and re-run `rcorn init`.
+**No `kb/` after a fresh checkout:** that's expected, since `kb/` is
+gitignored. Run `rcorn kb sync` and it clones the kb from the recorded remote.
+If there's no remote recorded yet, run `rcorn init` instead.
 
-**"not our ref" on clone:** the kb pointer is stale. Run `rcorn kb publish`
-from a working checkout to update it.
+**Still on the old kb submodule:** run `rcorn init`. It spots the submodule
+and converts it to a plain clone in place, then tells you exactly what to
+commit. If the old kb has uncommitted or unpushed changes, it refuses until
+they're on the remote, so nothing gets lost. [upgrades/v0.2.md](upgrades/v0.2.md) has the details.
 
 If you hit something these steps don't cover, run `rcorn feedback` and
 describe it. Feedback is how the rough edges get found.
