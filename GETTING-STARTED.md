@@ -33,9 +33,9 @@ The interactive prompt asks where the shared kb should live. Three options:
 `init` adds the kb submodule, installs the git and editor hooks, creates your
 repo scope, and lays down the skills and agent instructions.
 
-`init` only ships two native skills (`using-reinicorn`, `populate-agents-md`)
-— reinicorn takes no position on methodology. To get brainstorming,
-planning, debugging, and review skills, install a skill-set adapter:
+`init` only ships two native skills (`using-reinicorn`, `populate-agents-md`).
+Reinicorn has no opinion on how you develop, so for brainstorming, planning,
+debugging, and review skills, install a skill-set adapter:
 
 ```bash
 rcorn skills install superpowers
@@ -78,12 +78,12 @@ from the template, and the draft goes through PR-style review before it counts
 as approved. The workflow section of the [README](README.md) covers the full
 loop, including doc review.
 
-Those are the document types Reinicorn ships with, not the only ones you
-can have. Add your own or change these in `kb/<scope>/doc-types.yaml`;
-`rcorn doc-types show` prints the set in effect. The README's
-[How it works](README.md#how-it-works) explains the rules you can attach to
-a type, and [Customizing the process](README.md#customizing-the-process)
-has worked examples.
+Those are just the document types Reinicorn ships with. You can add your own
+or change these in `kb/<scope>/doc-types.yaml`, and `rcorn doc-types show`
+prints the set in effect. The README's [How it works](README.md#how-it-works)
+explains the rules you can attach to a type, and
+[Customizing the process](README.md#customizing-the-process) has worked
+examples.
 
 ## Key commands
 
