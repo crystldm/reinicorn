@@ -39,6 +39,15 @@ _MIGRATION_PROMPT = (
 )
 
 
+# Root-level single-file assets that are seed-only: written when absent,
+# never overwritten (the repo may own its own copy), and not manifest-tracked
+# — the manifest baselines from disk, so tracking a repo-owned file would
+# make the next update treat it as pristine and clobber it. .rumdl.toml is
+# the docs/markdown rule's config; without it the rule skips and reports a
+# false PASS.
+_SEED_FILES = (".rumdl.toml",)
+
+
 def _get_package_version() -> str:
     return __version__
 
@@ -341,6 +350,20 @@ def cmd_update(*, diff_target: str | None = None) -> int:
     for rel_path, src_path in sorted(package_files.items()):
         dest = repo_root / rel_path
 
+        if rel_path in _SEED_FILES:
+            # is_symlink() first: it catches dangling links exists() misses,
+            # and copy2 would write through a link onto its target.
+            if not dest.is_symlink() and not dest.exists():
+                shutil.copy2(src_path, dest)
+                counts["added"] += 1
+            elif dest.is_symlink() or not dest.is_file() or (
+                sha256_file(dest) != sha256_file(src_path)
+            ):
+                console.warn(f"Kept {rel_path} (repo's own; differs from shipped)")
+                print(f"    Run: rcorn update --diff {rel_path}")
+                counts["skipped"] += 1
+            continue
+
         if rel_path in manifest_files:
             if dest.is_file():
                 current_hash = sha256_file(dest)
@@ -422,6 +445,11 @@ def _collect_package_files(asset_root: Path, repo_root: Path) -> dict[str, Path]
                         rel = f.relative_to(src)
                         files[f"{dest_prefix}/{rel}"] = f
                 break  # Use first match, don't double-count
+
+    for name in _SEED_FILES:
+        src = asset_root / name
+        if src.is_file():
+            files[name] = src
 
     return files
 
