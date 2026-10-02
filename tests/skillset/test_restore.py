@@ -147,6 +147,55 @@ def test_restore_with_nothing_missing_does_not_fetch(
     assert fake_skillset_fetch == []
 
 
+def _fetch_for_real_from(tarball: Path, monkeypatch) -> None:
+    """Undo `fake_skillset_fetch` for restore: the real `fetch_source`, with
+    the "network" pointed at a local tarball of the fixture tree."""
+    from reinicorn.skillset import fetch
+    from reinicorn.skillset import restore as restore_mod
+
+    monkeypatch.setattr(restore_mod, "fetch_source", fetch.fetch_source)
+    monkeypatch.setattr(fetch, "tarball_url", lambda _source: f"file://{tarball}")
+
+
+def _fixture_tarball(dest_dir: Path) -> Path:
+    import tarfile
+
+    from tests.conftest import SKILLSET_FIXTURE_TREE
+
+    tarball = dest_dir / "upstream.tar.gz"
+    with tarfile.open(tarball, "w:gz") as tar:
+        tar.add(SKILLSET_FIXTURE_TREE, arcname=f"skills-{COMMIT_A}")
+    return tarball
+
+
+@pytest.mark.parametrize("tampered", [False, True], ids=["lock-digest", "tampered"])
+def test_restore_checks_the_archive_against_the_lock_digest(
+    installed: Path, tmp_path: Path, monkeypatch, tampered: bool
+) -> None:
+    """End to end through the real digest check: an archive whose digest
+    matches the lock restores; one that does not is refused and nothing is
+    written."""
+    tarball = _fixture_tarball(tmp_path)
+    _fetch_for_real_from(tarball, monkeypatch)
+    lock = read_lock(installed)
+    assert lock is not None
+    recorded = SkillsetLock(
+        adapter=lock.adapter, repo=lock.repo, commit=lock.commit,
+        archive_sha256="0" * 64 if tampered else sha256_file(tarball),
+        files=lock.files, wiring=lock.wiring,
+    )
+    root = _skills_root(installed)
+    (root / SCRATCH).unlink()
+
+    if tampered:
+        with pytest.raises(AdapterError, match="does not match the expected digest"):
+            restore_from_lock(installed, recorded, cache_dir=tmp_path / "fresh-cache")
+        assert not (root / SCRATCH).exists()
+    else:
+        restore_from_lock(installed, recorded, cache_dir=tmp_path / "fresh-cache")
+        assert sha256_file(root / SCRATCH) == lock.files[SCRATCH.as_posix()]
+
+
 def test_restore_refuses_when_the_lock_is_stale(installed: Path) -> None:
     """The adapter now stages a different file than the lock recorded: that
     is an update, not a restore — refuse, write nothing, point at update."""
