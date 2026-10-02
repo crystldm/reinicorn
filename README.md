@@ -309,8 +309,8 @@ up a house skill set the same way.
 
 Whichever skill set (if any) is installed, the generated wiring doc at
 `<skills-dir>/using-reinicorn/references/skillset-wiring.md`
-([here](.agents/skills/using-reinicorn/references/skillset-wiring.md) in this
-repo) maps every registered doc type to its creation command and the skill(s)
+(see [this repo's own wiring doc](.agents/skills/using-reinicorn/references/skillset-wiring.md))
+maps every registered doc type to its creation command and the skill(s)
 to invoke first. With no adapter installed, the creation commands alone are
 the contract; the kb, the templates, the hooks, and the linter all work
 standalone.
