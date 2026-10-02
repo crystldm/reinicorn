@@ -238,17 +238,22 @@ Methodology (brainstorming, planning, TDD, code review, worktrees, and so on)
 comes from a **skill-set adapter** you install:
 
 ```bash
-rcorn skills install superpowers
+rcorn skills install <name>
 ```
 
-This fetches a pinned, kb-compatible build of
-[obra/superpowers](https://github.com/obra/superpowers) — brainstorming,
-writing-plans, executing-plans, test-driven-development,
-systematic-debugging, and the rest of that pack — patched to write docs
-through `rcorn` instead of its own conventions. `rcorn skills list` shows
-bundled adapters, and `rcorn skills status` reports what's installed. You can
-also point `rcorn skills install` at your own adapter definition to wire up
-a house skill set.
+Two adapters are bundled, each a pinned, kb-compatible build patched to write
+docs through `rcorn` instead of its own conventions:
+
+- `superpowers`: [obra/superpowers](https://github.com/obra/superpowers) —
+  brainstorming, writing-plans, executing-plans, test-driven-development,
+  systematic-debugging, and the rest of that pack.
+- `mattpocock-skills`: [mattpocock/skills](https://github.com/mattpocock/skills)
+  — grill-with-docs, to-spec, to-tickets, wayfinder, implement, tdd,
+  code-review, and the rest of the engineering pack.
+
+`rcorn skills list` shows bundled adapters, and `rcorn skills status` reports
+what's installed. You can also point `rcorn skills install` at your own
+adapter definition to wire up a house skill set.
 
 Whichever skill set (if any) is installed, `using-reinicorn`'s generated
 wiring doc

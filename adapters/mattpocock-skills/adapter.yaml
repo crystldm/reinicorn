@@ -1,0 +1,55 @@
+# Bundled adapter: mattpocock/skills, adapted for reinicorn conventions.
+#
+# Installs the engineering (plus one productivity) skills from Matt Pocock's
+# skill set. Patches carry reinicorn-specific edits to upstream prose (the
+# `/setup-matt-pocock-skills` pointers, `rcorn` commands); the `## Reinicorn`
+# trailer sections are append blocks, not patch content, so upstream rebases
+# stay small.
+name: mattpocock-skills
+
+source:
+  repo: mattpocock/skills
+  # v1.2.3 (tag dereferenced to its commit)
+  commit: 6acc160e4e0cd062dbbbd7a1b26ae92855edf07e
+  annotation: v1.2.3
+
+skills:
+  skills/engineering/grill-with-docs: grill-with-docs
+  skills/engineering/to-spec: to-spec
+  skills/engineering/to-tickets: to-tickets
+  skills/engineering/wayfinder: wayfinder
+  skills/engineering/implement: implement
+  skills/engineering/domain-modeling: domain-modeling
+  skills/engineering/research: research
+  skills/engineering/prototype: prototype
+  skills/engineering/tdd: tdd
+  skills/engineering/code-review: code-review
+  skills/engineering/codebase-design: codebase-design
+  skills/productivity/grilling: grilling
+
+# No `excludes`: every file in the twelve selected trees is either the
+# SKILL.md, a companion .md it references, or the small `agents/openai.yaml`
+# harness descriptor. The upstream build scripts, HTML report assets, and
+# shell templates all live under skills this adapter does not select.
+
+patches:
+  - patches/code-review.patch
+  - patches/to-spec.patch
+  - patches/to-tickets.patch
+  - patches/wayfinder.patch
+
+appends:
+  to-spec:
+    - appends/to-spec-reinicorn.md
+  to-tickets:
+    - appends/to-tickets-reinicorn.md
+  wayfinder:
+    - appends/wayfinder-reinicorn.md
+
+# Reinicorn-authored files with no upstream counterpart.
+files:
+  ATTRIBUTION.md: files/ATTRIBUTION.md
+
+wiring:
+  spec: [grill-with-docs, to-spec]
+  plan: [to-tickets, wayfinder, implement]
