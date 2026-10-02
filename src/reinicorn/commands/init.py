@@ -649,10 +649,19 @@ def _copy_lint_config(target_dir: Path) -> None:
     print()
 
     rumdl_src = get_asset_path(".rumdl.toml")
-    if rumdl_src is not None:
-        shutil.copy(rumdl_src, target_dir / ".rumdl.toml")
+    if rumdl_src is None:
+        return
+    rumdl_dest = target_dir / ".rumdl.toml"
+    # .rumdl.toml is a well-known rumdl config name the repo may already own,
+    # so an existing one is kept. is_symlink() covers dangling links, which
+    # exists() misses — and shutil.copy would write through any symlink onto
+    # the file it points at.
+    if rumdl_dest.is_symlink() or rumdl_dest.exists():
+        console.warn("Kept existing .rumdl.toml (not overwritten)")
+    else:
+        shutil.copy(rumdl_src, rumdl_dest)
         console.success("Copied .rumdl.toml")
-        print()
+    print()
 
 
 def _print_full_summary(

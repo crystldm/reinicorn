@@ -291,6 +291,63 @@ def test_init_copies_lint_config(existing_repo: Path, seeded_bare: Path, tmp_pat
     assert (existing_repo / ".rumdl.toml").exists()
 
 
+def _lint_assets(tmp_path: Path) -> Path:
+    r_root = tmp_path / "r_root"
+    (r_root / "linters").mkdir(parents=True)
+    (r_root / "linters" / ".lint-config.json").write_text('{"rules": []}')
+    (r_root / ".rumdl.toml").write_text("[global]\nshipped = true\n")
+    return r_root
+
+
+def _copy_lint_config_from(r_root: Path, target: Path) -> None:
+    from reinicorn.commands.init import _copy_lint_config
+
+    def _resolve(name: str) -> Path | None:
+        p = r_root / name
+        return p if p.exists() else None
+
+    with patch("reinicorn.commands.init.get_asset_path", side_effect=_resolve):
+        _copy_lint_config(target)
+
+
+def test_copy_lint_config_does_not_write_through_rumdl_symlink(tmp_path: Path) -> None:
+    """A .rumdl.toml symlink in the target repo must not redirect the seed
+    write onto the file it points at (CWE-59)."""
+    r_root = _lint_assets(tmp_path)
+    target = tmp_path / "repo"
+    target.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original\n")
+    (target / ".rumdl.toml").symlink_to(outside)
+
+    _copy_lint_config_from(r_root, target)
+
+    assert outside.read_text() == "original\n"
+    assert (target / ".rumdl.toml").is_symlink()
+
+
+def test_copy_lint_config_keeps_existing_rumdl_config(tmp_path: Path) -> None:
+    """A repo's own .rumdl.toml is user configuration — init never clobbers it."""
+    r_root = _lint_assets(tmp_path)
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / ".rumdl.toml").write_text("[global]\nmine = true\n")
+
+    _copy_lint_config_from(r_root, target)
+
+    assert (target / ".rumdl.toml").read_text() == "[global]\nmine = true\n"
+
+
+def test_copy_lint_config_seeds_rumdl_config_when_absent(tmp_path: Path) -> None:
+    r_root = _lint_assets(tmp_path)
+    target = tmp_path / "repo"
+    target.mkdir()
+
+    _copy_lint_config_from(r_root, target)
+
+    assert (target / ".rumdl.toml").read_text() == "[global]\nshipped = true\n"
+
+
 def test_copy_skills_honours_configured_skills_dir(tmp_path: Path) -> None:
     """The native-skill copy destination follows REINICORN_SKILLS_DIR — only
     the packaged asset SOURCE path stays fixed at `.agents/skills`."""
