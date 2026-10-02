@@ -310,6 +310,13 @@ def cmd_update(*, diff_target: str | None = None) -> int:
     # function.
     _regenerate_wiring_doc(repo_root)
 
+    # Seed-only files are checked on every run, not just version changes:
+    # a missing one silently disables its consumer (a false-green lint PASS),
+    # so it must not wait for the next release. A missing asset root is
+    # reported below on the sync path.
+    seed_root = _get_asset_sources()
+    seeded = (0, 0) if seed_root is None else _seed_root_files(seed_root, repo_root)
+
     manifest_version = manifest["reinicorn_version"]
     if manifest_version == pkg_version:
         if legacy_agents_owned:
@@ -333,7 +340,7 @@ def cmd_update(*, diff_target: str | None = None) -> int:
         )
         return 1
 
-    counts = {"updated": 0, "added": 0, "skipped": 0}
+    counts = {"updated": 0, "added": seeded[0], "skipped": seeded[1]}
 
     package_files = _collect_package_files(asset_root, repo_root)
 
@@ -351,18 +358,7 @@ def cmd_update(*, diff_target: str | None = None) -> int:
         dest = repo_root / rel_path
 
         if rel_path in _SEED_FILES:
-            # is_symlink() first: it catches dangling links exists() misses,
-            # and copy2 would write through a link onto its target.
-            if not dest.is_symlink() and not dest.exists():
-                shutil.copy2(src_path, dest)
-                counts["added"] += 1
-            elif dest.is_symlink() or not dest.is_file() or (
-                sha256_file(dest) != sha256_file(src_path)
-            ):
-                console.warn(f"Kept {rel_path} (repo's own; differs from shipped)")
-                print(f"    Run: rcorn update --diff {rel_path}")
-                counts["skipped"] += 1
-            continue
+            continue  # handled by _seed_root_files, before the version check
 
         if rel_path in manifest_files:
             if dest.is_file():
@@ -411,6 +407,32 @@ def cmd_update(*, diff_target: str | None = None) -> int:
     _show_upgrade_notes(asset_root, manifest_version, pkg_version)
 
     return 0
+
+
+def _seed_root_files(asset_root: Path, repo_root: Path) -> tuple[int, int]:
+    """Write each shipped `_SEED_FILES` entry the repo lacks; keep existing ones.
+
+    Returns (added, kept-but-different). is_symlink() is checked first: it
+    catches dangling links exists() misses, and copy2 would write through a
+    link onto its target.
+    """
+    added = kept = 0
+    for name in _SEED_FILES:
+        src = asset_root / name
+        if not src.is_file():
+            continue
+        dest = repo_root / name
+        if not dest.is_symlink() and not dest.exists():
+            shutil.copy2(src, dest)
+            console.success(f"Seeded {name}")
+            added += 1
+        elif dest.is_symlink() or not dest.is_file() or (
+            sha256_file(dest) != sha256_file(src)
+        ):
+            console.warn(f"Kept {name} (repo's own; differs from shipped)")
+            print(f"    Run: rcorn update --diff {name}")
+            kept += 1
+    return added, kept
 
 
 def _collect_package_files(asset_root: Path, repo_root: Path) -> dict[str, Path]:
