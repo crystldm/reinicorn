@@ -147,6 +147,24 @@ def test_restore_with_nothing_missing_does_not_fetch(
     assert fake_skillset_fetch == []
 
 
+def test_restore_with_files_complete_still_repairs_wiring_doc_and_link(
+    installed: Path, fake_skillset_fetch
+) -> None:
+    """Every skill file present but the generated artifacts deleted: restore
+    repairs them without fetching, rather than reporting "complete" over a
+    wiring doc and link that are not there."""
+    lock = read_lock(installed)
+    assert lock is not None
+    wiring_doc_path(installed).unlink()
+    (installed / ".claude" / "skills").unlink()
+
+    assert restore_from_lock(installed, lock, cache_dir=installed / "cache") == []
+
+    assert "alpha" in wiring_doc_path(installed).read_text()
+    assert (installed / ".claude" / "skills").is_symlink()
+    assert fake_skillset_fetch == []
+
+
 def _fetch_for_real_from(tarball: Path, monkeypatch) -> None:
     """Undo `fake_skillset_fetch` for restore: the real `fetch_source`, with
     the "network" pointed at a local tarball of the fixture tree."""
@@ -254,6 +272,16 @@ def test_ensure_with_everything_present_is_silent(installed: Path, capsys) -> No
     capsys.readouterr()
     assert ensure_adapter_files(installed) is RestoreOutcome.COMPLETE
     assert capsys.readouterr().out == ""
+
+
+def test_ensure_with_files_complete_repairs_a_deleted_wiring_doc(
+    installed: Path, fake_skillset_fetch
+) -> None:
+    wiring_doc_path(installed).unlink()
+
+    assert ensure_adapter_files(installed) is RestoreOutcome.COMPLETE
+    assert "alpha" in wiring_doc_path(installed).read_text()
+    assert fake_skillset_fetch == []
 
 
 def test_ensure_restores_and_reports(installed: Path, capsys) -> None:

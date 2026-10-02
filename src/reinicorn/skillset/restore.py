@@ -30,13 +30,13 @@ from pathlib import Path
 
 from reinicorn import console
 from reinicorn.assets import get_asset_path
-from reinicorn.config import skills_dir
+from reinicorn.config import skills_dir, skills_link
 from reinicorn.skillset.adapter import Adapter, AdapterError, load_adapter
 from reinicorn.skillset.engine import build_staging
 from reinicorn.skillset.fetch import default_cache_dir, fetch_source
 from reinicorn.skillset.installer import maintain_link
 from reinicorn.skillset.lockfile import SKILLSET_LOCK_PATH, SkillsetLock, read_lock
-from reinicorn.skillset.wiring import write_wiring
+from reinicorn.skillset.wiring import wiring_doc_path, write_wiring
 
 
 class RestoreOutcome(Enum):
@@ -108,11 +108,13 @@ def restore_from_lock(
     Fetches the lock's pinned source (digest-checked against the lock),
     rebuilds the adapter's staging tree, and copies only the missing files.
     Also regenerates the wiring doc and the compatibility link, which a
-    fresh clone lacks for the same reason. The lock itself is never
+    fresh clone lacks for the same reason; with no file missing, those two are still repaired if absent
+    (see `repair_generated`), without a fetch. The lock itself is never
     rewritten — it is the record being restored from. Raises `AdapterError`.
     """
     missing = missing_files(repo_root, lock)
     if not missing:
+        repair_generated(repo_root, lock)
         return []
 
     adapter = locked_adapter(lock)
@@ -173,6 +175,24 @@ def restore_from_lock(
     return missing
 
 
+def repair_generated(repo_root: Path, lock: SkillsetLock) -> None:
+    """Regenerate the wiring doc and the compatibility link if either is absent.
+
+    No fetch: both derive from the lock and the configuration alone. Only
+    an absent artifact is touched — a present wiring doc or link (correct,
+    stale, or a real directory) is left to `rcorn update`/`rcorn skills
+    install <adapter>`, so the every-checkout path stays silent when
+    nothing is missing.
+    """
+    if not wiring_doc_path(repo_root).exists():
+        write_wiring(repo_root, lock.wiring)
+    link_rel = skills_link(repo_root)
+    if link_rel is not None:
+        link = repo_root / link_rel
+        if not link.exists() and not link.is_symlink():
+            maintain_link(repo_root)
+
+
 def ensure_adapter_files(
     repo_root: Path, *, cache_dir: Path | None = None
 ) -> RestoreOutcome:
@@ -189,6 +209,16 @@ def ensure_adapter_files(
         return RestoreOutcome.NO_LOCK
     missing = missing_files(repo_root, lock)
     if not missing:
+        try:
+            repair_generated(repo_root, lock)
+        except (AdapterError, OSError) as exc:
+            console.warn(
+                f"Could not regenerate the '{lock.adapter}' wiring doc or "
+                f"skills link: {exc}\n"
+                f"  How to fix: resolve the cause above, then run "
+                f"'rcorn skills install' (no argument) to retry."
+            )
+            return RestoreOutcome.FAILED
         return RestoreOutcome.COMPLETE
 
     console.info(
