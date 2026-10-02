@@ -15,7 +15,7 @@ from reinicorn.commands.skills_cmds import (
     cmd_skills_status,
     cmd_skills_update,
 )
-from reinicorn.skillset import installer
+from reinicorn.skillset import installer, restore
 from reinicorn.skillset.lockfile import read_lock
 
 FIXTURE_ROOT = Path(__file__).parent.parent / "skillset" / "fixtures" / "upstream-tree"
@@ -70,6 +70,7 @@ def fetch_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         return tree, f"digest-{source.commit}"
 
     monkeypatch.setattr(installer, "fetch_source", fake_fetch)
+    monkeypatch.setattr(restore, "fetch_source", fake_fetch)
     return calls
 
 
@@ -359,3 +360,85 @@ def test_list_prints_bundled_adapters_and_warns_on_broken_ones(
     assert "demo" in out
     assert "acme/skills" in out
     assert "broken" in out  # warned, not crashed
+
+
+# --- install with no argument: restore from the committed lock ---------------
+
+
+def _install_demo_then_delete(
+    tmp_path: Path, project: Path, rel: str, monkeypatch
+) -> Path:
+    """Install the demo adapter by path, delete one file, chdir so the lock's
+    adapter name re-resolves as ./demo. Returns the deleted file's path."""
+    adapter_dir = make_adapter_dir(tmp_path, "demo", DEMO_YAML)
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project):
+        assert cmd_skills_install(str(adapter_dir)) == 0
+    target = project / ".agents" / "skills" / rel
+    target.unlink()
+    monkeypatch.chdir(tmp_path)
+    return target
+
+
+def test_install_without_argument_restores_missing_files_from_lock(
+    tmp_path: Path, project: Path, fetch_calls, monkeypatch, capsys
+) -> None:
+    target = _install_demo_then_delete(tmp_path, project, "alpha/scratch.md", monkeypatch)
+    lock_before = read_lock(project)
+    capsys.readouterr()
+
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project):
+        result = cmd_skills_install(None)
+
+    assert result == 0
+    assert target.is_file()
+    assert read_lock(project) == lock_before
+    out = capsys.readouterr().out
+    assert "Restored" in out
+    assert "demo" in out
+    assert COMMIT_A[:12] in out
+
+
+def test_install_without_argument_and_nothing_missing_succeeds_quietly(
+    tmp_path: Path, project: Path, fetch_calls, monkeypatch, capsys
+) -> None:
+    adapter_dir = make_adapter_dir(tmp_path, "demo", DEMO_YAML)
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project):
+        assert cmd_skills_install(str(adapter_dir)) == 0
+        monkeypatch.chdir(tmp_path)
+        fetch_calls.clear()
+        capsys.readouterr()
+        result = cmd_skills_install(None)
+
+    assert result == 0
+    assert fetch_calls == []
+    assert "demo" in capsys.readouterr().out
+
+
+def test_install_without_argument_and_no_lock_errors_with_bundled_names(
+    tmp_path: Path, project: Path, capsys
+) -> None:
+    adapters_dir = tmp_path / "adapters"
+    make_adapter_dir(adapters_dir, "demo", DEMO_YAML)
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project), \
+         patch("reinicorn.commands.skills_cmds.get_asset_path", return_value=adapters_dir):
+        result = cmd_skills_install(None)
+
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "skillset-lock.json" in out
+    assert "demo" in out
+    assert read_lock(project) is None
+
+
+def test_install_without_argument_surfaces_restore_errors(
+    tmp_path: Path, project: Path, fetch_calls, monkeypatch, capsys
+) -> None:
+    _install_demo_then_delete(tmp_path, project, "alpha/scratch.md", monkeypatch)
+    monkeypatch.chdir(project)  # no ./demo here: the lock's adapter is unresolvable
+    capsys.readouterr()
+
+    with patch("reinicorn.commands.skills_cmds.repo_root", return_value=project):
+        result = cmd_skills_install(None)
+
+    assert result == 1
+    assert "not a bundled adapter" in capsys.readouterr().out

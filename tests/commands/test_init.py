@@ -446,3 +446,39 @@ def test_cli_init_dispatches_with_flags():
         slug=None,
         platforms_raw=None,
     )
+
+
+def test_init_teammate_clone_restores_adapter_files_from_lock(
+    kb_repo: Path, tmp_path: Path, fake_skillset_fetch, monkeypatch
+):
+    """The hooks-only teammate path also brings back the lock's skill files,
+    so a fresh clone is usable after `rcorn init` alone."""
+    from reinicorn.skillset import installer
+    from reinicorn.skillset.adapter import load_adapter
+
+    manifest = kb_repo / ".reinicorn" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text('{"reinicorn_version": "0.0.0", "files": {}}')
+    adapter_dir = kb_repo / "demo"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter.yaml").write_text(
+        "name: demo\n"
+        "source:\n"
+        "  repo: acme/skills\n"
+        "  commit: 0123456789abcdef0123456789abcdef01234567\n"
+        "  annotation: v1.0.0\n"
+        "skills:\n"
+        "  skills/alpha: alpha\n"
+        "wiring:\n"
+        "  spec: [alpha]\n"
+    )
+    installer.install_adapter(load_adapter(adapter_dir), kb_repo, cache_dir=tmp_path / "cache")
+    scratch = kb_repo / ".agents" / "skills" / "alpha" / "scratch.md"
+    scratch.unlink()
+    monkeypatch.chdir(kb_repo)
+
+    with patch("reinicorn.commands.init.cmd_hooks_install", return_value=0):
+        result = cmd_init(cwd=kb_repo)
+
+    assert result == 0
+    assert scratch.is_file()

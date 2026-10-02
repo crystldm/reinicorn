@@ -20,6 +20,7 @@ from reinicorn.manifest import (
 from reinicorn.skillset.adapter import Adapter, AdapterError, load_adapter
 from reinicorn.skillset.installer import install_adapter
 from reinicorn.skillset.lockfile import read_lock
+from reinicorn.skillset.restore import ensure_adapter_files
 from reinicorn.skillset.wiring import wiring_doc_path, write_wiring
 
 _SUPERPOWERS_ADAPTER = "superpowers"
@@ -293,6 +294,12 @@ def cmd_update(*, diff_target: str | None = None) -> int:
     # keyed on the manifest and lockfile, not on whether there's anything
     # else to sync).
     _maybe_migrate_legacy_forks(repo_root, manifest, manifest_files)
+
+    # A committed lockfile with gitignored skill files is the normal shape
+    # of a fresh clone or new worktree: bring the files back here, before
+    # the version-equality early return, so an up-to-date repo still gets
+    # them. Reports and continues on failure — offline must not fail update.
+    ensure_adapter_files(repo_root)
 
     # Runs unconditionally, before the version-equality branch below, so
     # both exit paths — "Already up to date" and a full sync — regenerate

@@ -221,3 +221,37 @@ def kb_clone_repo(tmp_path: Path) -> Path:
     run_git("config", "user.name", "Test User", cwd=kb)
     run_git("config", "protocol.file.allow", "always", cwd=kb)
     return parent
+
+
+SKILLSET_FIXTURE_TREE = Path(__file__).parent / "skillset" / "fixtures" / "upstream-tree"
+
+
+@pytest.fixture
+def fake_skillset_fetch(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Replace every skillset `fetch_source` with a local fixture-tree copier.
+
+    Patches the name in both modules that fetch (`installer` for install /
+    update, `restore` for restore-from-lock) so a test can install an
+    adapter and then restore it without ever touching the network. Each
+    call extracts a fresh copy into its own temp directory, exactly like
+    the real fetch. Returns the list of calls (commit, expected_digest).
+    """
+    import shutil
+    import tempfile
+
+    from reinicorn.skillset import installer, restore
+
+    calls: list[dict[str, object]] = []
+
+    def fake_fetch(
+        source, cache_dir: Path, *, expected_digest: str | None = None
+    ) -> tuple[Path, str]:
+        parent = Path(tempfile.mkdtemp(prefix="reinicorn-test-fetch-"))
+        tree = parent / f"acme-skills-{source.commit[:7]}"
+        shutil.copytree(SKILLSET_FIXTURE_TREE, tree)
+        calls.append({"commit": source.commit, "expected_digest": expected_digest})
+        return tree, f"digest-{source.commit}"
+
+    monkeypatch.setattr(installer, "fetch_source", fake_fetch)
+    monkeypatch.setattr(restore, "fetch_source", fake_fetch)
+    return calls

@@ -165,7 +165,13 @@ def _build_parser() -> argparse.ArgumentParser:
     skills_sub.required = True
     skills_install_p = skills_sub.add_parser("install", help="Install a skill-set adapter")
     skills_install_p.add_argument(
-        "adapter", help="Bundled adapter name or path to an adapter directory"
+        "adapter",
+        nargs="?",
+        default=None,
+        help=(
+            "Bundled adapter name or path to an adapter directory; omit to "
+            "restore the adapter the committed lockfile records"
+        ),
     )
     skills_sub.add_parser("status", help="Installed adapter, pin, and local drift")
     skills_update_p = skills_sub.add_parser(

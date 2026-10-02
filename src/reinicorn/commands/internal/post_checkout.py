@@ -12,6 +12,7 @@ from reinicorn.identity import TICKET_PATTERN_KEY
 from reinicorn.kb import checkout_kb_main, get_kb_dir
 from reinicorn.kb_remote import apply_kb_remote_url, resolve_kb_remote_url
 from reinicorn.mode import hook_check
+from reinicorn.skillset.restore import ensure_adapter_files
 from reinicorn.validation import validate_git_url
 
 if TYPE_CHECKING:
@@ -106,6 +107,16 @@ def cmd_post_checkout(args: list[str]) -> int:
     # Ensure kb exists (fresh clone / new worktree only)
     if get_kb_dir(root) is None and resolve_kb_remote_url(root):
         _init_kb(root)
+
+    # Same situation for adapter-installed skills: the lock is committed,
+    # the files may be gitignored. `ensure_adapter_files` reports its own
+    # AdapterErrors; the guard here is for anything else — a hook that
+    # raises fails the user's checkout, and missing skills are recoverable.
+    try:
+        ensure_adapter_files(root)
+    except Exception as e:
+        console.warn(f"Could not restore adapter skill files: {e}")
+        console.next_step("rcorn skills install")
 
     # New branch detection
     branch = current_branch()
