@@ -103,12 +103,14 @@ def missing_files(repo_root: Path, lock: SkillsetLock) -> list[str]:
 def restore_from_lock(
     repo_root: Path, lock: SkillsetLock, *, cache_dir: Path | None = None
 ) -> list[str]:
-    """Write back every lock-recorded file missing from disk; return those paths.
+    """Write back every lock-recorded file missing from disk; return those created.
 
     Fetches the lock's pinned source (digest-checked against the lock),
-    rebuilds the adapter's staging tree, and copies only the missing files.
-    Also regenerates the wiring doc and the compatibility link, which a
-    fresh clone lacks for the same reason; with no file missing, those two are still repaired if absent
+    rebuilds the adapter's staging tree, and creates only the missing files
+    — each exclusively, so a file that appeared after the missing list was
+    computed is left alone and not reported. Also regenerates the wiring
+    doc and the compatibility link, which a fresh clone lacks for the same
+    reason; with no file missing, those two are still repaired if absent
     (see `repair_generated`), without a fetch. The lock itself is never
     rewritten — it is the record being restored from. Raises `AdapterError`.
     """
@@ -153,11 +155,11 @@ def restore_from_lock(
                 f"adapter and refresh the lock."
             )
 
+        created: list[str] = []
         try:
             for rel in missing:
-                target = skills_root / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(work / "staging" / rel, target)
+                if _create_exclusively(work / "staging" / rel, skills_root / rel):
+                    created.append(rel)
         except OSError as exc:
             raise AdapterError(
                 f"Adapter '{lock.adapter}': failed while restoring into "
@@ -172,7 +174,32 @@ def restore_from_lock(
 
     write_wiring(repo_root, lock.wiring)
     maintain_link(repo_root)
-    return missing
+    return created
+
+
+def _create_exclusively(source: Path, target: Path) -> bool:
+    """Copy *source* to *target* only if nothing is at *target*; True if created.
+
+    The existence check and the creation are one atomic step (`O_EXCL`), so
+    a file someone else creates between `missing_files` and this write is
+    never overwritten. The staged file's mode is carried over, as `copy2`
+    did. A partially written target is removed before the error propagates,
+    so a failed restore never leaves a truncated file that a retry would
+    then treat as present.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        out = target.open("xb")
+    except FileExistsError:
+        return False
+    try:
+        with out, source.open("rb") as src:
+            shutil.copyfileobj(src, out)
+        shutil.copymode(source, target)
+    except OSError:
+        target.unlink(missing_ok=True)
+        raise
+    return True
 
 
 def repair_generated(repo_root: Path, lock: SkillsetLock) -> None:

@@ -165,6 +165,48 @@ def test_restore_with_files_complete_still_repairs_wiring_doc_and_link(
     assert fake_skillset_fetch == []
 
 
+def test_restore_never_overwrites_a_file_created_while_it_was_staging(
+    installed: Path, monkeypatch
+) -> None:
+    """A file that appears at a missing path after the missing list was
+    computed (a user, or a concurrent command) is theirs: restore leaves its
+    content alone and does not report the path as restored."""
+    from reinicorn.skillset import restore as restore_mod
+
+    lock = read_lock(installed)
+    assert lock is not None
+    root = _skills_root(installed)
+    (root / SCRATCH).unlink()
+    (root / BETA_TEMPLATE).unlink()
+
+    real_build_staging = restore_mod.build_staging
+
+    def staging_then_concurrent_write(*args, **kwargs):
+        hashes = real_build_staging(*args, **kwargs)
+        (root / SCRATCH).write_text("# written concurrently\n")
+        return hashes
+
+    monkeypatch.setattr(restore_mod, "build_staging", staging_then_concurrent_write)
+
+    restored = restore_from_lock(installed, lock, cache_dir=installed / "cache")
+
+    assert (root / SCRATCH).read_text() == "# written concurrently\n"
+    assert restored == [BETA_TEMPLATE.as_posix()]
+    assert sha256_file(root / BETA_TEMPLATE) == lock.files[BETA_TEMPLATE.as_posix()]
+
+
+def test_restore_preserves_the_staged_file_mode(installed: Path) -> None:
+    lock = read_lock(installed)
+    assert lock is not None
+    root = _skills_root(installed)
+    original_mode = (root / SCRATCH).stat().st_mode
+    (root / SCRATCH).unlink()
+
+    restore_from_lock(installed, lock, cache_dir=installed / "cache")
+
+    assert (root / SCRATCH).stat().st_mode == original_mode
+
+
 def _fetch_for_real_from(tarball: Path, monkeypatch) -> None:
     """Undo `fake_skillset_fetch` for restore: the real `fetch_source`, with
     the "network" pointed at a local tarball of the fixture tree."""
