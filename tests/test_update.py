@@ -481,6 +481,83 @@ def test_update_diff_does_not_migrate_submodule_layout(
     assert (submodule_repo / "kb" / ".git").is_file()
 
 
+def test_update_adds_rumdl_config_to_existing_install(tmp_path: Path) -> None:
+    """An install that predates the docs/markdown rule has no .rumdl.toml;
+    update must seed it, else the rule skips and reports a false PASS."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    assets = _setup_package_assets(tmp_path)
+    (assets / ".rumdl.toml").write_text("[global]\nshipped = true\n")
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        assert cmd_update() == 0
+
+    assert (repo / ".rumdl.toml").read_text() == "[global]\nshipped = true\n"
+
+
+def test_update_keeps_repo_owned_rumdl_config_across_updates(
+    tmp_path: Path, capsys
+) -> None:
+    """A repo's own .rumdl.toml is kept — on this update and the next one
+    (a disk-baselined manifest entry would make the second update clobber it)."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    (repo / ".rumdl.toml").write_text("[global]\nmine = true\n")
+    assets = _setup_package_assets(tmp_path)
+    (assets / ".rumdl.toml").write_text("[global]\nshipped = true\n")
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        assert cmd_update() == 0
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.3.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        assert cmd_update() == 0
+
+    assert (repo / ".rumdl.toml").read_text() == "[global]\nmine = true\n"
+    assert "Kept .rumdl.toml" in capsys.readouterr().out
+
+
+def test_update_seeds_rumdl_config_when_already_up_to_date(tmp_path: Path) -> None:
+    """Seeding does not wait for a version change: a current install missing
+    .rumdl.toml would otherwise report a false PASS until the next release."""
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path, version="0.2.0")
+    assets = _setup_package_assets(tmp_path)
+    (assets / ".rumdl.toml").write_text("[global]\nshipped = true\n")
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        assert cmd_update() == 0
+
+    assert (repo / ".rumdl.toml").read_text() == "[global]\nshipped = true\n"
+
+
+def test_update_does_not_write_through_rumdl_symlink(tmp_path: Path) -> None:
+    from reinicorn.commands.update import cmd_update
+
+    repo = _setup_repo_with_manifest(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original\n")
+    (repo / ".rumdl.toml").symlink_to(outside)
+    assets = _setup_package_assets(tmp_path)
+    (assets / ".rumdl.toml").write_text("[global]\nshipped = true\n")
+
+    with patch("reinicorn.commands.update._get_package_version", return_value="0.2.0"), \
+         patch("reinicorn.commands.update._get_repo_root", return_value=repo), \
+         patch("reinicorn.commands.update._get_asset_sources", return_value=assets):
+        assert cmd_update() == 0
+
+    assert outside.read_text() == "original\n"
+
+
 def test_update_never_reclaims_user_owned_maps(tmp_path: Path) -> None:
     from reinicorn.commands.update import cmd_update
 

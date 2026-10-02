@@ -638,7 +638,7 @@ def _install_session_hook(target_dir: Path) -> None:
 
 
 def _copy_lint_config(target_dir: Path) -> None:
-    """Copy linters/ directory to the target repo."""
+    """Copy linters/ directory and the markdown lint config to the target repo."""
     lint_src = get_asset_path("linters")
     if lint_src is None:
         return
@@ -646,6 +646,21 @@ def _copy_lint_config(target_dir: Path) -> None:
     lint_dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(lint_src, lint_dest, dirs_exist_ok=True)
     console.success("Copied linters/ config")
+    print()
+
+    rumdl_src = get_asset_path(".rumdl.toml")
+    if rumdl_src is None:
+        return
+    rumdl_dest = target_dir / ".rumdl.toml"
+    # .rumdl.toml is a well-known rumdl config name the repo may already own,
+    # so an existing one is kept. is_symlink() covers dangling links, which
+    # exists() misses — and shutil.copy would write through any symlink onto
+    # the file it points at.
+    if rumdl_dest.is_symlink() or rumdl_dest.exists():
+        console.warn("Kept existing .rumdl.toml (not overwritten)")
+    else:
+        shutil.copy(rumdl_src, rumdl_dest)
+        console.success("Copied .rumdl.toml")
     print()
 
 

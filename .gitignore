@@ -35,3 +35,6 @@ htmlcov/
 # Local git worktrees
 .worktrees/
 kb/
+
+# Local agent-session scratch
+.superpowers/
