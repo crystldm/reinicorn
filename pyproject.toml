@@ -64,7 +64,16 @@ packages = ["src/reinicorn"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "templates/AGENTS.md" = "reinicorn/_data/templates/AGENTS.md"
-".agents/skills" = "reinicorn/_data/skills"
+# Native skills only, as an explicit allowlist: force-include copies straight
+# off disk (it is not git-filtered and ignores `exclude`), so mapping all of
+# `.agents/skills` would ship whatever adapter-installed skills a dogfooding
+# checkout has restored from its committed skillset lock. The generated
+# `using-reinicorn/references/skillset-wiring.md` is deliberately absent — it
+# is rendered per project, never shipped. tests/test_packaging.py asserts this
+# list matches the git-tracked native files, so a new one cannot be dropped.
+".agents/skills/populate-agents-md" = "reinicorn/_data/skills/populate-agents-md"
+".agents/skills/using-reinicorn/SKILL.md" = "reinicorn/_data/skills/using-reinicorn/SKILL.md"
+".agents/skills/using-reinicorn/references/codex-tools.md" = "reinicorn/_data/skills/using-reinicorn/references/codex-tools.md"
 "hooks" = "reinicorn/_data/hooks"
 "editor-hooks" = "reinicorn/_data/editor-hooks"
 "linters" = "reinicorn/_data/linters"

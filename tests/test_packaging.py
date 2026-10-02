@@ -89,26 +89,45 @@ def test_sdist_contains_everything_needed_to_build(
         )
 
 
-@pytest.fixture(scope="module")
-def wheel_data_skill_dirs(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
-    """Build the wheel from a clean `git worktree` at HEAD and return the
-    top-level directory names under `reinicorn/_data/skills/`.
+# Generated per project by `rcorn update`/`rcorn skills` from the project's
+# own lock (see `reinicorn.manifest._generated_paths`). Reinicorn's repo
+# commits its copy, but the package must never ship it: a user repo would
+# receive reinicorn's own adapter wiring instead of its own.
+GENERATED_WIRING_DOC = "using-reinicorn/references/skillset-wiring.md"
 
-    The wheel's `force-include` maps `.agents/skills` straight off the
-    filesystem (unlike the sdist, it is not git-filtered), so building
-    from REPO_ROOT directly would sweep in whatever is actually on disk —
-    including gitignored, adapter-installed skills dogfed into this very
-    checkout (`.agents/skills/*` is gitignored except `using-reinicorn/`
-    and `populate-agents-md/`, see .gitignore). A worktree checked out at
-    HEAD reflects only what's git-tracked, matching a real release build
-    and staying green regardless of what's dogfed locally or in CI.
+# Stand-ins for what `rcorn skills install` / the post-checkout restore put
+# on disk in a dogfooding checkout: gitignored, adapter-installed files.
+DOGFOOD_ADAPTER_FILES = ("ATTRIBUTION.md", "brainstorming/SKILL.md")
+
+
+@pytest.fixture(scope="module")
+def wheel_data_skill_files(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
+    """Build the wheel from a dogfooding-shaped checkout and return the file
+    paths under `reinicorn/_data/skills/`, relative to it.
+
+    The checkout is a `git worktree` at HEAD (hooks disabled, so the result
+    does not depend on whether this machine has reinicorn's hooks
+    installed) with adapter-installed files planted under `.agents/skills/`
+    — exactly what a restore from the committed skillset lock leaves on
+    disk. The wheel's `force-include` maps paths straight off the
+    filesystem (unlike the sdist, it is not git-filtered), so only an
+    explicit native allowlist keeps those files out of a release build.
     """
     if shutil.which("uv") is None:
         pytest.skip("uv not available to build the wheel")
 
     worktree_dir = tmp_path_factory.mktemp("wheel_worktree") / "src"
     add_result = subprocess.run(
-        ["git", "worktree", "add", "--detach", str(worktree_dir), "HEAD"],
+        [
+            "git",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "worktree",
+            "add",
+            "--detach",
+            str(worktree_dir),
+            "HEAD",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -118,6 +137,11 @@ def wheel_data_skill_dirs(tmp_path_factory: pytest.TempPathFactory) -> list[str]
         pytest.skip(f"git worktree add failed in this environment:\n{add_result.stderr}")
 
     try:
+        for rel in DOGFOOD_ADAPTER_FILES:
+            planted = worktree_dir / ".agents" / "skills" / rel
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.write_text("adapter-installed\n")
+
         out_dir = tmp_path_factory.mktemp("wheel_out")
         build_result = subprocess.run(
             ["uv", "build", "--wheel", "--out-dir", str(out_dir)],
@@ -145,19 +169,38 @@ def wheel_data_skill_dirs(tmp_path_factory: pytest.TempPathFactory) -> list[str]
 
     prefix = "reinicorn/_data/skills/"
     return sorted(
-        {
-            name[len(prefix) :].split("/")[0]
-            for name in names
-            if name.startswith(prefix) and len(name) > len(prefix)
-        }
+        name[len(prefix) :]
+        for name in names
+        if name.startswith(prefix) and not name.endswith("/")
     )
 
 
 def test_wheel_data_skills_contains_only_native_skills(
-    wheel_data_skill_dirs: list[str],
+    wheel_data_skill_files: list[str],
 ) -> None:
-    """The wheel ships only the two native (non-adapter) skills. Anything
-    else means a dogfed, adapter-installed skill leaked into the build —
-    see `wheel_data_skill_dirs`'s docstring for why this must build from a
-    clean worktree rather than REPO_ROOT directly."""
-    assert wheel_data_skill_dirs == ["populate-agents-md", "using-reinicorn"]
+    """The wheel ships only the two native (non-adapter) skills, even when
+    adapter-installed files sit on disk next to them. Anything else means
+    a dogfed, adapter-installed skill leaked into the build."""
+    top_level = sorted({rel.split("/")[0] for rel in wheel_data_skill_files})
+    assert top_level == ["populate-agents-md", "using-reinicorn"]
+
+
+def test_wheel_data_skills_ships_exactly_the_tracked_native_files(
+    wheel_data_skill_files: list[str],
+) -> None:
+    """Every git-tracked native skill file ships — so the native allowlist
+    in pyproject.toml cannot silently drop a new one — and the generated
+    wiring doc, though committed in this repo, does not."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", ".agents/skills"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    expected = sorted(
+        rel.removeprefix(".agents/skills/")
+        for rel in tracked
+        if rel.removeprefix(".agents/skills/") != GENERATED_WIRING_DOC
+    )
+    assert wheel_data_skill_files == expected
