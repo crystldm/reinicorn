@@ -41,3 +41,33 @@ def test_every_create_path_births_a_lint_clean_doc(kb_repo: Path, capsys):
         assert cmd_doc_create("retro", "") == 0
 
     assert FrontmatterRule().run(kb_repo) == []
+
+
+def test_a_freshly_seeded_kb_scope_is_lint_clean(tmp_path: Path):
+    """`rcorn init` seeds a kb scope; the result must pass the lint that
+    guards it before anyone has written a doc (the seed is a create path too)."""
+    from reinicorn.kb_seed import generate_seed_tree
+
+    generate_seed_tree(tmp_path / "kb", "seeded")
+
+    assert FrontmatterRule().run(tmp_path) == []
+
+
+def test_principle_add_heals_a_bare_principles_file(kb_repo: Path):
+    """Kbs seeded before the fix hold a frontmatter-less golden-principles.md;
+    `principle add` appends to it and must leave a lint-clean doc, keeping
+    what the team already wrote."""
+    target = kb_repo / "kb" / "testproject" / "golden-principles.md"
+    target.write_text("# Golden Principles\n\n1. **Existing rule**\n   - kept\n")
+
+    with patch("reinicorn.kb.kb_scope", return_value="testproject"), \
+         patch("reinicorn.commands.doc_create.repo_root", return_value=kb_repo), \
+         patch("reinicorn.commands.doc_create.run_git", return_value=_GIT_USER), \
+         patch("reinicorn.commands.doc_create.commit_kb"), \
+         patch("reinicorn.commands.doc_create.kb_scope", return_value="testproject"):
+        assert cmd_doc_create("principle", "New rule") == 0
+
+    text = target.read_text()
+    assert FrontmatterRule().run(kb_repo) == []
+    assert "**Existing rule**" in text and "2. **New rule**" in text
+    assert text.count("# Golden Principles") == 1

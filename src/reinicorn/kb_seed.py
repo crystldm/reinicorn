@@ -52,9 +52,12 @@ def generate_seed_tree(root: Path, repo_slug: str) -> None:
     for sub in ("active", "completed", "_template"):
         (scope / plan_dir / sub).mkdir(parents=True, exist_ok=True)
 
-    # Golden principles (blank template)
-    (scope / "golden-principles.md").write_text(
-        "# Golden Principles\n\n"
+    # Golden principles (blank template). The header comes from the same
+    # renderer `principle add` uses, so a fresh kb passes kb/frontmatter.
+    from reinicorn.commands.doc_create import render_principles_header
+
+    (scope / REGISTRY["principle"].filename).write_text(
+        render_principles_header() + "\n"
         "> Universal, enforceable rules that keep the codebase legible.\n"
         "> Add principles as the team discovers what matters.\n\n"
         "<!-- No principles defined yet. Add your first one! -->\n"

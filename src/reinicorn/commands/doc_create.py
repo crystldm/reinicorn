@@ -133,16 +133,37 @@ def _branch_target(dt: DocType, repo_dir: Path, branch: str) -> Path:
     return branch_doc_path(dt.key, repo_dir, branch)
 
 
+_PRINCIPLES_TITLE = "Golden Principles"
+
+
+def render_principles_header(author: str | None = None) -> str:
+    """Frontmatter + H1 that open golden-principles.md.
+
+    The one rendering both writers of the file share — the kb seed
+    (`rcorn init`) and `principle add` — so neither can produce a file the
+    `kb/frontmatter` rule rejects.
+    """
+    dt = REGISTRY["principle"]
+    return _provenance(
+        _PRINCIPLES_TITLE, author or _get_author() or "unknown",
+        status=dt.create_status, doc_type=dt.key,
+        extra={"slug": Path(dt.filename).stem},
+    )
+
+
 def _append_doc(dt: DocType, repo_dir: Path, title: str, author: str) -> Path:
     """CreateMode.APPEND: add one templated item to the singleton file."""
     target = repo_dir / dt.filename
     if not target.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_provenance(
-            "Golden Principles", author or "unknown",
-            status=dt.create_status, doc_type=dt.key,
-            extra={"slug": target.stem},
-        ) + "\n")
+        target.write_text(render_principles_header(author) + "\n")
+    else:
+        meta, body = frontmatter.parse(target.read_text())
+        if not meta:
+            # Seeded before the seed carried frontmatter: give the file its
+            # header, keeping everything the team wrote below the old H1.
+            body = body.removeprefix(f"# {_PRINCIPLES_TITLE}\n")
+            target.write_text(render_principles_header(author) + body)
     content = target.read_text()
     num = len(re.findall(r"^\d+\.", content, re.MULTILINE)) + 1
     target.write_text(
