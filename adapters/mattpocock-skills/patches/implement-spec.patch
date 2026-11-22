@@ -1,0 +1,13 @@
+diff --git a/skills/engineering/implement-spec/SKILL.md b/skills/engineering/implement-spec/SKILL.md
+index 77bf59b..df5609a 100644
+--- a/skills/engineering/implement-spec/SKILL.md
++++ b/skills/engineering/implement-spec/SKILL.md
+@@ -6,7 +6,7 @@ disable-model-invocation: true
+ 
+ You have been provided a spec. This spec should have tickets associated with it, describing how to implement the spec.
+ 
+-The issue tracker should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.
++The issue tracker should have been provided to you. If not, read `docs/agents/issue-tracker.md`. In a Reinicorn-managed repo the spec may be a kb doc: read it with `rcorn spec show <slug> --full`.
+ 
+ The goal is the entire spec implemented on a single **integration branch**, with every ticket resolved the way the issue tracker closes work.
+ 

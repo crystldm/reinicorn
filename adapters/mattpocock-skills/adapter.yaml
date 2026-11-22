@@ -9,9 +9,9 @@ name: mattpocock-skills
 
 source:
   repo: mattpocock/skills
-  # v1.2.3 (tag dereferenced to its commit)
-  commit: 6acc160e4e0cd062dbbbd7a1b26ae92855edf07e
-  annotation: v1.2.3
+  # v1.3.2 (tag dereferenced to its commit)
+  commit: d1478fcb140db0b93c0c8df17bcfd311844749d0
+  annotation: v1.3.2
 
 skills:
   skills/engineering/grill-with-docs: grill-with-docs
@@ -19,21 +19,25 @@ skills:
   skills/engineering/to-tickets: to-tickets
   skills/engineering/wayfinder: wayfinder
   skills/engineering/implement: implement
+  skills/engineering/implement-spec: implement-spec
   skills/engineering/domain-modeling: domain-modeling
   skills/engineering/research: research
   skills/engineering/prototype: prototype
   skills/engineering/tdd: tdd
   skills/engineering/code-review: code-review
   skills/engineering/codebase-design: codebase-design
+  skills/engineering/pr: pr
+  skills/engineering/retro: retro
   skills/productivity/grilling: grilling
 
-# No `excludes`: every file in the twelve selected trees is either the
+# No `excludes`: every file in the fifteen selected trees is either the
 # SKILL.md, a companion .md it references, or the small `agents/openai.yaml`
 # harness descriptor. The upstream build scripts, HTML report assets, and
 # shell templates all live under skills this adapter does not select.
 
 patches:
   - patches/code-review.patch
+  - patches/implement-spec.patch
   - patches/to-spec.patch
   - patches/to-tickets.patch
   - patches/wayfinder.patch
@@ -52,4 +56,5 @@ files:
 
 wiring:
   spec: [grill-with-docs, to-spec]
-  plan: [to-tickets, wayfinder, implement]
+  plan: [to-tickets, wayfinder, implement, implement-spec]
+  retro: [retro]

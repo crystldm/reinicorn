@@ -5,7 +5,7 @@ mattpocock-skills adapter from the
 [skills](https://github.com/mattpocock/skills) repository by Matt Pocock,
 licensed under the MIT License.
 
-**Adapted from:** mattpocock/skills v1.2.3
+**Adapted from:** mattpocock/skills v1.3.2
 **Pinned commit:** recorded in `.reinicorn/skillset-lock.json`
 **License:** MIT (Copyright 2026 Matt Pocock)
 
@@ -16,12 +16,15 @@ licensed under the MIT License.
 - to-tickets
 - wayfinder
 - implement
+- implement-spec
 - domain-modeling
 - research
 - prototype
 - tdd
 - code-review
 - codebase-design
+- pr
+- retro
 - grilling
 
 ## Upstream License
