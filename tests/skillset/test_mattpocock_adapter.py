@@ -34,8 +34,8 @@ def mattpocock() -> Adapter:
 def test_loads(mattpocock: Adapter) -> None:
     assert mattpocock.name == "mattpocock-skills"
     assert mattpocock.source.repo == "mattpocock/skills"
-    assert mattpocock.source.commit == "6acc160e4e0cd062dbbbd7a1b26ae92855edf07e"
-    assert len(mattpocock.skills) == 12
+    assert mattpocock.source.commit == "d1478fcb140db0b93c0c8df17bcfd311844749d0"
+    assert len(mattpocock.skills) == 15
 
 
 def test_patch_targets_are_consistent(mattpocock: Adapter) -> None:
@@ -76,9 +76,7 @@ def test_patches_are_listed_in_alphabetical_order(mattpocock: Adapter) -> None:
 def test_excludes_are_inside_declared_skill_trees(mattpocock: Adapter) -> None:
     prefixes = tuple(f"{upstream}/" for upstream in mattpocock.skills)
     for rel in mattpocock.excludes:
-        assert rel.startswith(prefixes), (
-            f"excludes entry '{rel}' is outside the declared skills"
-        )
+        assert rel.startswith(prefixes), f"excludes entry '{rel}' is outside the declared skills"
 
 
 def test_files_land_inside_declared_skills_or_at_the_root(mattpocock: Adapter) -> None:
@@ -86,8 +84,7 @@ def test_files_land_inside_declared_skills_or_at_the_root(mattpocock: Adapter) -
     for installed_path in mattpocock.files:
         head = Path(installed_path).parts[0]
         assert head in installed or head == installed_path, (
-            f"files entry '{installed_path}' is neither a root file nor inside "
-            f"an installed skill"
+            f"files entry '{installed_path}' is neither a root file nor inside an installed skill"
         )
 
 
@@ -100,12 +97,10 @@ def test_attribution_is_installed_at_the_skills_root(mattpocock: Adapter) -> Non
 
 def test_wiring_references_installed_skills(mattpocock: Adapter) -> None:
     installed = set(mattpocock.skills.values())
-    assert set(mattpocock.wiring) == {"spec", "plan"}
+    assert set(mattpocock.wiring) == {"spec", "plan", "retro"}
     for doc_type, entry in mattpocock.wiring.items():
         for skill in entry.skills:
-            assert skill in installed, (
-                f"wiring.{doc_type} references uninstalled skill '{skill}'"
-            )
+            assert skill in installed, f"wiring.{doc_type} references uninstalled skill '{skill}'"
 
 
 def test_to_spec_patch_reroutes_to_rcorn_spec_create(mattpocock: Adapter) -> None:
@@ -117,4 +112,10 @@ def test_wiring_maps_spec_and_plan_to_the_expected_skill_order(
     mattpocock: Adapter,
 ) -> None:
     assert mattpocock.wiring["spec"].skills == ("grill-with-docs", "to-spec")
-    assert mattpocock.wiring["plan"].skills == ("to-tickets", "wayfinder", "implement")
+    assert mattpocock.wiring["plan"].skills == (
+        "to-tickets",
+        "wayfinder",
+        "implement",
+        "implement-spec",
+    )
+    assert mattpocock.wiring["retro"].skills == ("retro",)
